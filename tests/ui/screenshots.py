@@ -137,6 +137,105 @@ def exercise(win, root: Path, out: Path, scheme: str, suffix: str, render):
         raise AssertionError(problems)
 
 
+DEMO_RULES = [
+    {"name": "Games get Performance", "priority": 80, "debounce_s": 3,
+     "trigger": {"type": "app", "names": ["steam", "gamescope", "lutris"]},
+     "actions": [{"type": "profile", "value": "performance"},
+                 {"type": "panel_overdrive", "value": True},
+                 {"type": "effect", "name": "audio"}]},
+    {"name": "Unplugged: Quiet", "debounce_s": 0,
+     "trigger": {"type": "power", "source": "battery"},
+     "actions": [{"type": "profile", "value": "quiet"}, {"type": "charge_limit", "value": 80},
+                 {"type": "kbd_brightness", "value": 1}]},
+    {"name": "Quiet nights", "priority": 40, "debounce_s": 0,
+     "trigger": {"type": "schedule", "days": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"],
+                 "start": "23:00", "end": "07:00"},
+     "actions": [{"type": "kbd_brightness", "value": 0}]},
+    {"name": "Red keys in Performance", "enabled": False, "debounce_s": 0,
+     "trigger": {"type": "profile", "value": "performance"},
+     "actions": [{"type": "kbd_colour", "value": "#c0182d"}]},
+]
+
+
+def start_demo_daemon():
+    """A real tuf-controld against the fake tree, with demo rules and an effect."""
+    from tuf_control.automation.config import update_config
+    from tuf_control.automation.service import DaemonClient
+
+    def edit(c):
+        c["automation"]["rules"] = DEMO_RULES
+        c["effects"]["active"] = "temperature"
+        c["effects"]["notifications"]["enabled"] = True
+    update_config(edit)
+    client = DaemonClient()
+    print("demo daemon:", client.start())
+    for _ in range(50):
+        time.sleep(0.1)
+        if client.status()["running"] and client.status().get("log"):
+            break
+    return client
+
+
+def _scroll_bottom(widget) -> None:
+    from gi.repository import Gtk
+    sw = widget
+    while sw is not None and not isinstance(sw, Gtk.ScrolledWindow):
+        sw = sw.get_first_child()
+    if sw is not None:
+        adj = sw.get_vadjustment()
+        adj.set_value(adj.get_upper() - adj.get_page_size())
+
+
+def automation_shots(win, out: Path, scheme: str, suffix: str, render):
+    from tuf_control.effects.registry import EFFECTS
+    page = win.pages["automation"]
+    win.show_page("automation")
+    yield 1500  # first daemon status poll
+    page.poll_status()
+    yield 400
+    render(win, out / f"automation-{scheme}{suffix}.png")
+    _scroll_bottom(page)
+    yield 400
+    render(win, out / f"automation-activity-{scheme}{suffix}.png")
+    kb = win.pages["keyboard"]
+    win.show_page("keyboard")
+    kb.preview.fixed_t = 1.3
+    yield 900
+    for name, tag in (("audio", "keyboard-effects"), ("ambient", "keyboard-effects-ambient")):
+        kb.soft.pick.set_selected(list(EFFECTS).index(name) + 1)
+        yield 700
+        _scroll_bottom(kb.prefs)
+        yield 400
+        render(win, out / f"{tag}-{scheme}{suffix}.png")
+    # dialogs last: after an Adw.Dialog closes, this headless setup renders the window blank
+    win.show_page("automation")
+    yield 400
+    dlg = page.open_editor("games-get-performance")
+    yield 500
+    dlg.act_rows["effect"].set_expanded(True)
+    dlg.run_test()
+    yield 900
+    _scroll_bottom(dlg.prefs)
+    yield 300
+    render(win, out / f"automation-dialog-{scheme}{suffix}.png")
+    dlg.force_close()
+    new = page.open_editor(None)
+    yield 300
+    new.name.set_text("Battery saver")
+    new.trig_row.set_selected(2)
+    new.act_rows["profile"].set_enable_expansion(True)
+    new.act_rows["profile"].set_expanded(True)
+    yield 400
+    render(win, out / f"automation-new-{scheme}{suffix}.png")
+    new._save()  # through the page's locked config write
+    yield 600
+    from tuf_control.automation.config import load_config
+    ids = [r["id"] for r in load_config()["automation"]["rules"]]
+    if "battery-saver" not in ids:
+        raise AssertionError(f"rule not saved: {ids}")
+    print("automation: rule saved OK")
+
+
 def inner(args) -> int:
     import gi
     gi.require_version("Gtk", "4.0")
@@ -152,6 +251,11 @@ def inner(args) -> int:
     tmp = Path(tempfile.mkdtemp(prefix="tuf-shot-"))
     root = build_fake_tree(tmp / "root", ppt_readable=args.ppt)
     os.environ[FAKE_ROOT_ENV] = str(root)
+    # never read or write the user's real automation config or daemon status
+    from tuf_control.automation.config import CONFIG_DIR_ENV, RUNTIME_DIR_ENV
+    os.environ[CONFIG_DIR_ENV] = str(tmp / "config")
+    os.environ[RUNTIME_DIR_ENV] = str(tmp / "run")
+    daemon = start_demo_daemon() if args.automation else None
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     w, h = (int(x) for x in args.size.split("x"))
@@ -214,6 +318,8 @@ def inner(args) -> int:
             win.last_dialog.force_close()
             page.refresh()
             yield 300
+        if args.automation:
+            yield from automation_shots(win, out, scheme, suffix, render)
         if args.exercise:
             yield from exercise(win, root, out, scheme, suffix, render)
         app.quit()
@@ -247,7 +353,11 @@ def inner(args) -> int:
         GLib.timeout_add(1200, tick)
 
     app.connect_after("activate", on_activate)
-    app.run([])
+    try:
+        app.run([])
+    finally:
+        if daemon is not None:
+            daemon.stop()
     shutil.rmtree(tmp, ignore_errors=True)
     return 1 if state["failed"] else 0
 
@@ -266,6 +376,9 @@ def main() -> int:
     p.add_argument("--exercise", action="store_true",
                    help="drive profile/fan/GPU/keyboard/battery writes against the fake tree")
     p.add_argument("--user-theme", action="store_true", help="keep ~/.config/gtk-4.0 styles")
+    p.add_argument("--automation", action="store_true",
+                   help="run a demo tuf-controld on the fake tree; capture the Automation "
+                        "page, rule dialogs and keyboard software effects")
     args = p.parse_args()
     if os.environ.get("TUF_SHOT_CHILD"):
         return inner(args)

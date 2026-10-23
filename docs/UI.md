@@ -49,7 +49,10 @@ power limits), Fans (8-point curve per fan and profile; drag or arrow keys; Appl
 Factory), Graphics (Integrated / Hybrid / Ultimate via supergfxd; pending-restart banner),
 Display (refresh rate, panel overdrive, VRR note), Battery (charge limit 20–100 with 60/80/100
 presets, one-shot full charge, health), Keyboard (brightness, hardware effect, live preview,
-software effects placeholder), Automation (placeholder), About (support table per capability).
+software effects: picker, parameters, simulated preview, service status; see
+[EFFECTS.md](EFFECTS.md)), Automation (tuf-controld service, rules with enable switches and an
+"Active" badge, add/edit dialog with a dry-run Test, suggestions, recent activity; see
+[AUTOMATION.md](AUTOMATION.md)), About (support table per capability).
 
 ## Controller additions used by the UI
 
@@ -73,9 +76,12 @@ themselves have only been tested against a recording transport, never against ha
     python3 tests/ui/screenshots.py --exercise --dialog       # + drives the writes, checks the tree
     python3 tests/ui/screenshots.py --size 380x820 --tag narrow --schemes dark
     python3 tests/ui/screenshots.py --ppt --pages performance --tag ppt
+    python3 tests/ui/screenshots.py --automation --pages automation   # automation-*, keyboard-effects-*
 
 The script starts a private `dbus-run-session` with `mutter --headless --virtual-monitor`,
 runs the app on that Wayland socket against a fresh fake tree (sensor values animated for
 the graphs), and renders each page with `Gtk.WidgetPaintable` -> `Gsk.CairoRenderer` -> PNG.
 `--user-theme` keeps `~/.config/gtk-4.0/gtk.css`; by default it is bypassed so the shots
-show the app's own styling.
+show the app's own styling. The automation config and daemon status always live in the run's
+temporary directory; `--automation` starts a real `tuf-controld` against the fake tree with demo
+rules and stops it afterwards.

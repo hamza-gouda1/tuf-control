@@ -12,8 +12,9 @@ from .pages.dashboard import DashboardPage
 from .pages.display import DisplayPage
 from .pages.fans import FansPage
 from .pages.gpu import GpuPage
+from .pages.automation import AutomationPage
 from .pages.keyboard import KeyboardPage
-from .pages.misc import AboutPage, AutomationPage
+from .pages.misc import AboutPage
 from .pages.performance import PerformancePage
 from .tasks import run_bg
 from .viewmodels import PAGES, PROFILE_INFO, PROFILE_ORDER, battery_icon, humanize_error, \

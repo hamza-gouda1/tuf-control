@@ -19,14 +19,8 @@ from ..viewmodels import (
     speed_index,
 )
 from ..widgets import KeyboardPreview
-from .base import Page, button, info_row, prefs_page, soon_badge
-
-SOFTWARE_EFFECTS = [
-    ("Ambient", "Follow the colours on screen", "preferences-desktop-wallpaper-symbolic"),
-    ("Audio", "Pulse with what is playing", "audio-speakers-symbolic"),
-    ("Temperature", "Shift colour as the CPU heats up", "weather-clear-symbolic"),
-    ("Notifications", "Flash on new messages", "preferences-system-notifications-symbolic"),
-]
+from .base import Page, button, info_row, prefs_page
+from .keyboard_effects import EffectsSection
 
 
 def _rgba(rgb) -> Gdk.RGBA:
@@ -100,15 +94,9 @@ class KeyboardPage(Page):
                   self.fx_err):
             self.fx.add(r)
 
-        soft = Adw.PreferencesGroup(title="Effects (software)",
-                                    description="Driven by TUF Control in the background.")
-        soft.set_header_suffix(soon_badge())
-        for title, sub, icon in SOFTWARE_EFFECTS:
-            row = Adw.SwitchRow(title=title, subtitle=sub, sensitive=False)
-            row.add_prefix(Gtk.Image.new_from_icon_name(icon))
-            soft.add(row)
-        soft.add_css_class("dimmed-group")
-        self.set_child(prefs_page(g_prev, self.backlight, self.fx, soft))
+        self.soft = EffectsSection(self)
+        self.prefs = prefs_page(g_prev, self.backlight, self.fx, self.soft)
+        self.set_child(self.prefs)
 
     # -- data -----------------------------------------------------------------------------
     def refresh(self) -> None:
@@ -116,6 +104,14 @@ class KeyboardPage(Page):
                error=lambda e: (self.bri_row.set_sensitive(False),
                                 self.bri_row.set_subtitle(str(e))))
         run_bg(lambda: self.ctl.get_kbd_rgb()[0], done=self._got_rgb, error=self._rgb_failed)
+        self.soft.refresh()
+
+    def on_telemetry(self, t) -> None:
+        self.soft.on_telemetry(t)
+
+    def _show(self) -> None:
+        if not self.soft.active:  # a software effect owns the preview while selected
+            self.preview.set_effect(self.effect, self.brightness)
 
     def _got_bri(self, val) -> None:
         cur, mx = val
@@ -126,14 +122,14 @@ class KeyboardPage(Page):
         if 0 <= cur < len(self.bri_buttons):
             self.bri_buttons[cur].set_active(True)
         self._quiet = False
-        self.preview.set_effect(self.effect, cur)
+        self._show()
 
     def _rgb_failed(self, exc) -> None:
         for r in (self.mode_row, self.c1_row, self.c2_row, self.speed_row, self.dir_row):
             r.set_sensitive(False)
         self.fx_err.set_subtitle(str(exc))
         self.fx_err.set_visible(True)
-        self.preview.set_effect(self.effect, self.brightness)
+        self._show()
 
     def _got_rgb(self, info) -> None:
         self.saved = effect_from_rgb_data(info.get("mode_data"))
@@ -167,7 +163,7 @@ class KeyboardPage(Page):
         self.speed_row.set_visible(mode in MODE_USES_SPEED)
         self.dir_row.set_visible(mode in MODE_USES_DIRECTION)
         self.apply_btn.set_sensitive(self.saved is not None and self.effect != self.saved)
-        self.preview.set_effect(self.effect, self.brightness)
+        self._show()
 
     def _apply(self):
         eff = self.effect
@@ -182,7 +178,7 @@ class KeyboardPage(Page):
         if not b.get_active():
             return
         self.brightness = level
-        self.preview.set_effect(self.effect, level)
+        self._show()
         if self._quiet:
             return
         self.win.run_write(lambda: self.ctl.set_kbd_brightness(level),

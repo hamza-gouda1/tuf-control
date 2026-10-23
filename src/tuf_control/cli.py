@@ -38,6 +38,9 @@ def _parser() -> argparse.ArgumentParser:
     blim = bs.add_parser("limit")
     blim.add_argument("percent", type=int, help="20-100")
     blim.add_argument("--dry-run", action="store_true")
+
+    from .automation.cli_cmds import add_parsers as add_automation_parsers
+    add_automation_parsers(sub)  # daemon, automation, kbd effect
     return p
 
 
@@ -63,6 +66,9 @@ def _fmt_limits(limits) -> str:
 
 def run(args, ctl: Controller) -> int:
     cmd = args.cmd
+    if cmd in ("daemon", "automation", "kbd"):
+        from .automation import cli_cmds
+        return cli_cmds.run(args, ctl)
     if cmd == "capabilities":
         caps = ctl.capabilities()
         lines = []

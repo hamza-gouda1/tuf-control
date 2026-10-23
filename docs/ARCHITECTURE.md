@@ -13,6 +13,9 @@
 3. `tuf_control.controller.Controller`: picks a backend per capability and reports
    `capabilities()` including why something is unavailable.
 4. `tuf_control.cli`: argparse front end, JSON output, `--dry-run` on writes.
+5. `tuf_control.daemon` (`tuf-controld`): per-user service running `tuf_control.automation`
+   (rules) and `tuf_control.effects` (keyboard software effects). Both write only through the
+   `Controller`; see [AUTOMATION.md](AUTOMATION.md) and [EFFECTS.md](EFFECTS.md).
 
 ## Backend order
 

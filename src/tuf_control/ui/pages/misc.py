@@ -1,19 +1,11 @@
-"""Automation (coming soon) and About pages."""
+"""About page."""
 from __future__ import annotations
 
 from gi.repository import Adw, Gtk
 
 from ... import __version__
 from ..widgets import label
-from .base import Page, pill, prefs_page, soon_badge
-
-PLANNED = [
-    ("On AC or battery", "Switch profile, refresh rate and GPU mode when you plug in",
-     "ac-adapter-symbolic"),
-    ("Per app", "Performance for games, Quiet for the browser", "view-app-grid-symbolic"),
-    ("Schedule", "Quiet fans at night, full power during the day", "alarm-symbolic"),
-    ("Temperature guard", "Step down when the CPU stays hot", "weather-clear-symbolic"),
-]
+from .base import Page, pill, prefs_page
 
 CAP_TITLES = {
     "profile": "Power profile",
@@ -27,24 +19,6 @@ CAP_TITLES = {
     "fan_curves": "Fan curves",
     "telemetry": "Sensors",
 }
-
-
-class AutomationPage(Page):
-    key, title = "automation", "Automation"
-
-    def __init__(self, win) -> None:
-        super().__init__(win)
-        g = Adw.PreferencesGroup(
-            title="Rules", description="Let TUF Control change settings for you. "
-                                       "Rules will run in a small user service, no root needed.")
-        g.set_header_suffix(soon_badge())
-        for title, sub, icon in PLANNED:
-            row = Adw.ActionRow(title=title, subtitle=sub, sensitive=False)
-            row.add_prefix(Gtk.Image.new_from_icon_name(icon))
-            row.add_suffix(Gtk.Image.new_from_icon_name("go-next-symbolic"))
-            g.add(row)
-        g.add_css_class("dimmed-group")
-        self.set_child(prefs_page(g))
 
 
 class AboutPage(Page):

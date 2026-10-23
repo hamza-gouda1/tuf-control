@@ -1,0 +1,23 @@
+[Unit]
+Description=TUF Control automation and keyboard effects
+Documentation=file://%h/.local/share/doc/tuf-control/AUTOMATION.md
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+# tuf-controld is installed by pip into ~/.local/bin or /usr/bin; search both.
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/env tuf-controld
+ExecReload=/bin/kill -HUP $MAINPID
+KillSignal=SIGTERM
+TimeoutStopSec=10
+Restart=on-failure
+RestartSec=5
+# A user daemon: no root. Resource caps apply where the user manager delegates them.
+NoNewPrivileges=yes
+MemoryMax=96M
+CPUQuota=25%
+
+[Install]
+WantedBy=graphical-session.target
