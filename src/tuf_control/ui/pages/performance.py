@@ -99,10 +99,11 @@ class PerformancePage(Page):
         view = power_limits_view(self.cap("power_limits"), lims)
         if not view.available:
             self.limits.set_description(None)
-            row = info_row("Not exposed by this firmware", view.reason)
+            row = info_row("Not provided by the kernel driver", view.reason)
             note = info_row("Why nothing is shown",
-                            "Without the firmware's own minimum and maximum, any slider would "
-                            "be a guess. TUF Control never writes guessed power values.",
+                            "Without the real minimum and maximum, any slider would be a guess. "
+                            "TUF Control never writes guessed power values. See "
+                            "docs/upstream/FX608JHR-power-limits.md for the upstream request.",
                             "security-high-symbolic")
             for r in (row, note):
                 self.limits.add(r)
