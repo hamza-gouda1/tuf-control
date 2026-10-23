@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tuf-control"
+version = "0.1.0"
+description = "Control core for ASUS TUF/ROG laptops on Linux"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "GPL-3.0-or-later" }
+authors = [{ name = "Hamza Gouda" }]
+dependencies = []
+
+[project.optional-dependencies]
+dbus = ["PyGObject"]
+dev = ["pytest", "ruff"]
+
+[project.scripts]
+tuf-control = "tuf_control.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+markers = ["hardware: read-only smoke test on real hardware (set TUF_CONTROL_HARDWARE_TESTS=1)"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
