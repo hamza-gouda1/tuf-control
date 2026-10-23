@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+  "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<policyconfig>
+  <vendor>Hamza Gouda</vendor>
+  <vendor_url>https://github.com/hamzagouda/tuf-control</vendor_url>
+  <action id="io.github.hamzagouda.tuf-control.write">
+    <description>Change ASUS laptop hardware settings</description>
+    <message>Authentication is required to change ASUS hardware settings (power, fans, battery, keyboard)</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/libexec/tuf-control-helper</annotate>
+  </action>
+</policyconfig>

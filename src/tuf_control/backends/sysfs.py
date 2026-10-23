@@ -21,7 +21,7 @@ from ..core import (
     ValidationError,
 )
 from .base import Backend
-from .util import DirectWriter, Writer, read_text, run_cmd
+from .util import DirectWriter, FallbackWriter, Writer, read_text, run_cmd
 
 BATTERY_RANGE = (20, 100)
 _NV_QUERY = "temperature.gpu,power.draw,utilization.gpu"
@@ -42,7 +42,9 @@ class SysfsBackend(Backend):
     def __init__(self, root: str | Path = "/", writer: Writer | None = None,
                  use_nvidia_smi: bool = True) -> None:
         self.root = Path(root)
-        self.writer: Writer = writer or DirectWriter()
+        # on the real root, root-only attributes fall back to the polkit helper (after EACCES)
+        self.writer: Writer = writer or (
+            FallbackWriter() if str(root) == "/" else DirectWriter())
         self.use_nvidia_smi = use_nvidia_smi
         self._rapl_prev: tuple[int, float] | None = None
 

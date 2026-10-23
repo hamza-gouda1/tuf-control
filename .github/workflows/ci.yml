@@ -1,16 +1,41 @@
 name: ci
-on: [push, pull_request]
+on:
+  push:
+  pull_request:
+
 jobs:
-  test:
-    runs-on: ubuntu-latest
+  python:
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - run: pip install pytest ruff
-      - run: ruff check src tests
-      - run: python -m pytest -q
-        env:
-          PYTHONPATH: src
-          TUF_CONTROL_FAKE_ROOT: ""
+      - name: Unit tests (fake sysfs tree and fake D-Bus transport, no hardware)
+        run: PYTHONPATH=src python3 -m unittest discover -s tests -v
+      - name: Ruff
+        run: |
+          python3 -m pip install --user ruff
+          python3 -m ruff check src tests
+
+  shell:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: ShellCheck
+        run: shellcheck install.sh uninstall.sh tests/test_install.sh
+      - name: Installer test (temporary HOME)
+        run: bash tests/test_install.sh
+
+  extension:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install gjs
+        run: sudo apt-get update && sudo apt-get install -y gjs
+      - name: Syntax check
+        run: |
+          for f in extension/tuf-control-quick@hamza-gouda/*.js; do
+            node --input-type=module --check < "$f"
+          done
+      - name: Extension logic tests
+        run: gjs -m tests/test_quick_profiles.js
+      - name: metadata.json
+        run: python3 -c "import json; json.load(open('extension/tuf-control-quick@hamza-gouda/metadata.json'))"

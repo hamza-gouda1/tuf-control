@@ -59,10 +59,12 @@ user action), `get_attributes`, `set_attribute`, `one_shot_full_charge`. The sys
 can only read and write the active profile's fan curve; the Fans page follows the active
 profile and says so when another one is picked.
 
-D-Bus method names used for the new writes (asusd `SetFanCurve`, `ResetProfileCurves`,
-`OneShotFullCharge`, `LedModeData` property; supergfxd `SetMode`, `PendingMode`,
-`PendingUserAction`, `Power`, `Supported`) follow asusctl 6 / supergfxctl 5 and have not
-been exercised against real daemons yet.
+D-Bus names and signatures were verified by read-only introspection of asusd 6.3.5 and
+supergfxd: `SetFanCurve(u, (s, (yyyyyyyy), (yyyyyyyy), b))`, `SetCurvesToDefaults(u)` (there is no
+`ResetProfileCurves`), `OneShotFullCharge()`, aura `LedModeData` is `(uu(yyy)(yyy)ss)` with speed
+and direction as enum *names* ("Low"/"Med"/"High", "Right"/"Left"/"Up"/"Down"), supergfxd
+`SetMode(u) -> u`, `PendingMode`, `PendingUserAction`, `Power`, `Supported`. The write calls
+themselves have only been tested against a recording transport, never against hardware.
 
 ## Tests and screenshots
 

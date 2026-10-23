@@ -143,6 +143,29 @@ class GioTransport:
             return False
 
 
+# asusd (6.x) LedModeData is (uu(yyy)(yyy)ss): speed and direction are enum *names*.
+_SPEED_NAMES = ("Low", "Med", "High")
+_DIRECTION_NAMES = ("Right", "Left", "Up", "Down")
+
+
+def speed_to_name(v: int) -> str:
+    """Model speed (0-2, or a raw HID byte such as 0xE1/0xEB/0xF5) -> asusd name."""
+    if 0 <= v <= 2:
+        return _SPEED_NAMES[v]
+    return _SPEED_NAMES[min(range(3), key=lambda i: abs((0xE1, 0xEB, 0xF5)[i] - v))]
+
+
+def direction_to_name(v: int) -> str:
+    return _DIRECTION_NAMES[v] if 0 <= v < len(_DIRECTION_NAMES) else _DIRECTION_NAMES[0]
+
+
+def _name_to_index(names: tuple[str, ...], v, default: int) -> int:
+    if isinstance(v, str):
+        low = [n.lower() for n in names]
+        return low.index(v.lower()) if v.lower() in low else default
+    return int(v) if v is not None else default
+
+
 def _opt(v: int | None) -> int | None:
     return None if v is None or v < 0 else v
 
@@ -321,7 +344,9 @@ class DBusBackend(Backend):
         data = None
         if mode:
             data = {"mode": mode[0], "zone": mode[1], "colour1": list(mode[2]),
-                    "colour2": list(mode[3]), "speed": mode[4], "direction": mode[5]}
+                    "colour2": list(mode[3]),
+                    "speed": _name_to_index(_SPEED_NAMES, mode[4], 1),
+                    "direction": _name_to_index(_DIRECTION_NAMES, mode[5], 0)}
         return {"path": path, "led_mode": props.get("LedMode"), "mode_data": data,
                 "brightness": props.get("Brightness"),
                 "supported_modes": props.get("SupportedBasicModes"),
@@ -330,9 +355,9 @@ class DBusBackend(Backend):
     def set_kbd_effect(self, effect: KbdEffect) -> None:
         effect.validate()
         value = (effect.mode, effect.zone, tuple(effect.colour1), tuple(effect.colour2),
-                 effect.speed, effect.direction)
+                 speed_to_name(effect.speed), direction_to_name(effect.direction))
         self.t.set_property(ASUSD, self._aura(), AURA_IFACE, "LedModeData",
-                            "(uu(yyy)(yyy)uu)", value)
+                            "(uu(yyy)(yyy)ss)", value)
 
     # -- attributes / battery extras --------------------------------------------
     def set_attribute(self, name: str, value: int | str) -> None:
@@ -352,14 +377,18 @@ class DBusBackend(Backend):
     def set_fan_curve(self, profile: Profile, curve: FanCurve) -> None:
         curve.validate()
         self._need(ASUSD)
-        data = (curve.fan, bytes(p.pwm for p in curve.points),
-                bytes(p.temp for p in curve.points), curve.enabled)
-        self.t.call(ASUSD, PLATFORM_PATH, FANCURVES_IFACE, "SetFanCurve", "(u(sayayb))",
+        # verified against asusd 6.3: SetFanCurve(u, (s, (yyyyyyyy) pwm, (yyyyyyyy) temp, b))
+        if len(curve.points) != 8:
+            raise ValidationError("asusd fan curves need exactly 8 points")
+        data = (curve.fan, tuple(p.pwm for p in curve.points),
+                tuple(p.temp for p in curve.points), curve.enabled)
+        self.t.call(ASUSD, PLATFORM_PATH, FANCURVES_IFACE, "SetFanCurve",
+                    "(u(s(yyyyyyyy)(yyyyyyyy)b))",
                     (profile.asusd_id, data))
 
     def reset_fan_curves(self, profile: Profile) -> None:
         self._need(ASUSD)
-        self.t.call(ASUSD, PLATFORM_PATH, FANCURVES_IFACE, "ResetProfileCurves", "(u)",
+        self.t.call(ASUSD, PLATFORM_PATH, FANCURVES_IFACE, "SetCurvesToDefaults", "(u)",
                     (profile.asusd_id,))
 
     def get_fan_curves(self, profile: Profile | None = None) -> dict[str, FanCurve]:
