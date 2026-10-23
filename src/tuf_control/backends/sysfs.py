@@ -95,7 +95,7 @@ class SysfsBackend(Backend):
             elif not any(lim.bounded for lim in limits):
                 st[Capability.POWER_LIMITS] = CapStatus(
                     False, "attributes present but firmware exposes no readable values "
-                           "(PPT group disabled or unsupported)")
+                           "(the kernel driver has no power-limit table for this board)")
             else:
                 st[Capability.POWER_LIMITS] = ok
         bat = self.battery_dir

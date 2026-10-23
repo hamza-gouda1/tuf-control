@@ -24,24 +24,36 @@ class KbdWriter:
         self.ctl, self.max_hz, self.min_delta = ctl, max_hz, min_delta
         self.keepalive, self.bri_every, self.clock = keepalive_s, brightness_every_s, clock
         self.saved: KbdEffect | None = None
+        self.saved_static: KbdEffect | None = None
         self.last_rgb: RGB | None = None
         self.last_write = -1e9
         self.last_bri_check = -1e9
         self.backlight_off = False
         self.writes = 0
 
+    @staticmethod
+    def _effect(data: dict) -> KbdEffect:
+        return KbdEffect(int(data.get("mode", 0)), int(data.get("zone", 0)),
+                         tuple(data.get("colour1", (142, 42, 68))),
+                         tuple(data.get("colour2", (0, 0, 0))),
+                         int(data.get("speed", 1)), int(data.get("direction", 0)))
+
     def save(self) -> None:
         if self.saved is not None:
             return
-        data = (self.ctl.get_kbd_rgb()[0] or {}).get("mode_data") or {}
-        self.saved = KbdEffect(int(data.get("mode", 0)), int(data.get("zone", 0)),
-                               tuple(data.get("colour1", (142, 42, 68))),
-                               tuple(data.get("colour2", (0, 0, 0))),
-                               int(data.get("speed", 1)), int(data.get("direction", 0)))
+        info = self.ctl.get_kbd_rgb()[0] or {}
+        self.saved = self._effect(info.get("mode_data") or {})
+        # frames are written as Static, which asusd also stores as Static's own colour:
+        # remember it so a Breathe/Pulse user gets their Static colour back too
+        static = (info.get("builtins") or {}).get(0)
+        self.saved_static = self._effect(static) if static and self.saved.mode != 0 else None
 
     def restore(self) -> None:
         if self.saved is not None:
             saved, self.saved = self.saved, None
+            static, self.saved_static = self.saved_static, None
+            if static is not None and self.writes:
+                self.ctl.set_kbd_effect(static)
             self.ctl.set_kbd_effect(saved)
         self.last_rgb = None
 
@@ -183,7 +195,12 @@ class EffectsRunner:
         else:
             from .theme import theme_accent
             theme = _Cached(theme_accent, 10.0, clock)
-        return Inputs(telemetry=tel, profile=prof,
+        cpu = self.sources.get("cpu_load")
+        if cpu is None and "cpu_load" in needs:
+            from .system import CpuLoad
+            cpu = _Cached(CpuLoad(), 0.5, clock)
+        kw = {"now": self.sources["now"]} if "now" in self.sources else {}
+        return Inputs(telemetry=tel, profile=prof, cpu_load=cpu or (lambda: None), **kw,
                       audio=self._source("audio") if "audio" in needs else None,
                       frames=self._source("frames") if "frames" in needs else None,
                       notifications=self._source("notifications")
@@ -297,4 +314,8 @@ class EffectsRunner:
             if hasattr(src, "status"):
                 info["status"] = src.status
             out[f"source_{kind}"] = info
+            if info["error"] and not out["error"] and kind != "notifications":
+                out["error"] = f"{kind} input: {info['error']}"  # shown in the UI, never silent
+            elif info.get("status") == "waiting-permission":
+                out["waiting"] = "waiting for screen-sharing permission"
         return out

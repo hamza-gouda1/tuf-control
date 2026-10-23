@@ -89,6 +89,23 @@ class DaemonClient:
         _SPAWNED.append(proc)
         return f"started pid {proc.pid}"
 
+    def wait_running(self, timeout_s: float = 6.0) -> dict:
+        """After start(): wait for the first status write; raise with the daemon's own
+        last log lines when it died instead (missing module, broken config...)."""
+        for _ in range(max(1, int(timeout_s / 0.15))):
+            st = self.status()
+            if st["running"]:
+                return st
+            self.sleep(0.15)
+        tail = ""
+        try:
+            lines = (self.runtime / "daemon.log").read_text(errors="replace").strip().splitlines()
+            tail = lines[-1] if lines else ""
+        except OSError:
+            pass
+        raise BackendError("tuf-controld did not start" + (f": {tail}" if tail else
+                                                           " (no status written)"))
+
     def stop(self, timeout_s: float = 6.0) -> str:
         st = self.status()
         if self._systemd():

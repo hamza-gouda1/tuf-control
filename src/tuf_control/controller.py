@@ -165,10 +165,22 @@ class Controller:
     def get_kbd_rgb(self) -> tuple[dict, str]:
         return self.read(Capability.KBD_RGB)
 
-    def set_kbd_effect(self, effect: KbdEffect, dry_run: bool = False) -> WriteResult:
+    def set_kbd_effect(self, effect: KbdEffect, dry_run: bool = False,
+                       verify: bool = False) -> WriteResult:
+        """verify: read the mode back and fail loudly when the daemon did not take it
+        (the UI's Apply uses it; the software-effect writer does not, at 10 writes/s)."""
         effect.validate()
-        return self._write(Capability.KBD_RGB, effect, dry_run=dry_run, method="set_kbd_effect",
-                           detail=f"set keyboard effect mode {effect.mode}")
+        res = self._write(Capability.KBD_RGB, effect, dry_run=dry_run, method="set_kbd_effect",
+                          detail=f"set keyboard effect mode {effect.mode}")
+        if verify and res.applied:
+            got = (self.get_kbd_rgb()[0] or {}).get("mode_data") or {}
+            want = {"mode": effect.mode, "colour1": list(effect.colour1)}
+            have = {"mode": got.get("mode"), "colour1": list(got.get("colour1") or [])}
+            if have != want:
+                raise BackendError(f"{res.backend} accepted the keyboard effect but reports "
+                                   f"mode {have['mode']} colour {have['colour1']} instead of "
+                                   f"mode {want['mode']} colour {want['colour1']}")
+        return res
 
     # -- fans -------------------------------------------------------------------
     def get_fan_curves(self, profile: Profile | None = None) -> tuple[dict[str, FanCurve], str]:

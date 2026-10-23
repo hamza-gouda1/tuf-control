@@ -166,6 +166,14 @@ def _name_to_index(names: tuple[str, ...], v, default: int) -> int:
     return int(v) if v is not None else default
 
 
+def aura_mode_from_dbus(v) -> int:
+    """asusd 6.3 serialises AuraModeNum by variant *index* in some replies (AllModeData
+    reports Pulse as 9) but only accepts the discriminant (10) on writes; 9 is not a mode
+    (asusd answers 'incorrect type'), so read it as Pulse."""
+    v = int(v)
+    return 10 if v == 9 else v
+
+
 def _opt(v: int | None) -> int | None:
     return None if v is None or v < 0 else v
 
@@ -215,7 +223,7 @@ class DBusBackend(Backend):
                 limits = self.get_limits()
                 if not any(x.bounded for x in limits):
                     res[Capability.POWER_LIMITS] = CapStatus(
-                        False, "asusd reports no PPT values (-1); EnablePptGroup off or unsupported")
+                        False, "asusd reports no PPT values (-1): the kernel asus-armoury driver has no power-limit table for this board")
             except BackendError as exc:
                 res[Capability.POWER_LIMITS] = CapStatus(False, f"asusd armoury query failed: {exc}")
         return res
@@ -319,11 +327,14 @@ class DBusBackend(Backend):
 
     # -- keyboard -----------------------------------------------------------
     def _aura(self) -> str:
-        self._need(ASUSD)
-        kids = self._children(ASUSD, AURA_ROOT)
-        if not kids:
-            raise BackendUnavailable("no aura device exposed by asusd")
-        return f"{AURA_ROOT}/{kids[0]}"
+        # cached: software effects write several times a second
+        if getattr(self, "_aura_path", None) is None:
+            self._need(ASUSD)
+            kids = self._children(ASUSD, AURA_ROOT)
+            if not kids:
+                raise BackendUnavailable("no aura device exposed by asusd")
+            self._aura_path = f"{AURA_ROOT}/{kids[0]}"
+        return self._aura_path
 
     def get_kbd_brightness(self) -> tuple[int, int]:
         path = self._aura()
@@ -340,24 +351,39 @@ class DBusBackend(Backend):
     def get_kbd_rgb(self) -> dict:
         path = self._aura()
         props = self.t.get_all(ASUSD, path, AURA_IFACE)
-        mode = props.get("LedModeData")
-        data = None
-        if mode:
-            data = {"mode": mode[0], "zone": mode[1], "colour1": list(mode[2]),
-                    "colour2": list(mode[3]),
+
+        def unpack(mode):
+            return {"mode": aura_mode_from_dbus(mode[0]), "zone": mode[1],
+                    "colour1": list(mode[2]), "colour2": list(mode[3]),
                     "speed": _name_to_index(_SPEED_NAMES, mode[4], 1),
                     "direction": _name_to_index(_DIRECTION_NAMES, mode[5], 0)}
+        mode = props.get("LedModeData")
+        data = unpack(mode) if mode else None
+        try:  # per-mode settings asusd keeps (software effects put Static's back after use)
+            res = self.t.call(ASUSD, path, AURA_IFACE, "AllModeData")
+            builtins = {aura_mode_from_dbus(k): unpack(v) for k, v in (res[0] or {}).items()}
+        except (BackendError, BackendUnavailable, TypeError, IndexError, AttributeError):
+            builtins = {}
+        modes = props.get("SupportedBasicModes")
         return {"path": path, "led_mode": props.get("LedMode"), "mode_data": data,
-                "brightness": props.get("Brightness"),
-                "supported_modes": props.get("SupportedBasicModes"),
+                "builtins": builtins, "brightness": props.get("Brightness"),
+                "supported_modes": [aura_mode_from_dbus(m) for m in modes]
+                if modes is not None else None,
                 "supported_brightness": props.get("SupportedBrightness")}
 
     def set_kbd_effect(self, effect: KbdEffect) -> None:
+        """Exactly what `asusctl aura effect static -c ff0000` sends (captured with strace
+        against asusd 6.3.5): Properties.Set(xyz.ljones.Aura, LedModeData,
+        <(uu(yyy)(yyy)ss) mode zone c1 c2 "Med" "Right">) on /xyz/ljones/aura/<dev>."""
         effect.validate()
         value = (effect.mode, effect.zone, tuple(effect.colour1), tuple(effect.colour2),
                  speed_to_name(effect.speed), direction_to_name(effect.direction))
-        self.t.set_property(ASUSD, self._aura(), AURA_IFACE, "LedModeData",
-                            "(uu(yyy)(yyy)ss)", value)
+        try:
+            self.t.set_property(ASUSD, self._aura(), AURA_IFACE, "LedModeData",
+                                "(uu(yyy)(yyy)ss)", value)
+        except BackendUnavailable:
+            self._aura_path = None  # asusd restarted or the device went away
+            raise
 
     # -- attributes / battery extras --------------------------------------------
     def set_attribute(self, name: str, value: int | str) -> None:

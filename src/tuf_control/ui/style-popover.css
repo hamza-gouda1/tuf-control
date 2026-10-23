@@ -1,0 +1,45 @@
+/* Popovers, menus and dropdowns: one clean rounded surface.
+ *
+ * Loaded above user stylesheets (STYLE_PROVIDER_PRIORITY_USER + 1) because the fix is
+ * for them: a global ~/.config/gtk-4.0/gtk.css rule such as
+ *     window, .background { background-color: @window_bg_color; }
+ * also matches the popover's own node (popover.background), so the whole popup
+ * surface, shadow margin and arrow area included, was filled as a dark rectangle behind
+ * the rounded list. Only `contents` and `arrow` may paint; the surface stays clear.
+ * Selectors are scoped to popovers so nothing else in a user theme is overridden. */
+
+popover.background,
+popover.menu,
+popover {
+  background-color: transparent;
+  background-image: none;
+  border: none;
+  box-shadow: none;
+}
+
+popover > contents,
+popover > arrow {
+  background-color: @popover_bg_color;
+  color: @popover_fg_color;
+}
+
+popover > contents {
+  border-radius: 12px;
+  box-shadow: 0 1px 3px 1px alpha(black, 0.10),
+              0 6px 18px 2px alpha(black, 0.10),
+              0 0 0 1px alpha(black, 0.10);
+}
+
+popover > arrow {
+  border: 1px solid alpha(black, 0.10);
+}
+
+/* dropdown / combo lists: rows with breathing room, a soft selected tint */
+popover.menu > contents { padding: 6px; }
+popover listview > row,
+popover.menu modelbutton {
+  border-radius: 8px;
+  min-height: 32px;
+  padding: 0 10px;
+}
+popover listview > row:selected { background-color: alpha(@accent_bg_color, 0.14); }

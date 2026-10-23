@@ -1,6 +1,7 @@
 """The built-in software effects."""
 from __future__ import annotations
 
+import colorsys
 import math
 
 from .base import Effect, Param
@@ -52,8 +53,8 @@ class TemperatureEffect(Effect):
 
 
 class AudioEffect(Effect):
-    name, title = "audio", "Audio"
-    description = "Pulses with the bass of whatever is playing."
+    name, title = "audio", "Music beat"
+    description = "Pulses with the beat of whatever is playing."
     needs = ("audio",)
     note = "Reads the default output's monitor through parec or pw-record."
     params = (
@@ -71,8 +72,8 @@ class AudioEffect(Effect):
 
 
 class AmbientEffect(Effect):
-    name, title = "ambient", "Screen colour"
-    description = "Average colour of the screen."
+    name, title = "ambient", "Screen ambient"
+    description = "Follows the average colour of the screen."
     needs = ("frames",)
     max_fps = 15
     note = ("GNOME asks once through the screen-sharing portal, then shows its sharing "
@@ -86,7 +87,7 @@ class AmbientEffect(Effect):
 
 class ProfileEffect(Effect):
     name, title = "profile", "Profile colours"
-    description = "Colour follows the power profile."
+    description = "Colour follows the power profile: Performance (game mode) stands out."
     needs = ("profile",)
     max_fps = 8
     params = (
@@ -168,5 +169,114 @@ class NotificationFlash(Effect):
         return scale(self.colour("colour"), max(0.0, k))
 
 
-ALL = (TemperatureEffect, AudioEffect, AmbientEffect, ProfileEffect, AccentEffect)
+class SpectrumEffect(Effect):
+    name, title = "spectrum", "Music spectrum"
+    description = ("Hue follows the music's balance (bass warm, treble cool), "
+                   "brightness its loudness.")
+    needs = ("audio",)
+    note = "Reads the default output's monitor through parec or pw-record."
+    params = (
+        Param("style", "choice", "bands", "Style", choices=("bands", "meter")),
+        Param("bass", "colour", "#e0182d", "Bass colour"),
+        Param("mid", "colour", "#c9ae86", "Mid colour"),
+        Param("treble", "colour", "#2f6fdf", "Treble colour"),
+        Param("gain", "float", 1.2, "Sensitivity", 0.2, 4.0, step=0.1),
+        Param("floor", "float", 0.08, "Resting level", 0.0, 0.6, step=0.02),
+    )
+
+    def tick(self, dt: float) -> RGB | None:
+        src = self.inputs.audio
+        lv = {b: (src.level(b) if src is not None else 0.0) for b in ("bass", "mid", "treble")}
+        stops = [self.colour("bass"), self.colour("mid"), self.colour("treble")]
+        g, floor = self.p["gain"], self.p["floor"]
+        if self.p["style"] == "meter":  # a VU meter: louder walks bass -> mid -> treble colour
+            loud = min(1.0, (max(lv.values()) * g) ** 1.3)
+            return scale(gradient(stops, loud), floor + (1 - floor) * loud)
+        total = sum(lv.values())
+        if total <= 1e-6:
+            return scale(stops[0], floor)
+        mix = [sum(c[i] * lv[b] for c, b in zip(stops, lv)) / total for i in range(3)]
+        loud = min(1.0, (max(lv.values()) * g) ** 1.5)
+        return scale(mix, floor + (1 - floor) * loud)
+
+
+class RainbowEffect(Effect):
+    name, title = "rainbow", "Rainbow"
+    description = "A slow walk round the colour wheel."
+    max_fps = 15
+    params = (
+        Param("period", "float", 20.0, "Cycle length (s)", 4.0, 300.0, step=1.0),
+        Param("saturation", "float", 1.0, "Saturation", 0.2, 1.0, step=0.05),
+    )
+
+    def tick(self, dt: float) -> RGB | None:
+        self.t += dt
+        h = (self.t / self.p["period"]) % 1.0
+        r, g, b = colorsys.hsv_to_rgb(h, self.p["saturation"], 1.0)
+        return (round(r * 255), round(g * 255), round(b * 255))
+
+
+class CpuLoadEffect(Effect):
+    name, title = "cpu", "CPU load"
+    description = "Calm when idle, warmer as the processor gets busy."
+    needs = ("cpu_load",)
+    max_fps = 8
+    params = (
+        Param("low", "int", 5, "Idle below (%)", 0, 90),
+        Param("high", "int", 85, "Busy at (%)", 10, 100),
+        Param("idle", "colour", "#2f6fdf", "Idle colour"),
+        Param("busy", "colour", "#c9ae86", "Busy colour"),
+        Param("max", "colour", "#e0182d", "Flat-out colour"),
+    )
+
+    def __init__(self, params=None, inputs=None) -> None:
+        super().__init__(params, inputs)
+        self.load: float | None = None
+
+    def tick(self, dt: float) -> RGB | None:
+        v = self.inputs.cpu_load()
+        if v is not None:  # ~1 s lag: compiles and page loads read as load, not as flicker
+            self.load = v if self.load is None else self.load + (v - self.load) * min(1, dt)
+        if self.load is None:
+            return None
+        lo = self.p["low"] / 100
+        hi = max(self.p["high"] / 100, lo + 0.01)
+        return gradient([self.colour("idle"), self.colour("busy"), self.colour("max")],
+                        (self.load - lo) / (hi - lo))
+
+
+class NightEffect(Effect):
+    name, title = "night", "Night warmth"
+    description = "Day colour by day; fades to a dim warm amber in the evening."
+    max_fps = 2
+    params = (
+        Param("day", "colour", BORDEAUX, "Day colour"),
+        Param("night", "colour", "#ff8a3d", "Night colour"),
+        Param("start", "int", 21, "Evening starts (hour)", 0, 23),
+        Param("end", "int", 7, "Morning (hour)", 0, 23),
+        Param("fade", "int", 45, "Fade (min)", 0, 180),
+        Param("level", "float", 0.35, "Night brightness", 0.05, 1.0, step=0.05),
+    )
+
+    def night_amount(self) -> float:
+        """0 by day, 1 at night, a linear fade of `fade` minutes after start/before end."""
+        now = self.inputs.now()
+        m = now.hour * 60 + now.minute + now.second / 60
+        start, end, fade = self.p["start"] * 60, self.p["end"] * 60, max(self.p["fade"], 0)
+        span = (end - start) % 1440 or 1440
+        since_start = (m - start) % 1440
+        if since_start >= span:  # daytime
+            return 0.0
+        to_end = span - since_start
+        k = 1.0 if not fade else min(1.0, since_start / fade, to_end / fade)
+        return max(0.0, k)
+
+    def tick(self, dt: float) -> RGB | None:
+        k = self.night_amount()
+        return scale(lerp_rgb(self.colour("day"), self.colour("night"), k),
+                     1 - (1 - self.p["level"]) * k)
+
+
+ALL = (AudioEffect, SpectrumEffect, AmbientEffect, RainbowEffect, TemperatureEffect,
+       CpuLoadEffect, ProfileEffect, NightEffect, AccentEffect)
 OVERLAYS = (NotificationFlash,)

@@ -2,11 +2,13 @@
 service status. The effect itself runs in tuf-controld; this only edits the config."""
 from __future__ import annotations
 
+import time
+
 from gi.repository import Adw, Gdk, GLib, Gtk
 
 from ...automation.config import load_config, update_config
 from ...automation.service import DaemonClient
-from ...core import KbdEffect
+from ...core import BackendError, KbdEffect
 from ...effects.colour import hex_to_rgb, rgb_to_hex
 from ...effects.preview import EffectPreview
 from ...effects.registry import EFFECTS
@@ -63,6 +65,7 @@ class EffectsSection(Adw.PreferencesGroup):
         self._timer = None
         self._ticks = 0
         self._soft_shown = False
+        self._last_error: str | None = None
         self.telemetry = None
         self.preview = EffectPreview(telemetry=lambda: self.telemetry,
                                      profile=lambda: self.win.profile.value
@@ -149,10 +152,16 @@ class EffectsSection(Adw.PreferencesGroup):
         self.svc_pill.set_label("Running" if run else "Stopped")
         (self.svc_pill.add_css_class if run else self.svc_pill.remove_css_class)("accent")
         self.svc_btn.set_label("Stop" if run else "Start")
+        err = fx.get("error") if run else None
+        if err and err != self._last_error:  # failures are toasted once, never silent
+            self.win.toast_error(BackendError(f"Software effect: {err}"))
+        self._last_error = err
         if not run:
             sub = "Stopped. Effects need the service; Apply starts it."
-        elif fx.get("error"):
-            sub = fx["error"]
+        elif err:
+            sub = err
+        elif fx.get("waiting"):
+            sub = f"Showing {fx.get('effect')} · {fx['waiting']}"
         elif fx.get("running"):
             eff = fx.get("effect")
             sub = f"Showing {EFFECTS[eff].title.lower() if eff in EFFECTS else eff}"
@@ -195,8 +204,8 @@ class EffectsSection(Adw.PreferencesGroup):
                 self.param_rows.append(row)
             for w in (self.note, self.flash, self.prev_row, self.svc_row):
                 self.add(w)
-            self.note.set_title({"ambient": "Needs permission",
-                                 "audio": "Audio source"}.get(name, "Note"))
+            self.note.set_title({"ambient": "Needs permission", "audio": "Audio source",
+                                 "spectrum": "Audio source"}.get(name, "Note"))
             self.note.set_subtitle(GLib.markup_escape_text(cls.note))
             self.note.set_visible(bool(cls.note))
         else:
@@ -238,7 +247,7 @@ class EffectsSection(Adw.PreferencesGroup):
         row = Adw.SpinRow.new_with_range(p.min, p.max, step)
         row.set_title(p.label)
         if p.kind == "float":
-            row.set_digits(1)
+            row.set_digits(2 if step < 0.1 else 1)
         row.set_value(cur)
         row.connect("notify::value", lambda r, _p: put(
             int(r.get_value()) if p.kind == "int" else round(r.get_value(), 2)))
@@ -305,6 +314,7 @@ class EffectsSection(Adw.PreferencesGroup):
             started = None
             if want["active"] and not self.client.status()["running"]:
                 started = self.client.start()
+                self.client.wait_running()  # raises with the daemon's own error output
             return cfg, started
 
         def done(res):
@@ -314,6 +324,29 @@ class EffectsSection(Adw.PreferencesGroup):
             self.win.toast(f"{title} on" + (" · service started" if started else ""))
             GLib.timeout_add(800, lambda: (self.poll_status(), False)[1])
         run_bg(work, done=done, error=self.win.toast_error)
+
+    def release_for_hardware(self, timeout_s: float = 6.0) -> bool:
+        """Worker thread. Turn the configured software effect off and wait until the
+        daemon has restored the hardware mode; True when something was stopped."""
+        st = self.client.status()
+        cfg_active = load_config()["effects"]["active"]
+        running = st.get("running") and (st.get("effects") or {}).get("running")
+        if not cfg_active and not running:
+            return False
+        if cfg_active:
+            update_config(lambda c: c["effects"].__setitem__("active", None))
+        if not st.get("running"):
+            return bool(cfg_active)
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            fx = self.client.status().get("effects") or {}
+            if not fx.get("running"):
+                return True
+            time.sleep(0.15)
+        if (self.client.status().get("effects") or {}).get("override"):
+            raise BackendError("an automation rule keeps a software effect on; "
+                               "turn that rule off first")
+        raise BackendError("tuf-controld did not release the keyboard in time")
 
     def _toggle_service(self) -> None:
         run = self.status.get("running")

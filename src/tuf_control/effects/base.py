@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import datetime
 
 from ..core import ValidationError
 from .colour import RGB, hex_to_rgb, rgb_to_hex
@@ -89,6 +90,8 @@ class Inputs:
     frames: object = None         # .latest() -> RGB | None (effects.ambient)
     notifications: object = None  # .drain() -> list[dict] (effects.notify)
     theme_accent: Callable[[], RGB | None] = lambda: None
+    cpu_load: Callable[[], float | None] = lambda: None   # 0..1 over all cores
+    now: Callable[[], datetime] = datetime.now           # wall clock (night effect)
     extra: dict = field(default_factory=dict)
 
 

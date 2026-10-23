@@ -17,7 +17,12 @@ class _Beat:
 
     def level(self, band: str = "bass") -> float:
         beat = (self.t * 2.0) % 1.0  # 120 bpm
-        return math.exp(-beat * 6.0) * (0.55 if band == "treble" else 0.95)
+        if band == "bass":
+            return math.exp(-beat * 6.0) * 0.95
+        off = (beat + 0.5) % 1.0  # hats on the off-beat, mids drifting
+        if band == "treble":
+            return math.exp(-off * 9.0) * 0.6
+        return 0.25 + 0.2 * math.sin(self.t * 0.7)
 
 
 class _Drift:
@@ -36,7 +41,8 @@ class EffectPreview:
         self.beat, self.drift = _Beat(), _Drift()
         self.queue = NotificationQueue()
         self.inputs = Inputs(telemetry=telemetry, profile=profile, audio=self.beat,
-                             frames=self.drift, notifications=self.queue, theme_accent=theme)
+                             frames=self.drift, notifications=self.queue, theme_accent=theme,
+                             cpu_load=lambda: 0.45 + 0.4 * math.sin(self.beat.t / 3.0))
         self.effect = None
         self.overlay = None
         self.smoother = Smoother(0.15)
