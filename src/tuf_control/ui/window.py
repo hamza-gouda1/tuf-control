@@ -41,6 +41,7 @@ CONTROL = [
     ("keyboard", "Keyboard", "input-keyboard-symbolic", "keyboard", "KeyboardPage"),
     ("automation", "Automation", "media-playlist-repeat-symbolic", "automation",
      "AutomationPage"),
+    ("agent", "Agent access", "channel-secure-symbolic", "agent_access", "AgentAccessPage"),
     ("about", "About", "help-about-symbolic", "misc", "AboutPage"),
 ]
 NAV = [("Monitor", MONITOR), ("Control", CONTROL)]

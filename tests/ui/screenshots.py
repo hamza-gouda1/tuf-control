@@ -236,6 +236,59 @@ def automation_shots(win, out: Path, scheme: str, suffix: str, render):
     print("automation: rule saved OK")
 
 
+def seed_agent_demo() -> None:
+    """Calls from a demo MCP client against the fake tree: reads, dry runs, two requests
+    waiting for approval (one high-risk) and a change made under a standing grant."""
+    from tuf_control.agent import policy
+    from tuf_control.agent.tools import AgentService
+    svc = AgentService()
+    svc.set_client("desktop-assistant", "2.1")
+    for name, a in (("get_status", {}), ("get_telemetry", {"sections": ["cpu", "fans"]}),
+                    ("list_processes", {"limit": 5})):
+        svc.call(name, a)
+    policy.grant("control-all", high_risk=True)
+    svc.call("set_charge_limit", {"percent": 80})
+    svc.call("set_charge_limit", {"percent": 80, "dry_run": False,
+                                  "reason": "Mostly plugged in today; protect the battery"})
+    pts = [(40, 40), (50, 70), (58, 100), (65, 130), (72, 165), (80, 200), (88, 235),
+           (97, 255)]
+    svc.call("set_fan_curve", {"profile": "balanced", "fan": "cpu", "dry_run": False,
+                               "points": [{"temp_c": t, "pwm": p} for t, p in pts],
+                               "reason": "Fans ramp late under the current load"})
+    svc.call("set_power_limit", {"name": "ppt_pl1_spl", "value": 300})
+    policy.grant("control-basic", 3600)
+    svc.call("set_keyboard_brightness", {"level": 1, "dry_run": False})
+
+
+def agent_shots(win, out: Path, scheme: str, suffix: str, render):
+    page = win.pages["agent"]
+    win.show_page("agent")
+    yield 900
+    render(win, out / f"agent-access-{scheme}{suffix}.png")
+    _scroll_bottom(page)
+    yield 400
+    render(win, out / f"agent-access-activity-{scheme}{suffix}.png")
+    # drive the page: approve the basic request, then the kill switch
+    from tuf_control.agent import policy
+    from tuf_control.agent.present import pending_rows
+    rows = pending_rows(page.queue.pending())
+    basic = next(r for r in rows if not r["high"])
+    page._decide(basic, True)
+    yield 600
+    problems = []
+    if page.queue.get(basic["id"])["status"] != "approved":
+        problems.append("approve did not land")
+    page._revoke()
+    yield 600
+    if policy.load_access().enabled or page.queue.pending():
+        problems.append("revoke did not land")
+    if page.master.get_active() or page.pending_rows:
+        problems.append("page did not follow the revoke")
+    print("agent page:", "OK" if not problems else "; ".join(problems))
+    if problems:
+        raise AssertionError(problems)
+
+
 def _find(widget, cls):
     """First mapped descendant of `widget` that is a `cls` (popovers live under their row)."""
     child = widget.get_first_child()
@@ -305,6 +358,11 @@ def inner(args) -> int:
     from tuf_control.automation.config import CONFIG_DIR_ENV, RUNTIME_DIR_ENV
     os.environ[CONFIG_DIR_ENV] = str(tmp / "config")
     os.environ[RUNTIME_DIR_ENV] = str(tmp / "run")
+    from tuf_control.agent.store import STATE_DIR_ENV  # agent audit log and approval queue
+    os.environ[STATE_DIR_ENV] = str(tmp / "state")
+    os.environ["TUF_CONTROL_AGENT_NOTIFY"] = "0"
+    if args.agent:
+        seed_agent_demo()
     daemon = start_demo_daemon() if args.automation else None
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -415,6 +473,8 @@ def inner(args) -> int:
             yield from popover_shots(win, out, scheme, suffix, render, render_over)
         if args.automation:
             yield from automation_shots(win, out, scheme, suffix, render)
+        if args.agent:
+            yield from agent_shots(win, out, scheme, suffix, render)
         if args.exercise:
             yield from exercise(win, root, out, scheme, suffix, render)
         app.quit()
@@ -473,6 +533,9 @@ def main() -> int:
     p.add_argument("--user-theme", action="store_true", help="keep ~/.config/gtk-4.0 styles")
     p.add_argument("--popovers", action="store_true",
                    help="keyboard page with its dropdowns open, and the colour chooser")
+    p.add_argument("--agent", action="store_true",
+                   help="seed agent access demo data (calls, pending requests) and capture "
+                        "the Agent access page")
     p.add_argument("--automation", action="store_true",
                    help="run a demo tuf-controld on the fake tree; capture the Automation "
                         "page, rule dialogs and keyboard software effects")

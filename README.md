@@ -24,6 +24,8 @@ in a GTK 4 / Libadwaita interface, a CLI, and a GNOME Quick Settings toggle.
   `nvidia-smi` and `upower` ([PERFORMANCE.md](docs/PERFORMANCE.md)). The dGPU is never woken
   to read sensors.
 - **CLI**: `tuf-control status | profile | limit | battery ...`, `--json`, `--dry-run` on every write.
+- **Agent access**: an MCP server (`tuf-control mcp`) and JSON CLI for agents and scripts.
+  Read-only by default; every change is a dry run until you approve it. See below.
 - **Quick Settings**: a "Performance" toggle with a profile submenu, GPU mode and charge limit
   readouts. Follows the shell theme.
 
@@ -88,6 +90,32 @@ custom shortcut; skip it with `--no-hotkey`, pick another key with `--hotkey=KEY
 
 Development without hardware: `TUF_CONTROL_FAKE_ROOT=/tmp/tree tuf-control status` (see
 [docs/UI.md](docs/UI.md)).
+
+## Agent access
+
+Agents use the app through a protocol instead of a window. `tuf-control mcp` is a Model
+Context Protocol server (JSON-RPC over stdio, standard library only) with read tools
+(status, telemetry, processes, fan curves, battery health, automation rules, "why is this
+unavailable"), write tools for profile, charge limit and keyboard, and high-risk tools for
+fan curves, GPU mode, power limits and restoring defaults.
+
+    tuf-control mcp --print-config          # client config snippet
+    tuf-control agent grant control-basic   # allow change requests (each one approved by you)
+    tuf-control agent pending | approve ID | deny ID | audit | revoke
+
+- Read-only by default; only you raise the level (Agent access page or `agent grant`).
+- Writes are dry runs unless `dry_run: false` **and** you approved: once per call, or with a
+  time-boxed grant (`--for 1h`) for the basic tools. High-risk tools are off until you enable
+  them and always ask per call.
+- Hardware bounds enforced through the same Controller, rate limits, strict schemas with no
+  path or command parameters, untrusted process names cleaned and marked, an audit log,
+  and a kill switch (`tuf-control agent revoke`, **Revoke all** on the page).
+
+<p align="center">
+  <img src="docs/screenshots/agent-access-dark.png" alt="Agent access" width="60%">
+</p>
+
+Tools, safety model, threat model and an example session: [docs/AGENT_API.md](docs/AGENT_API.md).
 
 ## Architecture
 

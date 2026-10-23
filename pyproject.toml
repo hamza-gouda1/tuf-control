@@ -20,6 +20,7 @@ dev = ["pytest", "ruff"]
 [project.scripts]
 tuf-control = "tuf_control.cli:main"
 tuf-controld = "tuf_control.daemon:main"
+tuf-control-mcp = "tuf_control.agent.mcp:main"
 
 [project.gui-scripts]
 tuf-control-gui = "tuf_control.ui.app:main"

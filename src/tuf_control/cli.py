@@ -41,7 +41,21 @@ def _parser() -> argparse.ArgumentParser:
 
     from .automation.cli_cmds import add_parsers as add_automation_parsers
     add_automation_parsers(sub)  # daemon, automation, kbd effect
+    from .agent.cli_cmds import add_parsers as add_agent_parsers
+    add_agent_parsers(sub)  # agent, mcp
+    _json_everywhere(p)
     return p
+
+
+def _json_everywhere(parser: argparse.ArgumentParser) -> None:
+    """Accept --json after any subcommand too (`tuf-control status --json`)."""
+    for act in parser._actions:
+        if isinstance(act, argparse._SubParsersAction):
+            for child in act.choices.values():
+                if not any("--json" in a.option_strings for a in child._actions):
+                    child.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
+                                       help="machine-readable output (see docs/AGENT_API.md)")
+                _json_everywhere(child)
 
 
 def _emit(args, data, text: str) -> None:
@@ -127,6 +141,13 @@ def run(args, ctl: Controller) -> int:
 
 def main(argv: list[str] | None = None, controller: Controller | None = None) -> int:
     args = _parser().parse_args(argv)
+    if args.cmd in ("agent", "mcp"):  # no Controller: the agent builds its own, unprivileged
+        from .agent import cli_cmds as agent_cmds
+        try:
+            return agent_cmds.run(args, controller)
+        except TufControlError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
     try:
         return run(args, controller or Controller())
     except TufControlError as exc:

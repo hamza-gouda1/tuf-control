@@ -366,6 +366,8 @@ do_install() {
     fi
     write_launcher "$BIN_DIR/tuf-control" \
         "PYTHONPATH=\"$APP_DIR\${PYTHONPATH:+:\$PYTHONPATH}\" exec python3 -m tuf_control \"\$@\""
+    write_launcher "$BIN_DIR/tuf-control-mcp" \
+        "PYTHONPATH=\"$APP_DIR\${PYTHONPATH:+:\$PYTHONPATH}\" exec python3 -m tuf_control mcp \"\$@\""
     write_launcher "$BIN_DIR/tuf-control-gui" \
         "PYTHONPATH=\"$APP_DIR\${PYTHONPATH:+:\$PYTHONPATH}\" exec python3 -c 'from tuf_control.ui.app import main; raise SystemExit(main())' \"\$@\""
     write_desktop
@@ -386,7 +388,7 @@ do_install() {
 do_uninstall() {
     say "removing tuf-control for $USER"
     local f
-    for f in "$BIN_DIR/tuf-control" "$BIN_DIR/tuf-control-gui" \
+    for f in "$BIN_DIR/tuf-control" "$BIN_DIR/tuf-control-gui" "$BIN_DIR/tuf-control-mcp" \
              "$DATA_HOME/applications/$APP_ID.desktop"; do
         if is_ours "$f"; then act rm -f "$f"; elif [ -e "$f" ]; then say "keeping $f (not ours)"; fi
         restore "$f"
