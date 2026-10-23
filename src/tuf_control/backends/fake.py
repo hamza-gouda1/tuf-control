@@ -1,9 +1,29 @@
 """Fake sysfs tree mimicking the real layout, for tests and CI."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
+from ..core import (
+    BackendUnavailable,
+    Capability,
+    CapStatus,
+    FanCurve,
+    GpuAction,
+    GpuMode,
+    GpuStatus,
+    KbdEffect,
+    Profile,
+    Telemetry,
+)
 from .sysfs import SysfsBackend
+
+DEFAULT_CURVES = {
+    1: ([39, 48, 51, 55, 62, 71, 80, 97], [28, 53, 65, 116, 158, 180, 217, 255]),
+    2: ([40, 50, 57, 64, 67, 72, 74, 97], [31, 71, 109, 146, 184, 212, 255, 255]),
+}
+# asusd AuraModeNum values offered by a TUF single-zone keyboard
+FAKE_AURA_MODES = [0, 1, 2, 10]
 
 # name -> (type, current, default, min, max, possible_values, display_name)
 _ATTRS = {
@@ -27,7 +47,7 @@ def _w(path: Path, text: object) -> None:
 
 
 def build_fake_tree(root: str | Path, *, ppt_readable: bool = True,
-                    profile: str = "balanced") -> Path:
+                    profile: str = "balanced", dgpu_runtime: str = "active") -> Path:
     """Create a fake root containing a sys/ tree. Returns the root."""
     root = Path(root)
     _w(root / "sys/firmware/acpi/platform_profile", profile)
@@ -70,13 +90,26 @@ def build_fake_tree(root: str | Path, *, ppt_readable: bool = True,
     _w(hw / "hwmon8/fan2_label", "gpu_fan")
     fc = hw / "hwmon9"
     _w(fc / "name", "asus_custom_fan_curve")
-    cpu = ([39, 48, 51, 55, 62, 71, 80, 97], [28, 53, 65, 116, 158, 180, 217, 255])
-    gpu = ([40, 50, 57, 64, 67, 72, 74, 97], [31, 71, 109, 146, 184, 212, 255, 255])
-    for idx, (temps, pwms) in ((1, cpu), (2, gpu)):
+    for idx, (temps, pwms) in DEFAULT_CURVES.items():
         _w(fc / f"pwm{idx}_enable", 1)
         for i, (t, p) in enumerate(zip(temps, pwms), 1):
             _w(fc / f"pwm{idx}_auto_point{i}_temp", t)
             _w(fc / f"pwm{idx}_auto_point{i}_pwm", p)
+    _w(root / "sys/class/powercap/intel-rapl:0/energy_uj", 1_000_000_000)
+    for dev, vendor, boot in (("0000:00:02.0", "0x8086", 1), ("0000:01:00.0", "0x10de", 0)):
+        d = root / "sys/bus/pci/devices" / dev
+        _w(d / "class", "0x030000")
+        _w(d / "vendor", vendor)
+        _w(d / "boot_vga", boot)
+        _w(d / "power/runtime_status", "active" if boot else dgpu_runtime)
+    # stand-ins for daemons the fake backend replaces (supergfxd, asusd aura, nvidia-smi)
+    fake = root / "fake"
+    _w(fake / "nvidia-smi.csv", "46, 12.40, 3")
+    _w(fake / "gfx.json", json.dumps({"mode": int(GpuMode.HYBRID), "pending_mode": None,
+                                      "pending_action": None}))
+    _w(fake / "aura.json", json.dumps({"mode": 0, "zone": 0, "colour1": [142, 42, 68],
+                                       "colour2": [201, 174, 134], "speed": 1, "direction": 0,
+                                       "supported_modes": FAKE_AURA_MODES}))
     return root
 
 
@@ -87,3 +120,86 @@ class FakeBackend(SysfsBackend):
 
     def __init__(self, root: str | Path, writer=None) -> None:
         super().__init__(root, writer=writer, use_nvidia_smi=False)
+
+    # Daemon stand-ins live under <root>/fake as JSON; they never leave the fake tree.
+    def _fake(self, name: str) -> Path:
+        return self.root / "fake" / name
+
+    def _load(self, name: str) -> dict:
+        try:
+            return json.loads(self._fake(name).read_text())
+        except (OSError, ValueError):
+            raise BackendUnavailable(f"fake {name} missing") from None
+
+    def _save(self, name: str, data: dict) -> None:
+        self._fake(name).write_text(json.dumps(data))
+
+    def probe(self):
+        st = super().probe()
+        if self._fake("aura.json").exists():
+            st[Capability.KBD_RGB] = CapStatus(True)
+        return st
+
+    def get_telemetry(self) -> Telemetry:
+        t = super().get_telemetry()
+        if t.gpu_runtime in (None, "active"):
+            try:
+                parts = [float(x) for x in self._fake("nvidia-smi.csv").read_text().split(",")]
+                t.gpu_temp_c, t.gpu_power_w, t.gpu_util_pct = parts[:3]
+            except (OSError, ValueError):
+                pass
+        return t
+
+    def get_gpu_mode(self) -> GpuMode:
+        try:
+            return GpuMode(self._load("gfx.json")["mode"])
+        except BackendUnavailable:
+            return super().get_gpu_mode()
+
+    def get_gpu_status(self) -> GpuStatus:
+        st = super().get_gpu_status()
+        try:
+            g = self._load("gfx.json")
+        except BackendUnavailable:
+            return st
+        st.pending_mode = GpuMode(g["pending_mode"]) if g.get("pending_mode") is not None else None
+        st.pending_action = (GpuAction(g["pending_action"])
+                             if g.get("pending_action") is not None else None)
+        return st
+
+    def set_gpu_mode(self, mode: GpuMode) -> GpuAction:
+        g = self._load("gfx.json")
+        current = GpuMode(g["mode"])
+        if mode is current:
+            g.update(pending_mode=None, pending_action=None)
+            self._save("gfx.json", g)
+            return GpuAction.NOTHING
+        mux = GpuMode.ASUS_MUX_DGPU in (mode, current)
+        action = GpuAction.REBOOT if mux else GpuAction.LOGOUT
+        g.update(pending_mode=int(mode), pending_action=int(action))
+        self._save("gfx.json", g)
+        return action
+
+    def get_kbd_rgb(self) -> dict:
+        a = self._load("aura.json")
+        data = {k: a[k] for k in ("mode", "zone", "colour1", "colour2", "speed", "direction")}
+        cur, mx = self.get_kbd_brightness()
+        return {"path": "fake", "led_mode": a["mode"], "mode_data": data, "brightness": cur,
+                "supported_modes": a.get("supported_modes", FAKE_AURA_MODES),
+                "supported_brightness": list(range(mx + 1))}
+
+    def set_kbd_effect(self, effect: KbdEffect) -> None:
+        effect.validate()
+        a = self._load("aura.json")
+        a.update(mode=effect.mode, zone=effect.zone, colour1=list(effect.colour1),
+                 colour2=list(effect.colour2), speed=effect.speed, direction=effect.direction)
+        self._save("aura.json", a)
+
+    def reset_fan_curves(self, profile: Profile) -> None:
+        self._check_active(profile)
+        for idx, (temps, pwms) in DEFAULT_CURVES.items():
+            self.set_fan_curve(profile, FanCurve.from_lists(("CPU", "GPU")[idx - 1], temps, pwms,
+                                                            enabled=False))
+
+    def one_shot_full_charge(self) -> None:
+        self.set_battery_threshold(100)

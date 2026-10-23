@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=TUF Control
+GenericName=Laptop Control
+Comment=Fans, power, graphics and lighting for ASUS TUF and ROG laptops
+Exec=tuf-control-gui
+Icon=io.github.hamzagouda.TufControl
+Terminal=false
+Categories=Settings;HardwareSettings;GTK;
+Keywords=asus;tuf;rog;fan;power;profile;gpu;mux;battery;keyboard;rgb;
+StartupNotify=true
+SingleMainWindow=true

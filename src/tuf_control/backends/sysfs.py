@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import time
 from pathlib import Path
 
 from ..core import (
@@ -10,7 +11,9 @@ from ..core import (
     CapStatus,
     FanCurve,
     FirmwareAttribute,
+    GpuAction,
     GpuMode,
+    GpuStatus,
     PowerLimit,
     Profile,
     Telemetry,
@@ -41,6 +44,7 @@ class SysfsBackend(Backend):
         self.root = Path(root)
         self.writer: Writer = writer or DirectWriter()
         self.use_nvidia_smi = use_nvidia_smi
+        self._rapl_prev: tuple[int, float] | None = None
 
     # -- paths ------------------------------------------------------------
     def _p(self, rel: str) -> Path:
@@ -219,6 +223,44 @@ class SysfsBackend(Backend):
             return GpuMode.INTEGRATED
         return GpuMode.HYBRID
 
+    def _dgpu_dir(self) -> Path | None:
+        """The discrete GPU: an NVIDIA display controller, else a non-boot VGA device."""
+        gpus = [d for d in sorted(self._p("sys/bus/pci/devices").glob("*"))
+                if (read_text(d / "class") or "").startswith("0x03")]
+        for d in gpus:
+            if read_text(d / "vendor") == "0x10de":
+                return d
+        return next((d for d in gpus if read_text(d / "boot_vga") == "0"), None)
+
+    def dgpu_runtime(self) -> str | None:
+        """Runtime PM state of the discrete GPU without waking it."""
+        d = self._dgpu_dir()
+        return read_text(d / "power/runtime_status") if d else None
+
+    def get_gpu_status(self) -> GpuStatus:
+        mode = self.get_gpu_mode()
+        supported = [GpuMode.HYBRID]
+        if (self.armoury / "dgpu_disable").exists():
+            supported.insert(0, GpuMode.INTEGRATED)
+        if (self.armoury / "gpu_mux_mode").exists():
+            supported.append(GpuMode.ASUS_MUX_DGPU)
+        pending = read_text(self.armoury / "pending_reboot" / "pending_reboot") == "1"
+        return GpuStatus(mode, supported, None, GpuAction.REBOOT if pending else None,
+                         self.dgpu_runtime())
+
+    def set_attribute(self, name: str, value: int | str) -> None:
+        if not re.fullmatch(r"[a-z0-9_]+", name):
+            raise ValidationError(f"bad attribute name {name!r}")
+        attr = next((a for a in self.get_attributes() if a.name == name), None)
+        if attr is None:
+            raise ValidationError(f"unknown attribute {name!r}")
+        if attr.type == "integer":
+            self.set_limit(name, int(value))
+            return
+        if attr.possible_values and str(value) not in attr.possible_values:
+            raise ValidationError(f"{name}: {value} not one of {', '.join(attr.possible_values)}")
+        self.writer.write(self.armoury / name / "current_value", str(value))
+
     # -- keyboard -----------------------------------------------------------
     def get_kbd_brightness(self) -> tuple[int, int]:
         cur = _int(read_text(self.kbd_dir / "brightness"))
@@ -234,7 +276,14 @@ class SysfsBackend(Backend):
         self.writer.write(self.kbd_dir / "brightness", str(value))
 
     # -- fan curves -----------------------------------------------------------
-    def get_fan_curves(self) -> dict[str, FanCurve]:
+    _FAN_INDEX = {"CPU": 1, "GPU": 2, "MID": 3}
+
+    def _check_active(self, profile: Profile | None) -> None:
+        if profile is not None and profile is not self.get_profile():
+            raise Unsupported("sysfs only exposes the active profile's fan curve")
+
+    def get_fan_curves(self, profile: Profile | None = None) -> dict[str, FanCurve]:
+        self._check_active(profile)
         hw = self._hwmon("asus_custom_fan_curve")
         if hw is None:
             raise BackendUnavailable("asus_custom_fan_curve not present")
@@ -249,6 +298,28 @@ class SysfsBackend(Backend):
         if not curves:
             raise BackendUnavailable("fan curve files unreadable")
         return curves
+
+    def set_fan_curve(self, profile: Profile, curve: FanCurve) -> None:
+        curve.validate()
+        self._check_active(profile)
+        hw = self._hwmon("asus_custom_fan_curve")
+        idx = self._FAN_INDEX.get(curve.fan.upper())
+        if hw is None or idx is None:
+            raise BackendUnavailable(f"no custom fan curve for {curve.fan}")
+        for i, pt in enumerate(curve.points, 1):
+            self.writer.write(hw / f"pwm{idx}_auto_point{i}_temp", str(pt.temp))
+            self.writer.write(hw / f"pwm{idx}_auto_point{i}_pwm", str(pt.pwm))
+        # asus-wmi: 1 = custom curve on, 2 = firmware automatic
+        self.writer.write(hw / f"pwm{idx}_enable", "1" if curve.enabled else "2")
+
+    def reset_fan_curves(self, profile: Profile) -> None:
+        self._check_active(profile)
+        hw = self._hwmon("asus_custom_fan_curve")
+        if hw is None:
+            raise BackendUnavailable("asus_custom_fan_curve not present")
+        for idx in (1, 2):
+            if (hw / f"pwm{idx}_enable").exists():
+                self.writer.write(hw / f"pwm{idx}_enable", "3")  # 3 = factory defaults
 
     # -- telemetry ------------------------------------------------------------
     def get_telemetry(self) -> Telemetry:
@@ -282,9 +353,23 @@ class SysfsBackend(Backend):
             t.profile = self.get_profile()
         except (BackendUnavailable, ValidationError):
             pass
-        if self.use_nvidia_smi:
+        t.cpu_power_w = self._rapl_power()
+        t.gpu_runtime = self.dgpu_runtime()
+        # nvidia-smi wakes a suspended dGPU (and drains the battery): only ask when awake
+        if self.use_nvidia_smi and t.gpu_runtime in (None, "active"):
             self._fill_gpu(t)
         return t
+
+    def _rapl_power(self) -> float | None:
+        """CPU package power from the RAPL energy counter (often root-only)."""
+        e = _int(read_text(self._p("sys/class/powercap/intel-rapl:0/energy_uj")))
+        if e is None:
+            return None
+        now = time.monotonic()
+        prev, self._rapl_prev = self._rapl_prev, (e, now)
+        if prev is None or now - prev[1] < 0.2 or e < prev[0]:
+            return None
+        return round((e - prev[0]) / 1e6 / (now - prev[1]), 1)
 
     @staticmethod
     def _fill_gpu(t: Telemetry) -> None:

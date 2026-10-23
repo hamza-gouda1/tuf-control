@@ -202,6 +202,50 @@ class Telemetry:
     battery_status: str | None = None
     battery_percent: int | None = None
     profile: Profile | None = None
+    cpu_power_w: float | None = None
+    gpu_runtime: str | None = None  # dGPU runtime PM state: "active", "suspended", ...
+
+
+class GpuAction(IntEnum):
+    """supergfxd GfxUserAction numbering (what the user must do after a switch)."""
+
+    LOGOUT = 0
+    REBOOT = 1
+    SWITCH_TO_INTEGRATED = 2
+    ASUS_EGPU_DISABLE = 3
+    NOTHING = 4
+
+
+@dataclass
+class GpuStatus:
+    mode: GpuMode
+    supported: list[GpuMode] = field(default_factory=list)
+    pending_mode: GpuMode | None = None
+    pending_action: GpuAction | None = None
+    dgpu_power: str | None = None  # "active", "suspended", "off", ...
+
+
+@dataclass
+class KbdEffect:
+    """asusd LedModeData: (mode, zone, colour1, colour2, speed, direction)."""
+
+    mode: int
+    zone: int = 0
+    colour1: tuple[int, int, int] = (142, 42, 68)
+    colour2: tuple[int, int, int] = (0, 0, 0)
+    speed: int = 1
+    direction: int = 0
+
+    def validate(self) -> KbdEffect:
+        for name in ("mode", "zone", "speed", "direction"):
+            v = getattr(self, name)
+            if not _is_int(v) or v < 0:
+                raise ValidationError(f"keyboard effect {name} must be a non-negative integer")
+        for name in ("colour1", "colour2"):
+            c = tuple(getattr(self, name))
+            if len(c) != 3 or not all(_is_int(x) and 0 <= x <= 255 for x in c):
+                raise ValidationError(f"keyboard effect {name} must be three values 0-255")
+        return self
 
 
 def jsonable(obj):

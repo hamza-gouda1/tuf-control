@@ -15,7 +15,10 @@ from ..core import (
     Capability,
     CapStatus,
     FanCurve,
+    GpuAction,
     GpuMode,
+    GpuStatus,
+    KbdEffect,
     PowerLimit,
     Profile,
     ValidationError,
@@ -81,13 +84,13 @@ class GioTransport:
             return BackendError(f"D-Bus timeout: {msg}")
         return BackendError(msg)
 
-    def call(self, dest, path, iface, method, sig=None, args=()):
+    def call(self, dest, path, iface, method, sig=None, args=(), timeout_ms=None):
         Gio, GLib = self._mods()
         params = GLib.Variant(sig, args) if sig else None
         try:
             res = self._connection().call_sync(
                 dest, path, iface, method, params, None, Gio.DBusCallFlags.NONE,
-                self.timeout_ms, None)
+                timeout_ms or self.timeout_ms, None)
         except GLib.Error as exc:
             raise self._wrap(exc) from None
         return res.unpack() if res is not None else None
@@ -258,6 +261,39 @@ class DBusBackend(Backend):
         res = self.t.call(SUPERGFX, SUPERGFX_PATH, SUPERGFX, "Mode")
         return GpuMode(int(res[0]))
 
+    def get_gpu_status(self) -> GpuStatus:
+        self._need(SUPERGFX)
+        mode = self.get_gpu_mode()
+
+        def ask(method):
+            try:
+                return self.t.call(SUPERGFX, SUPERGFX_PATH, SUPERGFX, method)[0]
+            except (BackendError, BackendUnavailable):
+                return None
+        supported = [GpuMode(int(m)) for m in (ask("Supported") or [])
+                     if int(m) in GpuMode._value2member_map_]
+        pend_mode, pend_action, power = ask("PendingMode"), ask("PendingUserAction"), ask("Power")
+        powers = {0: "active", 1: "suspended", 2: "off", 3: "disabled", 4: "mux-discreet"}
+        pm = GpuMode(int(pend_mode)) if pend_mode is not None else None
+        if pm in (GpuMode.NONE, mode):
+            pm = None
+        pa = GpuAction(int(pend_action)) if pend_action is not None and \
+            int(pend_action) in GpuAction._value2member_map_ else None
+        if pa is GpuAction.NOTHING:
+            pa = None
+        return GpuStatus(mode, supported, pm, pa,
+                         powers.get(int(power)) if power is not None else None)
+
+    def set_gpu_mode(self, mode: GpuMode) -> GpuAction:
+        self._need(SUPERGFX)
+        # supergfxd may unload drivers before answering: allow a long timeout
+        res = self.t.call(SUPERGFX, SUPERGFX_PATH, SUPERGFX, "SetMode", "(u)", (int(mode),),
+                          timeout_ms=30000)
+        try:
+            return GpuAction(int(res[0]))
+        except (TypeError, ValueError, IndexError):
+            return GpuAction.NOTHING
+
     # -- keyboard -----------------------------------------------------------
     def _aura(self) -> str:
         self._need(ASUSD)
@@ -291,9 +327,43 @@ class DBusBackend(Backend):
                 "supported_modes": props.get("SupportedBasicModes"),
                 "supported_brightness": props.get("SupportedBrightness")}
 
+    def set_kbd_effect(self, effect: KbdEffect) -> None:
+        effect.validate()
+        value = (effect.mode, effect.zone, tuple(effect.colour1), tuple(effect.colour2),
+                 effect.speed, effect.direction)
+        self.t.set_property(ASUSD, self._aura(), AURA_IFACE, "LedModeData",
+                            "(uu(yyy)(yyy)uu)", value)
+
+    # -- attributes / battery extras --------------------------------------------
+    def set_attribute(self, name: str, value: int | str) -> None:
+        if not re.fullmatch(r"[a-z0-9_]+", name):
+            raise ValidationError(f"bad attribute name {name!r}")
+        self._need(ASUSD)
+        if name not in self._children(ASUSD, ARMOURY_PATH):
+            raise BackendUnavailable(f"asusd does not expose {name}")
+        self.t.set_property(ASUSD, f"{ARMOURY_PATH}/{name}", ARMOURY_IFACE,
+                            "CurrentValue", "i", int(value))
+
+    def one_shot_full_charge(self) -> None:
+        self._need(ASUSD)
+        self.t.call(ASUSD, PLATFORM_PATH, PLATFORM_IFACE, "OneShotFullCharge")
+
     # -- fan curves -----------------------------------------------------------
-    def get_fan_curves(self) -> dict[str, FanCurve]:
-        prof = self.get_profile()
+    def set_fan_curve(self, profile: Profile, curve: FanCurve) -> None:
+        curve.validate()
+        self._need(ASUSD)
+        data = (curve.fan, bytes(p.pwm for p in curve.points),
+                bytes(p.temp for p in curve.points), curve.enabled)
+        self.t.call(ASUSD, PLATFORM_PATH, FANCURVES_IFACE, "SetFanCurve", "(u(sayayb))",
+                    (profile.asusd_id, data))
+
+    def reset_fan_curves(self, profile: Profile) -> None:
+        self._need(ASUSD)
+        self.t.call(ASUSD, PLATFORM_PATH, FANCURVES_IFACE, "ResetProfileCurves", "(u)",
+                    (profile.asusd_id,))
+
+    def get_fan_curves(self, profile: Profile | None = None) -> dict[str, FanCurve]:
+        prof = profile or self.get_profile()
         res = self.t.call(ASUSD, PLATFORM_PATH, FANCURVES_IFACE, "FanCurveData", "(u)",
                           (prof.asusd_id,))[0]
         # asusd tuple order: (fan, pwm[8], temp[8], enabled)

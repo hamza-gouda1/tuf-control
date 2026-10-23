@@ -13,7 +13,10 @@ from .models import (
     FanCurve,
     FanPoint,
     FirmwareAttribute,
+    GpuAction,
     GpuMode,
+    GpuStatus,
+    KbdEffect,
     PowerLimit,
     Profile,
     Telemetry,
@@ -22,6 +25,7 @@ from .models import (
 
 __all__ = [
     "BackendError", "BackendUnavailable", "BatteryHealth", "CapStatus", "Capability",
-    "FanCurve", "FanPoint", "FirmwareAttribute", "GpuMode", "PowerLimit", "PrivilegeRequired",
+    "FanCurve", "FanPoint", "FirmwareAttribute", "GpuAction", "GpuMode", "GpuStatus",
+    "KbdEffect", "PowerLimit", "PrivilegeRequired",
     "Profile", "Telemetry", "TufControlError", "Unsupported", "ValidationError", "jsonable",
 ]

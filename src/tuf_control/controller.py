@@ -11,6 +11,12 @@ from .core import (
     BackendUnavailable,
     Capability,
     CapStatus,
+    FanCurve,
+    FirmwareAttribute,
+    GpuAction,
+    GpuMode,
+    GpuStatus,
+    KbdEffect,
     PowerLimit,
     Profile,
     Unsupported,
@@ -25,6 +31,7 @@ class WriteResult:
     applied: bool
     backend: str
     detail: str
+    value: object = None  # what the backend returned, e.g. the GpuAction after a switch
 
 
 def default_backends() -> list[Backend]:
@@ -96,16 +103,20 @@ class Controller:
         raise BackendUnavailable(
             f"{cap.value} unavailable: " + ("; ".join(errors) or self.why_unavailable(cap)))
 
-    def _write(self, cap: Capability, *args, dry_run: bool = False, detail: str = "") -> WriteResult:
-        method = OPERATIONS[cap][1]
+    def _write(self, cap: Capability, *args, dry_run: bool = False, detail: str = "",
+               method: str | None = None, backends: list[Backend] | None = None) -> WriteResult:
+        method = method or OPERATIONS[cap][1]
         assert method
         errors = []
-        for b in self.providers(cap):
+        for b in (self.providers(cap) if backends is None else backends):
             if dry_run:
                 return WriteResult(False, b.name, f"dry run: would {detail}")
             try:
-                getattr(b, method)(*args)
-                return WriteResult(True, b.name, detail)
+                out = getattr(b, method)(*args)
+                res = WriteResult(True, b.name, detail)
+                if out is not None:
+                    res.value = out
+                return res
             except (BackendUnavailable, Unsupported) as exc:  # never after validation errors
                 errors.append(f"{b.name}: {exc}")
         raise BackendUnavailable(
@@ -140,6 +151,74 @@ class Controller:
             raise ValidationError("battery threshold must be an integer in 20-100")
         return self._write(Capability.BATTERY_THRESHOLD, value, dry_run=dry_run,
                            detail=f"set battery charge limit {value}")
+
+    # -- keyboard -------------------------------------------------------------
+    def get_kbd_brightness(self) -> tuple[tuple[int, int], str]:
+        return self.read(Capability.KBD_BRIGHTNESS)
+
+    def set_kbd_brightness(self, value: int, dry_run: bool = False) -> WriteResult:
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise ValidationError("keyboard brightness must be a non-negative integer")
+        return self._write(Capability.KBD_BRIGHTNESS, value, dry_run=dry_run,
+                           detail=f"set keyboard brightness {value}")
+
+    def get_kbd_rgb(self) -> tuple[dict, str]:
+        return self.read(Capability.KBD_RGB)
+
+    def set_kbd_effect(self, effect: KbdEffect, dry_run: bool = False) -> WriteResult:
+        effect.validate()
+        return self._write(Capability.KBD_RGB, effect, dry_run=dry_run, method="set_kbd_effect",
+                           detail=f"set keyboard effect mode {effect.mode}")
+
+    # -- fans -------------------------------------------------------------------
+    def get_fan_curves(self, profile: Profile | None = None) -> tuple[dict[str, FanCurve], str]:
+        return self.read(Capability.FAN_CURVES, *(() if profile is None else (profile,)))
+
+    def set_fan_curve(self, profile: Profile, curve: FanCurve,
+                      dry_run: bool = False) -> WriteResult:
+        curve.validate()
+        return self._write(Capability.FAN_CURVES, profile, curve, dry_run=dry_run,
+                           method="set_fan_curve",
+                           detail=f"set {curve.fan} fan curve for {profile.value}")
+
+    def reset_fan_curves(self, profile: Profile, dry_run: bool = False) -> WriteResult:
+        return self._write(Capability.FAN_CURVES, profile, dry_run=dry_run,
+                           method="reset_fan_curves",
+                           detail=f"reset fan curves for {profile.value}")
+
+    # -- gpu --------------------------------------------------------------------
+    def get_gpu_status(self) -> tuple[GpuStatus, str]:
+        errors = []
+        for b in self.providers(Capability.GPU_MODE):
+            try:
+                return b.get_gpu_status(), b.name
+            except (BackendUnavailable, BackendError, Unsupported) as exc:
+                errors.append(f"{b.name}: {exc}")
+        raise BackendUnavailable("gpu status unavailable: " + (
+            "; ".join(errors) or self.why_unavailable(Capability.GPU_MODE)))
+
+    def set_gpu_mode(self, mode: GpuMode, dry_run: bool = False) -> WriteResult:
+        if not isinstance(mode, GpuMode):
+            raise ValidationError("unknown GPU mode")
+        res = self._write(Capability.GPU_MODE, mode, dry_run=dry_run, method="set_gpu_mode",
+                          detail=f"switch GPU mode to {mode.name.lower()}")
+        if res.applied and res.value is None:
+            res.value = GpuAction.NOTHING
+        return res
+
+    # -- firmware attributes ------------------------------------------------------
+    def get_attributes(self) -> tuple[list[FirmwareAttribute], str]:
+        return self.read(Capability.FIRMWARE_ATTRIBUTES)
+
+    def set_attribute(self, name: str, value: int | str, dry_run: bool = False) -> WriteResult:
+        # every backend is tried in order: asusd can write what sysfs needs root for
+        return self._write(Capability.FIRMWARE_ATTRIBUTES, name, value, dry_run=dry_run,
+                           method="set_attribute", backends=list(self.backends),
+                           detail=f"set {name}={value}")
+
+    def one_shot_full_charge(self, dry_run: bool = False) -> WriteResult:
+        return self._write(Capability.BATTERY_THRESHOLD, dry_run=dry_run,
+                           method="one_shot_full_charge", detail="charge once to 100%")
 
     def cross_check(self) -> list[dict]:
         """Read every capability from every available backend and report disagreements."""

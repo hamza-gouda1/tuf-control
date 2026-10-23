@@ -8,7 +8,10 @@ from ..core import (
     CapStatus,
     FanCurve,
     FirmwareAttribute,
+    GpuAction,
     GpuMode,
+    GpuStatus,
+    KbdEffect,
     PowerLimit,
     Profile,
     Telemetry,
@@ -79,8 +82,30 @@ class Backend(ABC):
     def get_kbd_rgb(self) -> dict:
         self._no("keyboard rgb")
 
-    def get_fan_curves(self) -> dict[str, FanCurve]:
+    def get_fan_curves(self, profile: Profile | None = None) -> dict[str, FanCurve]:
+        """Curves for `profile` (None: the active profile)."""
         self._no("fan curves")
+
+    def set_fan_curve(self, profile: Profile, curve: FanCurve) -> None:
+        self._no("set fan curve")
+
+    def reset_fan_curves(self, profile: Profile) -> None:
+        self._no("reset fan curves")
+
+    def get_gpu_status(self) -> GpuStatus:
+        return GpuStatus(self.get_gpu_mode())
+
+    def set_gpu_mode(self, mode: GpuMode) -> GpuAction:
+        self._no("set gpu mode")
+
+    def set_kbd_effect(self, effect: KbdEffect) -> None:
+        self._no("set keyboard effect")
+
+    def set_attribute(self, name: str, value: int | str) -> None:
+        self._no("set firmware attribute")
+
+    def one_shot_full_charge(self) -> None:
+        self._no("one-shot full charge")
 
     def get_telemetry(self) -> Telemetry:
         self._no("telemetry")

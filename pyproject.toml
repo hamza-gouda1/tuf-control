@@ -14,13 +14,20 @@ dependencies = []
 
 [project.optional-dependencies]
 dbus = ["PyGObject"]
+gui = ["PyGObject", "pycairo"]
 dev = ["pytest", "ruff"]
 
 [project.scripts]
 tuf-control = "tuf_control.cli:main"
 
+[project.gui-scripts]
+tuf-control-gui = "tuf_control.ui.app:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"tuf_control.ui" = ["*.css"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
