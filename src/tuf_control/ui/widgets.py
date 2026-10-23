@@ -4,7 +4,7 @@ from __future__ import annotations
 import math
 import time
 
-from gi.repository import Adw, Gtk, Pango, PangoCairo
+from gi.repository import Adw, GLib, Gtk, Pango, PangoCairo
 
 from . import theme
 from .viewmodels import (
@@ -16,7 +16,7 @@ from .viewmodels import (
     smooth_values,
 )
 from ..core import FanCurve, KbdEffect
-from .viewmodels import preview_colour
+from .viewmodels import FrameGate, is_animated, preview_colour
 
 
 def label(text: str = "", css: tuple[str, ...] = (), xalign: float = 0.0, **kw) -> Gtk.Label:
@@ -340,7 +340,12 @@ def _round_rect(cr, x, y, w, h, r):
 
 
 class KeyboardPreview(Gtk.DrawingArea):
-    """Animated approximation of the hardware effect on a stylised key grid."""
+    """Animated approximation of the hardware effect on a stylised key grid.
+
+    Static effects are drawn once (on change, resize or theme switch). Animated ones are
+    redrawn from one ~15 fps timer (10 when frames are slow) that exists only while the
+    widget is mapped and the window is visible. Key geometry is cached per size and the
+    colour is computed once per frame (once per column/row for the rainbow wave)."""
 
     COLS, ROWS = 15, 5
 
@@ -352,50 +357,115 @@ class KeyboardPreview(Gtk.DrawingArea):
         self.set_content_height(132)
         self.set_hexpand(True)
         self.set_draw_func(self._draw)
-        self._tick = None
+        self.gate = FrameGate()
+        self._timer: int | None = None
+        self._timer_ms = 0
+        self._geom: tuple[tuple[int, int], list] | None = None
         self.t0 = time.monotonic()
         self.fixed_t: float | None = None
-        self.connect("map", lambda *_: self._start())
-        self.connect("unmap", lambda *_: self._stop())
+        self._root = None
+        self._root_ids: list[int] = []
+        self.connect("map", lambda *_: self._on_map())
+        self.connect("unmap", lambda *_: self._on_unmap())
+        Adw.StyleManager.get_default().connect("notify::dark", lambda *_: self.queue_draw())
 
-    def _start(self):
-        if self._tick is None and not Adw.StyleManager.get_default().get_high_contrast():
-            self._tick = self.add_tick_callback(lambda *_: (self.queue_draw(), True)[1])
+    # -- animation ------------------------------------------------------------------------
+    def _on_map(self) -> None:
+        root = self.get_root()
+        if root is not None and root is not self._root:
+            self._drop_root()
+            self._root = root
+            self._root_ids = [root.connect("notify::suspended", lambda *_: self._sync()),
+                              root.connect("notify::visible", lambda *_: self._sync())]
+        self._sync()
 
-    def _stop(self):
-        if self._tick is not None:
-            self.remove_tick_callback(self._tick)
-            self._tick = None
+    def _on_unmap(self) -> None:
+        self._drop_root()
+        self._sync()
+
+    def _drop_root(self) -> None:
+        if self._root is not None:
+            for i in self._root_ids:
+                self._root.disconnect(i)
+        self._root, self._root_ids = None, []
+
+    def _shown(self) -> bool:
+        r = self._root
+        return bool(self.get_mapped() and r is not None and r.get_visible()
+                    and not r.get_property("suspended"))
+
+    def _sync(self) -> None:
+        want = self._shown() and is_animated(self.effect) \
+            and not Adw.StyleManager.get_default().get_high_contrast()
+        if want and self._timer is None:
+            self.queue_draw()
+            self._arm()
+        elif not want and self._timer is not None:
+            GLib.source_remove(self._timer)
+            self._timer = None
+
+    def _arm(self) -> None:
+        self._timer_ms = round(self.gate.interval * 1000)
+        self._timer = GLib.timeout_add(self._timer_ms, self._on_timer)
+
+    def _on_timer(self) -> bool:
+        if self.gate.due(time.monotonic()):
+            self.queue_draw()
+        if round(self.gate.interval * 1000) != self._timer_ms:  # slow frames: 15 -> 10 fps
+            self._arm()
+            return False
+        return True
 
     def set_effect(self, effect: KbdEffect, brightness: int) -> None:
+        if effect == self.effect and brightness == self.brightness:
+            return  # dirty flag: same colours, same frame
         self.effect, self.brightness = effect, brightness
+        self.gate.wake()
         self.queue_draw()
+        self._sync()
+
+    # -- drawing ----------------------------------------------------------------------------
+    def _layout(self, w: int, h: int) -> list:
+        if self._geom is None or self._geom[0] != (w, h):
+            pad, gap = 14.0, 5.0
+            kw = (w - 2 * pad - gap * (self.COLS - 1)) / self.COLS
+            kh = (h - 2 * pad - gap * (self.ROWS - 1)) / self.ROWS
+            keys = []
+            for row in range(self.ROWS):
+                for col in range(self.COLS):
+                    x, y, ww = pad + col * (kw + gap), pad + row * (kh + gap), kw
+                    if row == self.ROWS - 1 and 4 <= col <= 9:  # space bar
+                        if col != 4:
+                            continue
+                        ww = kw * 6 + gap * 5
+                    keys.append((x, y, ww, kh, (x + ww / 2) / w, (y + kh / 2) / h))
+            self._geom = ((w, h), keys)
+        return self._geom[1]
 
     def _draw(self, _a, cr, w, h):
+        start = time.perf_counter()
         t = self.fixed_t if self.fixed_t is not None else time.monotonic() - self.t0
         dark = theme.is_dark()
         _round_rect(cr, 0, 0, w, h, 14)
         cr.set_source_rgb(*((0.07, 0.05, 0.06) if dark else (0.16, 0.12, 0.13)))
         cr.fill()
-        pad, gap = 14.0, 5.0
-        kw = (w - 2 * pad - gap * (self.COLS - 1)) / self.COLS
-        kh = (h - 2 * pad - gap * (self.ROWS - 1)) / self.ROWS
-        for row in range(self.ROWS):
-            for col in range(self.COLS):
-                x = pad + col * (kw + gap)
-                y = pad + row * (kh + gap)
-                ww = kw
-                if row == self.ROWS - 1 and 4 <= col <= 9:  # space bar
-                    if col != 4:
-                        continue
-                    ww = kw * 6 + gap * 5
-                pos = (x + ww / 2) / w
-                if self.effect.direction in (2, 3):
-                    pos = (y + kh / 2) / h
-                r, g, b = preview_colour(self.effect, t, pos, self.brightness)
-                _round_rect(cr, x, y, ww, kh, 4)
-                cr.set_source_rgb(0.12 + r * 0.88, 0.10 + g * 0.88, 0.11 + b * 0.88)
-                cr.fill_preserve()
-                cr.set_source_rgba(1, 1, 1, 0.06)
-                cr.set_line_width(1)
-                cr.stroke()
+        eff, bri = self.effect, self.brightness
+        wave = eff.mode == 3  # only the rainbow wave depends on the key position
+        vertical = eff.direction in (2, 3)
+        cache: dict[float, tuple] = {}
+        flat = None if wave else preview_colour(eff, t, 0.0, bri)
+        cr.set_line_width(1)
+        for x, y, ww, kh, px, py in self._layout(w, h):
+            if wave:
+                pos = round(py if vertical else px, 3)
+                col = cache.get(pos)
+                if col is None:
+                    col = cache[pos] = preview_colour(eff, t, pos, bri)
+            else:
+                col = flat
+            _round_rect(cr, x, y, ww, kh, 4)
+            cr.set_source_rgb(0.12 + col[0] * 0.88, 0.10 + col[1] * 0.88, 0.11 + col[2] * 0.88)
+            cr.fill_preserve()
+            cr.set_source_rgba(1, 1, 1, 0.06)
+            cr.stroke()
+        self.gate.add_cost(time.perf_counter() - start)

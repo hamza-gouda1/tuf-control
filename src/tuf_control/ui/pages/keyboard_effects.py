@@ -14,10 +14,10 @@ from ...effects.preview import EffectPreview
 from ...effects.registry import EFFECTS
 from ...effects.theme import theme_accent
 from ..tasks import run_bg
+from ..viewmodels import FrameGate
 from ..widgets import _round_rect, label
 from .base import button, info_row, pill
 
-FRAME_MS = 50
 NAMES = list(EFFECTS)
 
 
@@ -64,6 +64,12 @@ class EffectsSection(Adw.PreferencesGroup):
         self._quiet = False
         self._timer = None
         self._ticks = 0
+        self._timer_ms = 0
+        self._root = None
+        self._root_ids: list[int] = []
+        self._last_t = 0.0
+        self.gate = FrameGate()
+        self._shown_rgb = None
         self._soft_shown = False
         self._last_error: str | None = None
         self.telemetry = None
@@ -97,7 +103,7 @@ class EffectsSection(Adw.PreferencesGroup):
         self.prev_row.add_prefix(Gtk.Image.new_from_icon_name("view-reveal-symbolic"))
         self.hex = label("", ("numeric", "dim-label"), valign=Gtk.Align.CENTER)
         self.swatch = Swatch()
-        self.test_flash = button("Flash", "flat", on_click=self.preview.flash)
+        self.test_flash = button("Flash", "flat", on_click=self._flash)
         self.test_flash.set_tooltip_text("Preview a notification flash")
         for w in (self.test_flash, self.hex, self.swatch):
             self.prev_row.add_suffix(w)
@@ -111,8 +117,8 @@ class EffectsSection(Adw.PreferencesGroup):
         self.svc_row.add_suffix(self.svc_btn)
         self.add(self.svc_row)
 
-        self.connect("map", lambda *_: self._start_preview())
-        self.connect("unmap", lambda *_: self._stop_preview())
+        self.connect("map", lambda *_: self._on_map())
+        self.connect("unmap", lambda *_: self._on_unmap())
         self._picked()
 
     # -- state --------------------------------------------------------------
@@ -261,6 +267,7 @@ class EffectsSection(Adw.PreferencesGroup):
 
     def _edited(self) -> None:
         name = self.selected
+        self.gate.wake()
         self.preview.configure(name, self.values[name] if name else {},
                                {**self.notif, "enabled": self.flash.get_active()})
         self.test_flash.set_visible(self.flash.get_active() and name is not None)
@@ -272,31 +279,79 @@ class EffectsSection(Adw.PreferencesGroup):
                      == {**self._defaults(name), **self.values[name]}))
         self.apply_btn.set_sensitive(not same)
         self._frame()
+        self._sync()
 
     @staticmethod
     def _defaults(name: str) -> dict:
         return {p.key: p.default for p in EFFECTS[name].params}
 
-    def _start_preview(self) -> None:
-        if self._timer is None:
-            self._timer = GLib.timeout_add(FRAME_MS, self._frame)
+    def _flash(self) -> None:
+        self.preview.flash()
+        self.gate.wake()
+        self._sync()
 
-    def _stop_preview(self) -> None:
-        if self._timer is not None:
+    # The timer exists only while this section is mapped and its window is visible and not
+    # suspended; it runs at 15 fps (10 when slow) and backs off to 4 Hz once the colour has
+    # stopped changing.
+    def _on_map(self) -> None:
+        root = self.get_root()
+        if root is not None and root is not self._root:
+            self._drop_root()
+            self._root = root
+            self._root_ids = [root.connect("notify::suspended", lambda *_: self._sync()),
+                              root.connect("notify::visible", lambda *_: self._sync())]
+        self._sync()
+
+    def _on_unmap(self) -> None:
+        self._drop_root()
+        self._sync()
+
+    def _drop_root(self) -> None:
+        if self._root is not None:
+            for i in self._root_ids:
+                self._root.disconnect(i)
+        self._root, self._root_ids = None, []
+
+    def _sync(self) -> None:
+        r = self._root
+        shown = bool(self.get_mapped() and r is not None and r.get_visible()
+                     and not r.get_property("suspended"))
+        if shown and self._timer is None:
+            self._last_t = time.monotonic()
+            self._arm()
+        elif not shown and self._timer is not None:
             GLib.source_remove(self._timer)
             self._timer = None
 
-    def _frame(self) -> bool:
-        rgb = self.preview.tick(FRAME_MS / 1000) if self.active else None
-        self.swatch.set_rgb(rgb)
-        self.hex.set_label(rgb_to_hex(rgb).upper() if rgb else "")
+    def _arm(self) -> None:
+        self._timer_ms = round(self.gate.interval * 1000)
+        self._timer = GLib.timeout_add(self._timer_ms, self._on_timer)
+
+    def _on_timer(self) -> bool:
+        self._frame()
+        if round(self.gate.interval * 1000) != self._timer_ms:
+            self._arm()
+            return False
+        return True
+
+    def _frame(self) -> None:
+        now = time.monotonic()
+        dt, self._last_t = min(now - self._last_t, 0.5), now
+        start = time.perf_counter()
+        rgb = self.preview.tick(dt) if self.active else None
+        rgb = tuple(rgb) if rgb is not None else None
+        self.gate.observe(rgb)
+        if rgb != self._shown_rgb:  # dirty flag: touch widgets only when the colour moved
+            self._shown_rgb = rgb
+            self.swatch.set_rgb(rgb)
+            self.hex.set_label(rgb_to_hex(rgb).upper() if rgb else "")
         if self.active and rgb is not None:
-            self.page.preview.set_effect(KbdEffect(0, colour1=tuple(rgb)), self.page.brightness)
             self._soft_shown = True
+            self.page.preview.set_effect(KbdEffect(0, colour1=rgb), self.page.brightness)
         elif not self.active and self._soft_shown:
             self._soft_shown = False
             self.page.preview.set_effect(self.page.effect, self.page.brightness)
-        return True
+        self.gate.add_cost(time.perf_counter() - start)
 
     # -- actions --------------------------------------------------------------
     def apply(self) -> None:

@@ -104,6 +104,44 @@ def inner(args) -> int:
     app = TufControlApp()
     result: dict = {"renderer": args.renderer, "fake": bool(fake), "pid": os.getpid()}
 
+    def keyboard_steps(win):
+        """Keyboard page CPU: hardware effect, static software effect, animated one."""
+        from tuf_control.effects.registry import EFFECTS
+        from tuf_control.ui import widgets
+        draws = {"n": 0}
+        orig = widgets.KeyboardPreview._draw
+
+        def counted(self, *a):
+            draws["n"] += 1
+            return orig(self, *a)
+        widgets.KeyboardPreview._draw = counted
+        yield 5000
+        win.show_page("keyboard")
+        yield 4000
+        soft = win.pages["keyboard"].soft
+        names = list(EFFECTS)
+        cases = [("hardware_static", 0), ("software_static", 1 + names.index("accent")),
+                 ("software_animated", 1 + names.index("rainbow"))]
+        out = {}
+        for label_, idx in cases:
+            soft.pick.set_selected(idx)
+            yield 3000
+            c0, t0, d0 = cpu_s(), time.monotonic(), draws["n"]
+            yield int(args.idle * 1000)
+            c1, t1, d1 = cpu_s(), time.monotonic(), draws["n"]
+            out[label_] = {"cpu_pct": round(100 * (c1 - c0) / (t1 - t0), 2),
+                           "draws_per_s": round((d1 - d0) / (t1 - t0), 1)}
+        win.show_page("dashboard")
+        yield 3000
+        c0, t0, d0 = cpu_s(), time.monotonic(), draws["n"]
+        yield int(args.idle * 1000)
+        c1, t1, d1 = cpu_s(), time.monotonic(), draws["n"]
+        out["left_page"] = {"cpu_pct": round(100 * (c1 - c0) / (t1 - t0), 2),
+                            "draws_per_s": round((d1 - d0) / (t1 - t0), 1)}
+        result["keyboard"] = out
+        print(json.dumps(result, indent=1))
+        app.quit()
+
     def steps(win):
         yield 5000  # startup settles
         result["startup"] = mem()
@@ -159,7 +197,7 @@ def inner(args) -> int:
         app.quit()
 
     def on_activate(_app):
-        it = steps(app.window)
+        it = (keyboard_steps if args.keyboard else steps)(app.window)
 
         def tick():
             try:
@@ -181,6 +219,8 @@ def main() -> int:
     p.add_argument("--warmup", type=float, default=10.0)
     p.add_argument("--renderer", default="default", choices=["default", "gl", "cairo", "ngl"])
     p.add_argument("--fake", action="store_true", help="fake hardware tree instead of real")
+    p.add_argument("--keyboard", action="store_true",
+                   help="only measure the Keyboard page (use with --fake, --idle 15)")
     args = p.parse_args()
     if os.environ.get("TUF_MEASURE_CHILD"):
         return inner(args)

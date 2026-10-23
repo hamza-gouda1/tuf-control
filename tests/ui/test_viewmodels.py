@@ -195,6 +195,46 @@ class BatteryGpuKeyboardTests(unittest.TestCase):
             KbdEffect(0, colour1=(300, 0, 0)).validate()
 
 
+class FrameGateTests(unittest.TestCase):
+    def test_limits_to_fifteen_fps(self):
+        g = vm.FrameGate()
+        t, frames = 0.0, 0
+        while t < 10.0:  # polled at 240 Hz
+            frames += g.due(t)
+            t += 1 / 240
+        self.assertTrue(140 <= frames <= 152, frames)
+
+    def test_dirty_flag_and_idle_backoff(self):
+        g = vm.FrameGate(settle_frames=3)
+        self.assertTrue(g.observe((1, 2, 3)))
+        self.assertFalse(g.observe((1, 2, 3)))
+        self.assertAlmostEqual(g.interval, 1 / 15)
+        for _ in range(3):
+            g.observe((1, 2, 3))
+        self.assertAlmostEqual(g.interval, 0.25)  # settled: 4 Hz
+        self.assertTrue(g.observe((9, 9, 9)))
+        self.assertAlmostEqual(g.interval, 1 / 15)  # a change wakes it
+        g.observe((9, 9, 9))
+        g.wake()
+        self.assertTrue(g.observe((9, 9, 9)))  # forced redraw
+
+    def test_slow_frames_drop_to_ten_fps(self):
+        g = vm.FrameGate()
+        for _ in range(10):
+            g.add_cost(0.05)
+        self.assertAlmostEqual(g.interval, 0.1)
+        for _ in range(40):
+            g.add_cost(0.002)
+        self.assertAlmostEqual(g.interval, 1 / 15)
+
+    def test_only_time_dependent_effects_animate(self):
+        self.assertFalse(vm.is_animated(KbdEffect(0)))
+        self.assertTrue(all(vm.is_animated(KbdEffect(m)) for m in (1, 2, 3, 10, 12)))
+        for m in (0, 4, 5):  # modes whose preview colour ignores t
+            e = KbdEffect(m, colour1=(10, 20, 30))
+            self.assertEqual(vm.preview_colour(e, 0.0), vm.preview_colour(e, 7.3))
+
+
 def mutter_state():
     def mode(rate, cur=False, variable=False):
         props = {"is-current": cur}

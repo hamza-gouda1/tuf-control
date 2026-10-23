@@ -504,6 +504,61 @@ def preview_colour(effect: KbdEffect, t: float, x: float = 0.0,
     return tuple(c * level for c in col)  # type: ignore[return-value]
 
 
+ANIMATED_MODES = frozenset({1, 2, 3, 10, 12})  # breathe, cycle, rainbow, pulse, flash
+
+
+def is_animated(effect: KbdEffect) -> bool:
+    """False when preview_colour does not depend on time (it only needs drawing once)."""
+    return effect.mode in ANIMATED_MODES
+
+
+class FrameGate:
+    """Frame limiter and dirty flag for a live preview (no GTK, so it can be tested).
+
+    Runs at `fast_fps` (15), drops to `slow_fps` (10) when a frame costs more than
+    `slow_cost_s` on average, and backs off to `idle_hz` once `settle_frames` frames in a row
+    produced nothing new. `observe(key, cost)` is the dirty flag: it returns True only when
+    `key` differs from the last one, and any change wakes the gate back to full speed.
+    """
+
+    def __init__(self, fast_fps: float = 15.0, slow_fps: float = 10.0, idle_hz: float = 4.0,
+                 settle_frames: int = 30, slow_cost_s: float = 0.020) -> None:
+        self.fast, self.slow, self.idle = 1 / fast_fps, 1 / slow_fps, 1 / idle_hz
+        self.settle_frames, self.slow_cost = settle_frames, slow_cost_s
+        self.key: object = None
+        self.unchanged = 0
+        self.cost = 0.0
+        self.last = -1e9
+
+    @property
+    def interval(self) -> float:
+        if self.unchanged >= self.settle_frames:
+            return self.idle
+        return self.slow if self.cost > self.slow_cost else self.fast
+
+    def due(self, now: float) -> bool:
+        """True at most once per `interval`; the caller then does the frame."""
+        if now - self.last >= self.interval - 0.002:  # 2 ms of timer jitter
+            self.last = now
+            return True
+        return False
+
+    def add_cost(self, cost: float) -> None:
+        self.cost = cost if self.cost == 0.0 else self.cost * 0.8 + cost * 0.2
+
+    def observe(self, key, cost: float = 0.0) -> bool:
+        if cost:
+            self.add_cost(cost)
+        changed = key != self.key
+        self.key = key
+        self.unchanged = 0 if changed else self.unchanged + 1
+        return changed
+
+    def wake(self) -> None:
+        self.unchanged = 0
+        self.key = object()  # nothing equals it: the next observe() is a change
+
+
 # -- display -----------------------------------------------------------------------------------
 
 

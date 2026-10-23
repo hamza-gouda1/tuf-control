@@ -63,8 +63,30 @@ laptop control app. The sampler itself costs 4–6 ms per tick (all sources, one
   the last value held in between. DRM client fds are rediscovered every 10 s (a 17 ms
   `/proc/*/fd` scan); each tick reads one fdinfo per client (~1 ms).
 
-What remains: the keyboard page's live preview animates at the display rate and costs
-~60–75 % of a core while it is visible (owned by the keyboard work, not the monitor).
+### Keyboard page preview
+
+Before: while the page was visible the preview widget called `queue_draw()` from a frame-clock
+tick callback unconditionally, and the software-effect section also pushed a new `KbdEffect`
+every 50 ms: ~500 draws/s in the headless harness (the display rate) at **78-80 %** of a core,
+even for a static colour. Now (`python3 tests/ui/measure.py --fake --keyboard --idle 15
+--renderer cairo`):
+
+| Keyboard page visible | before | after |
+|---|---|---|
+| hardware effect (static) | 79.8 % (495 draws/s) | **0.9 %** (0 draws/s) |
+| software effect, static colour (Accent) | 80.3 % (499/s) | **1.0 %** (0/s) |
+| software effect, animated (Rainbow) | 77.9 % (513/s) | **4.7 %** (14.8/s) |
+
+(The Dashboard-idle baseline of the sampler is about 1 %.) What changed (`FrameGate` in
+`ui/viewmodels.py`, `KeyboardPreview` in `ui/widgets.py`, `ui/pages/keyboard_effects.py`):
+static effects draw once (on change, resize or theme switch); animated ones draw from a
+`GLib` timer at 15 fps (10 when the average draw takes over 20 ms) instead of the frame clock;
+`set_effect` is a no-op when the effect and brightness are unchanged; key geometry is cached
+per size and the colour is computed once per frame (per column or row for the rainbow wave);
+the software preview timer runs at 15 fps and backs off to 4 Hz after 30 frames with an
+unchanged colour, touching the swatch, hex label and keyboard widget only when the colour
+moved; both timers are removed when the page is unmapped or the window is hidden or suspended.
+
 Running the sampler in `tuf-controld` instead of the GUI would not save memory (the GUI
 still needs GTK) and would make the daemon wake every second even with no window open, so
 the sampler stays in the GUI and stops with it.
