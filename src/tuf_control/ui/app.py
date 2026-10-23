@@ -26,6 +26,8 @@ def _icon_dirs() -> list[Path]:
 
 class TufControlApp(Adw.Application):
     def __init__(self, controller: Controller | None = None) -> None:
+        from .lean import choose_renderer
+        choose_renderer()  # before the display opens: Cairo unless asked otherwise
         super().__init__(application_id=APP_ID, flags=Gio.ApplicationFlags.DEFAULT_FLAGS)
         self.controller = controller
         self.window = None

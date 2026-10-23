@@ -16,12 +16,16 @@ otherwise the system preference is followed.
 | File | Role |
 | --- | --- |
 | `app.py` | `Adw.Application` (`io.github.hamzagouda.TufControl`), styles, icon path, `main()` |
-| `window.py` | `Adw.NavigationSplitView` sidebar + `Gtk.Stack` pages, header profile chip and battery indicator, toasts, confirm dialogs, 1 s telemetry poll |
+| `window.py` | `Adw.NavigationSplitView` sidebar (Monitor / Control sections) + `Gtk.Stack`; pages imported and built on first visit (`LazyPages`), hidden monitor pages destroyed after 30 s; header profile chip and battery indicator, toasts, confirm dialogs |
+| `live.py` | `LiveHub`: the one telemetry timer (1 Hz, 2 Hz on a detail page, stopped while the window is hidden) over `tuf_control.telemetry.Sampler`; process walk only while Processes is visible |
+| `charts.py`, `chartmath.py` | Cairo `Chart` (axes, grid, time axis, hover readout, stacked areas), `CoreGrid`, `CompositionBar`, `Meter`; display-free windowing, downsampling and monotone curves |
+| `lean.py` | Cairo renderer by default (`TUF_CONTROL_RENDERER=gl` to change), `malloc_trim`; see [PERFORMANCE.md](PERFORMANCE.md) |
 | `viewmodels.py` | Display-free logic: formatting, `History`, power-limit view, `FanCurveModel` (clamped drags), `CurveGeometry`, GPU/keyboard/battery helpers, Mutter state parsing |
 | `widgets.py` | `Sparkline`, `Tile`, `FanCurveCanvas`, `KeyboardPreview` (Cairo) |
 | `display_config.py` | `org.gnome.Mutter.DisplayConfig` client (async Gio) and an in-memory fake |
 | `tasks.py` | `run_bg()`: worker pool (`backends.pool.run_async`) -> result via `GLib.idle_add` |
 | `theme.py`, `style.css`, `style-dark.css` | Wine palette, Geist Mono detection, dark overlay |
+| `monitor.css` | Monitor pages (cards, stat cells, process table); named colours only |
 | `pages/` | One module per page |
 
 `data/`: desktop file, metainfo, scalable app icon.
@@ -39,12 +43,30 @@ otherwise the system preference is followed.
 - Every write ends in a toast with the result or the real error (`humanize_error`).
 - With `TUF_CONTROL_FAKE_ROOT` set, only the fake backend and a fake display config exist.
   Dialogs and toasts say so.
-- The dGPU is never woken to read sensors: telemetry skips `nvidia-smi` unless the dGPU's
-  runtime PM state is `active`.
+- Popovers, dropdowns and menus are one rounded surface: `ui/style-popover.css` is loaded
+  above user stylesheets (`STYLE_PROVIDER_PRIORITY_USER + 1`) and only clears the popover
+  node itself, because a user `gtk.css` rule like `window, .background { background-color:
+  … }` also matches `popover.background` and filled the whole popup surface (shadow margin
+  and arrow area) as a dark rectangle behind the list. Check with `--user-theme --popovers`.
+- The dGPU is never woken to read sensors: NVML (or `nvidia-smi`) is only used while the
+  dGPU's runtime PM state is `active`, and released when it idles so it can sleep again.
+- Monitor values come from `tuf_control.telemetry` (/proc, /sys, NVML; no dependencies).
+  A reading that is missing is a gap in the graph, never a zero; what needs root (RAPL
+  package power, per-process network) says so.
 
 ## Pages
 
-Dashboard (CPU, GPU, fans, battery tiles with 120 s graphs), Performance (profile cards,
+Monitor: Dashboard (live cards with 120 s graphs for CPU, memory, NVIDIA and Intel GPU,
+CPU fan, GPU fan, storage, network, battery; a card opens its page), Processes (apps grouped
+by systemd scope or all processes; CPU, private memory, disk I/O, GPU, VRAM; sort, filter,
+End task with SIGTERM then an offered SIGKILL), Processor (stacked user/system/iowait, 24-CPU
+grid with P/E cores, clock, temperatures, load, governor/EPP), Memory (in use / cache stack,
+composition bar, swap, zswap, pressure), NVIDIA graphics and Intel graphics (utilisation,
+clocks, temperature, power, VRAM, engines, processes; sleeping state), Fans & temps (both fans,
+all temperature sensors, link to Fan curves), Storage (per-disk rates, busy, temperature,
+file systems), Network (per-interface rates; virtual interfaces hidden by default).
+
+Control: Performance (profile cards,
 power limits), Fans (8-point curve per fan and profile; drag or arrow keys; Apply / Revert /
 Factory), Graphics (Integrated / Hybrid / Ultimate via supergfxd; pending-restart banner),
 Display (refresh rate, panel overdrive, VRR note), Battery (charge limit 20–100 with 60/80/100
@@ -66,8 +88,10 @@ D-Bus names and signatures were verified by read-only introspection of asusd 6.3
 supergfxd: `SetFanCurve(u, (s, (yyyyyyyy), (yyyyyyyy), b))`, `SetCurvesToDefaults(u)` (there is no
 `ResetProfileCurves`), `OneShotFullCharge()`, aura `LedModeData` is `(uu(yyy)(yyy)ss)` with speed
 and direction as enum *names* ("Low"/"Med"/"High", "Right"/"Left"/"Up"/"Down"), supergfxd
-`SetMode(u) -> u`, `PendingMode`, `PendingUserAction`, `Power`, `Supported`. The write calls
-themselves have only been tested against a recording transport, never against hardware.
+`SetMode(u) -> u`, `PendingMode`, `PendingUserAction`, `Power`, `Supported`. The keyboard
+`LedModeData`/`Brightness` writes were run against asusd 6.3.5 on the FX608JHR (byte-identical
+to `asusctl aura effect`, read back after each Apply); the other write calls have only been
+tested against a recording transport.
 
 ## Tests and screenshots
 
@@ -77,6 +101,9 @@ themselves have only been tested against a recording transport, never against ha
     python3 tests/ui/screenshots.py --size 380x820 --tag narrow --schemes dark
     python3 tests/ui/screenshots.py --ppt --pages performance --tag ppt
     python3 tests/ui/screenshots.py --automation --pages automation   # automation-*, keyboard-effects-*
+    python3 tests/ui/measure.py --idle 60       # RSS/PSS and idle CPU, real mode, headless
+    PYTHONPATH=src python3 tests/hardware/validate_telemetry.py   # vs top, free, sensors, ...
+    python3 tests/ui/screenshots.py --pages keyboard --popovers  # dropdowns open, colour chooser
 
 The script starts a private `dbus-run-session` with `mutter --headless --virtual-monitor`,
 runs the app on that Wayland socket against a fresh fake tree (sensor values animated for

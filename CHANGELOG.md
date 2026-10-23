@@ -5,6 +5,15 @@ All notable changes to this project. Format follows Keep a Changelog; versions f
 ## [Unreleased]
 
 ### Added
+- System monitor: `tuf_control.telemetry` (/proc, /sys, NVML via ctypes; one sampler, ring
+  buffers), a new Dashboard with live cards, and Processes, Processor, Memory, NVIDIA graphics,
+  Intel graphics, Fans & temps, Storage and Network pages. Pages build on first visit; Cairo
+  renderer by default. 107 MB RSS / 1.2 % CPU idle on the Dashboard (docs/PERFORMANCE.md).
+- `tests/hardware/validate_telemetry.py` (read-only cross-check against top, free, sensors,
+  nvidia-smi, upower, sysfs) and `tests/ui/measure.py` (RSS and idle CPU, headless).
+- `install.sh`: GNOME custom shortcut "TUF Control" (XF86Launch3, the Armoury Crate key) that opens
+  or raises the app; appended to existing custom shortcuts, removed alone by `--uninstall`;
+  `--no-hotkey`, `--hotkey=KEYSYM`.
 - GNOME Shell 46 Quick Settings extension `tuf-control-quick@hamza-gouda`: Performance toggle
   with a Quiet / Balanced / Performance submenu, asusd with power-profiles-daemon fallback,
   GPU mode and charge limit readouts, "Open TUF Control".

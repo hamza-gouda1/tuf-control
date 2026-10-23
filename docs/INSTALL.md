@@ -24,6 +24,24 @@ GNOME Shell 46 only. On Wayland a new extension appears after you log out and in
 `xyz.ljones.Asusd` and falls back to power-profiles-daemon. It never sets colours: it follows the
 shell theme.
 
+## Armoury Crate key shortcut
+
+`./install.sh` also adds a GNOME custom shortcut named "TUF Control" that runs
+`~/.local/bin/tuf-control-gui` on **XF86Launch3**. The app has a fixed application id, so
+pressing the key again raises the running window instead of starting a second copy. Your other
+custom shortcuts are kept: the entry `.../custom-keybindings/tuf-control/` is appended to the list,
+the previous list is saved to `~/.local/state/tuf-control/backup/custom-keybindings.list`, and
+`--uninstall` removes only our entry. If another custom shortcut already uses the key, ours is not
+added. Options: `--no-hotkey` skips it, `--hotkey=XF86Launch1` picks another key.
+
+Why XF86Launch3: the kernel's asus-nb-wmi keymap sends WMI code 0x38 ("Armoury Crate") as KEY_PROG3
+(202) from the input device "Asus WMI hotkeys"; XKB maps evdev 202 to keycode 210, `<I210>`, which
+`xkb/symbols/inet` defines as XF86Launch3. Check it on your machine: Settings > Keyboard > Keyboard
+Shortcuts > add a custom shortcut and press the key (it shows the captured name), or run `xev` from
+a terminal, keep its window focused and press the key (look for `keycode 210 ... XF86Launch3`).
+If it shows something else (for example XF86Launch1, KEY_PROG1 from WMI 0x86/0x8A, or XF86Launch4),
+run `./install.sh --hotkey=<that name>`. Keysyms already bound by GNOME itself are not used.
+
 ## Root-only writes (optional, polkit)
 
 Most settings go through `asusd`, which already holds the privileges. Direct sysfs writes

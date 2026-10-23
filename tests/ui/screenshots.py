@@ -236,6 +236,56 @@ def automation_shots(win, out: Path, scheme: str, suffix: str, render):
     print("automation: rule saved OK")
 
 
+def _find(widget, cls):
+    """First mapped descendant of `widget` that is a `cls` (popovers live under their row)."""
+    child = widget.get_first_child()
+    while child is not None:
+        if isinstance(child, cls) and child.get_mapped():
+            return child
+        hit = _find(child, cls)
+        if hit is not None:
+            return hit
+        child = child.get_next_sibling()
+    return None
+
+
+def popover_shots(win, out: Path, scheme: str, suffix: str, render, render_over):
+    """Keyboard page with its dropdowns open, and the colour chooser."""
+    from gi.repository import Gtk
+    from tuf_control.effects.registry import EFFECTS
+    kb = win.pages["keyboard"]
+    win.show_page("keyboard")
+    kb.preview.fixed_t = 1.3
+    yield 900
+    for row, tag in ((kb.mode_row, "keyboard-dropdown"),
+                     (kb.soft.pick, "keyboard-effects-dropdown")):
+        if tag == "keyboard-effects-dropdown":
+            _scroll_bottom(kb.prefs)
+            yield 300
+        row.activate()
+        yield 600
+        pop = _find(row, Gtk.Popover)
+        if pop is None:
+            raise AssertionError(f"{tag}: no popover opened")
+        render_over(win, pop, out / f"{tag}-{scheme}{suffix}.png")
+        pop.popdown()
+        yield 300
+    kb.soft.pick.set_selected(list(EFFECTS).index("spectrum") + 1)
+    yield 600
+    _scroll_bottom(kb.prefs)
+    yield 300
+    render(win, out / f"keyboard-effects-spectrum-{scheme}{suffix}.png")
+    kb.c1.activate()
+    yield 1200
+    dlg = next((w for w in Gtk.Window.list_toplevels()
+                if w is not win and isinstance(w, Gtk.Window) and w.get_mapped()), None)
+    if dlg is None:
+        raise AssertionError("colour chooser did not open")
+    render(dlg, out / f"keyboard-colour-{scheme}{suffix}.png")
+    dlg.close()
+    yield 300
+
+
 def inner(args) -> int:
     import gi
     gi.require_version("Gtk", "4.0")
@@ -260,7 +310,6 @@ def inner(args) -> int:
     out.mkdir(parents=True, exist_ok=True)
     w, h = (int(x) for x in args.size.split("x"))
 
-    from tuf_control.core import Capability
     from tuf_control.ui.app import TufControlApp
 
     app = TufControlApp()
@@ -282,15 +331,51 @@ def inner(args) -> int:
             renderer.unrealize()
         print(f"wrote {path} ({ww}x{hh})")
 
+    def render_over(win, pop, path: Path) -> None:
+        """The window with an open popover composited where the compositor put it."""
+        ww, hh = win.get_width(), win.get_height()
+        surf = pop.get_surface()
+        px, py = surf.get_position_x(), surf.get_position_y()
+        ptx, pty = pop.get_surface_transform()
+        wtx, wty = win.get_surface_transform()
+        x, y = px + ptx - wtx, py + pty - wty
+        snap = Gtk.Snapshot()
+        bg = win.get_style_context().lookup_color("window_bg_color")[1]
+        snap.append_color(bg, Graphene.Rect().init(0, 0, ww, hh))
+        Gtk.WidgetPaintable(widget=win).snapshot(snap, ww, hh)
+        snap.save()
+        snap.translate(Graphene.Point().init(x, y))
+        Gtk.WidgetPaintable(widget=pop).snapshot(snap, pop.get_width(), pop.get_height())
+        snap.restore()
+        renderer = Gsk.CairoRenderer.new()
+        renderer.realize_for_display(win.get_display())
+        try:
+            renderer.render_texture(snap.to_node(),
+                                    Graphene.Rect().init(0, 0, ww, hh)).save_to_png(str(path))
+        finally:
+            renderer.unrealize()
+        print(f"wrote {path} (popover at {x:.0f},{y:.0f} {pop.get_width()}x{pop.get_height()})")
+
     def steps(win):
-        dash = win.pages["dashboard"]
-        now = time.monotonic()
-        for hist in dash.h.values():  # drop samples the window's own poll already took
-            hist._data.clear()
-        for i in range(120):  # two minutes of history from the simulated tree
+        # telemetry: stop the live timer and replay two minutes of the fake world on a
+        # virtual clock (1 Hz), so every graph has the same deterministic history
+        hub = win.hub
+        hub.hold = True
+        hub.stop()
+        hub.store.clear()
+        clock = {"t": time.monotonic() - 125.0}
+        hub.procs_wanted = True
+        for i in range(120):
             simulate(root, i)
-            t = win.ctl.read(Capability.TELEMETRY)[0]
-            dash.ingest(t, now - 120 + i + 1)
+            clock["t"] += 1.0
+            hub.collect_now(clock["t"])
+        hub.procs_wanted = False
+
+        def tick(n=1):
+            for _ in range(n):
+                clock["t"] += 1.0
+                hub.collect_now(clock["t"], notify=True)
+        tick()
         yield 600
         suffix = f"-{args.tag}" if args.tag else ""
         for key in [p for p in args.pages.split(",") if p in win.pages] or (
@@ -298,7 +383,15 @@ def inner(args) -> int:
             win.show_page(key)
             if key == "keyboard":
                 win.pages["keyboard"].preview.fixed_t = 1.3
+            tick(3 if key == "processes" else 1)
             yield 700
+            if key == "processes":  # open the busiest app and select its first process
+                pp = win.pages["processes"]
+                row = pp.tree.get_row(0)
+                if row is not None:
+                    row.set_expanded(True)
+                    pp.sel.set_selected(1)
+                yield 300
             if key == "fans":
                 c = win.pages["fans"].canvas
                 c.active = 4
@@ -318,6 +411,8 @@ def inner(args) -> int:
             win.last_dialog.force_close()
             page.refresh()
             yield 300
+        if args.popovers:
+            yield from popover_shots(win, out, scheme, suffix, render, render_over)
         if args.automation:
             yield from automation_shots(win, out, scheme, suffix, render)
         if args.exercise:
@@ -376,6 +471,8 @@ def main() -> int:
     p.add_argument("--exercise", action="store_true",
                    help="drive profile/fan/GPU/keyboard/battery writes against the fake tree")
     p.add_argument("--user-theme", action="store_true", help="keep ~/.config/gtk-4.0 styles")
+    p.add_argument("--popovers", action="store_true",
+                   help="keyboard page with its dropdowns open, and the colour chooser")
     p.add_argument("--automation", action="store_true",
                    help="run a demo tuf-controld on the fake tree; capture the Automation "
                         "page, rule dialogs and keyboard software effects")

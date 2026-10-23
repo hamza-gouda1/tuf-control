@@ -17,6 +17,11 @@
    (rules) and `tuf_control.effects` (keyboard software effects). Both write only through the
    `Controller`; see [AUTOMATION.md](AUTOMATION.md) and [EFFECTS.md](EFFECTS.md).
 
+6. `tuf_control.telemetry`: GTK-free system monitor sources (/proc, /sys, NVML via ctypes),
+   one `Sampler`, preallocated ring buffers (`Store`), the process walker and a fake tree for
+   development. The GUI drives it from one timer (`ui/live.py`); see
+   [PERFORMANCE.md](PERFORMANCE.md).
+
 ## Backend order
 
 D-Bus, then sysfs, then CLI. A capability is served by the first backend whose probe

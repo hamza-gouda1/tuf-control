@@ -55,6 +55,13 @@ class Styles:
         self.dark.load_from_path(str(HERE / "style-dark.css"))
         prio = Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
         Gtk.StyleContext.add_provider_for_display(display, self.base, prio)
+        # popover surface fix: must outrank ~/.config/gtk-4.0/gtk.css (see the file)
+        self.popover = Gtk.CssProvider()
+        self.popover.load_from_path(str(HERE / "style-popover.css"))
+        self.popover_dark = Gtk.CssProvider()
+        self.popover_dark.load_from_path(str(HERE / "style-popover-dark.css"))
+        self._pop_prio = Gtk.STYLE_PROVIDER_PRIORITY_USER + 1
+        Gtk.StyleContext.add_provider_for_display(display, self.popover, self._pop_prio)
         self._dark_on = False
         self._display, self._prio = display, prio
         sm = Adw.StyleManager.get_default()
@@ -65,6 +72,9 @@ class Styles:
         want = is_dark()
         if want and not self._dark_on:
             Gtk.StyleContext.add_provider_for_display(self._display, self.dark, self._prio + 1)
+            Gtk.StyleContext.add_provider_for_display(self._display, self.popover_dark,
+                                                      self._pop_prio + 1)
         elif not want and self._dark_on:
             Gtk.StyleContext.remove_provider_for_display(self._display, self.dark)
+            Gtk.StyleContext.remove_provider_for_display(self._display, self.popover_dark)
         self._dark_on = want

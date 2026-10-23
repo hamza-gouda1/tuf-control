@@ -1,0 +1,9 @@
+pos:	0
+drm-driver:	xe
+drm-client-id:	7
+drm-pdev:	0000:00:02.0
+drm-cycles-rcs:	5000
+drm-total-cycles-rcs:	100000
+drm-engine-capacity-ccs:	2
+drm-cycles-ccs:	0
+drm-total-cycles-ccs:	100000

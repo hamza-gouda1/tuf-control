@@ -18,7 +18,11 @@ in a GTK 4 / Libadwaita interface, a CLI, and a GNOME Quick Settings toggle.
 - **Battery**: charge limit 20-100 %, one-shot full charge, health.
 - **Keyboard**: brightness and hardware effects with a live preview.
 - **Display**: refresh rate (with Undo), panel overdrive.
-- **Dashboard**: CPU, GPU, fans and battery with 2-minute graphs. The dGPU is never woken to read sensors.
+- **Monitor**: a dashboard of live cards and detail pages for processes/apps (with End task),
+  per-core CPU, memory, both GPUs, both fans and temperatures, storage and network. About half
+  of Mission Center's memory (107 MB vs ~210 MB), checked against `top`, `free`, `sensors`,
+  `nvidia-smi` and `upower` ([PERFORMANCE.md](docs/PERFORMANCE.md)). The dGPU is never woken
+  to read sensors.
 - **CLI**: `tuf-control status | profile | limit | battery ...`, `--json`, `--dry-run` on every write.
 - **Quick Settings**: a "Performance" toggle with a profile submenu, GPU mode and charge limit
   readouts. Follows the shell theme.
@@ -71,6 +75,9 @@ drop-in replacement. "Partial" means present but narrower than the original.
 
 See [docs/INSTALL.md](docs/INSTALL.md). User-level, no root, no downloads. The optional polkit
 helper is printed with `./install.sh --system` and never run for you.
+
+The installer also binds the Armoury Crate key (XF86Launch3) to open or raise TUF Control as a GNOME
+custom shortcut; skip it with `--no-hotkey`, pick another key with `--hotkey=KEYSYM`.
 
 ## Usage
 

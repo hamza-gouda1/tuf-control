@@ -1,29 +1,75 @@
 from __future__ import annotations
 
+import importlib
 import os
+from collections.abc import Iterator, Mapping
 
 from gi.repository import Adw, Gio, GLib, Gtk
 
 from ..controller import FAKE_ROOT_ENV
-from ..core import Capability, Profile
+from ..core import Capability, Profile, Telemetry
+from .live import LiveHub
 from .pages.base import Page
-from .pages.battery import BatteryPage
-from .pages.dashboard import DashboardPage
-from .pages.display import DisplayPage
-from .pages.fans import FansPage
-from .pages.gpu import GpuPage
-from .pages.automation import AutomationPage
-from .pages.keyboard import KeyboardPage
-from .pages.misc import AboutPage
-from .pages.performance import PerformancePage
 from .tasks import run_bg
-from .viewmodels import PAGES, PROFILE_INFO, PROFILE_ORDER, battery_icon, humanize_error, \
+from .viewmodels import PROFILE_INFO, PROFILE_ORDER, battery_icon, humanize_error, \
     power_state_text
 from .widgets import label
 
-POLL_MS = 1000
-PAGE_CLASSES = [DashboardPage, PerformancePage, FansPage, GpuPage, DisplayPage, BatteryPage,
-                KeyboardPage, AutomationPage, AboutPage]
+PARK_AFTER_S = 30  # a hidden monitor detail page is destroyed after this long
+PROFILE_EVERY = 2  # ticks between profile reads (the header chip follows outside changes)
+
+# (key, sidebar title, icon, module, class); pages are imported and built on first visit
+MONITOR = [
+    ("dashboard", "Dashboard", "view-grid-symbolic", "dashboard", "DashboardPage"),
+    ("processes", "Processes", "view-list-bullet-symbolic", "processes", "ProcessesPage"),
+    ("cpu", "Processor", "computer-symbolic", "cpu", "CpuPage"),
+    ("memory", "Memory", "media-flash-symbolic", "memory", "MemoryPage"),
+    ("dgpu", "NVIDIA graphics", "applications-graphics-symbolic", "gpu_monitor",
+     "NvidiaGpuPage"),
+    ("igpu", "Intel graphics", "video-display-symbolic", "gpu_monitor", "IntelGpuPage"),
+    ("fanmon", "Fans & temps", "weather-windy-symbolic", "fanmon", "FanMonitorPage"),
+    ("storage", "Storage", "drive-harddisk-solidstate-symbolic", "storage", "StoragePage"),
+    ("network", "Network", "network-transmit-receive-symbolic", "network", "NetworkPage"),
+]
+CONTROL = [
+    ("performance", "Performance", "power-profile-performance-symbolic", "performance",
+     "PerformancePage"),
+    ("fans", "Fan curves", "document-edit-symbolic", "fans", "FansPage"),
+    ("gpu", "GPU mode", "application-x-firmware-symbolic", "gpu", "GpuPage"),
+    ("display", "Display", "preferences-desktop-display-symbolic", "display", "DisplayPage"),
+    ("battery", "Battery", "battery-level-80-symbolic", "battery", "BatteryPage"),
+    ("keyboard", "Keyboard", "input-keyboard-symbolic", "keyboard", "KeyboardPage"),
+    ("automation", "Automation", "media-playlist-repeat-symbolic", "automation",
+     "AutomationPage"),
+    ("about", "About", "help-about-symbolic", "misc", "AboutPage"),
+]
+NAV = [("Monitor", MONITOR), ("Control", CONTROL)]
+ENTRIES = {e[0]: e for _s, items in NAV for e in items}
+
+
+class LazyPages(Mapping):
+    """win.pages[key] builds the page on first access; iteration lists every key."""
+
+    def __init__(self, win) -> None:
+        self.win = win
+        self.built: dict[str, Page] = {}
+
+    def __getitem__(self, key: str) -> Page:
+        page = self.built.get(key)
+        if page is None:
+            if key not in ENTRIES:
+                raise KeyError(key)
+            page = self.win._build(key)
+        return page
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(ENTRIES)
+
+    def __len__(self) -> int:
+        return len(ENTRIES)
+
+    def get_built(self, key: str) -> Page | None:
+        return self.built.get(key)
 
 
 class MainWindow(Adw.ApplicationWindow):
@@ -35,8 +81,12 @@ class MainWindow(Adw.ApplicationWindow):
         self.caps: dict | None = None
         self.profile: Profile | None = None
         self.fake = bool(os.environ.get(FAKE_ROOT_ENV))
-        self._polling = False
         self._profile_busy = False
+        self._profile_reading = False
+        self.current: str | None = None
+        self.hub = LiveHub(os.environ.get(FAKE_ROOT_ENV) or None)
+        self.hub.listeners.append(self._on_sample)
+        _load_monitor_css()
 
         self.toasts = Adw.ToastOverlay()
         self.split = Adw.NavigationSplitView(min_sidebar_width=210, max_sidebar_width=250,
@@ -47,14 +97,19 @@ class MainWindow(Adw.ApplicationWindow):
         # sidebar
         self.list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.SINGLE)
         self.list.add_css_class("navigation-sidebar")
-        for key, title, icon in PAGES:
-            row = Gtk.ListBoxRow()
-            row.key = key
-            box = Gtk.Box(spacing=12)
-            box.append(Gtk.Image.new_from_icon_name(icon))
-            box.append(label(title))
-            row.set_child(box)
-            self.list.append(row)
+        self.rows: dict[str, Gtk.ListBoxRow] = {}
+        for section, items in NAV:
+            for i, (key, title, icon, _m, _c) in enumerate(items):
+                row = Gtk.ListBoxRow()
+                row.key = key
+                row.section = section if i == 0 else None
+                box = Gtk.Box(spacing=12)
+                box.append(Gtk.Image.new_from_icon_name(icon))
+                box.append(label(title))
+                row.set_child(box)
+                self.list.append(row)
+                self.rows[key] = row
+        self.list.set_header_func(self._row_header)
         self.list.connect("row-selected", self._row_selected)
         self.list.connect("row-activated", lambda *_: self.split.set_show_content(True))
         side_tv = Adw.ToolbarView()
@@ -79,11 +134,7 @@ class MainWindow(Adw.ApplicationWindow):
         # content
         self.stack = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE,
                                transition_duration=140)
-        self.pages: dict[str, Page] = {}
-        for cls in PAGE_CLASSES:
-            page = cls(self)
-            self.pages[cls.key] = page
-            self.stack.add_named(page, cls.key)
+        self.pages = LazyPages(self)
         self.content_tv = Adw.ToolbarView()
         head = Adw.HeaderBar()
         self.title = Adw.WindowTitle(title="Dashboard")
@@ -98,19 +149,168 @@ class MainWindow(Adw.ApplicationWindow):
         bp = Adw.Breakpoint.new(Adw.BreakpointCondition.parse("max-width: 720sp"))
         bp.add_setter(self.split, "collapsed", True)
         self.add_breakpoint(bp)
-        tight = Adw.Breakpoint.new(Adw.BreakpointCondition.parse("max-width: 460sp"))
-        tight.add_setter(self.split, "collapsed", True)
-        tight.add_setter(self.pw_label, "visible", False)
-        tight.add_setter(self.chip_label, "visible", False)
-        tight.add_setter(self.pages["performance"].cards, "orientation",
-                         Gtk.Orientation.VERTICAL)
-        self.add_breakpoint(tight)
+        self.tight = Adw.Breakpoint.new(Adw.BreakpointCondition.parse("max-width: 460sp"))
+        self.tight.add_setter(self.split, "collapsed", True)
+        self.tight.add_setter(self.pw_label, "visible", False)
+        self.tight.add_setter(self.chip_label, "visible", False)
+        self.add_breakpoint(self.tight)
 
-        self.list.select_row(self.list.get_row_at_index(0))
-        self._load_caps()
-        self._poll()
-        self._timer = GLib.timeout_add(POLL_MS, self._poll)
+        self.list.select_row(self.rows["dashboard"])
+        self._load_caps()  # reads the profile when done (the controller probes once)
         self.connect("close-request", self._on_close)
+        self.connect("notify::suspended", lambda *_: self._sync_running())
+        self.connect("notify::visible", lambda *_: self._sync_running())
+        self.connect("map", lambda *_: self._sync_running())
+        self.connect("unmap", lambda *_: self._sync_running())
+        self.hub.start()
+
+    # -- pages ------------------------------------------------------------------------
+    def _build(self, key: str) -> Page:
+        _k, _title, _icon, mod, cls = ENTRIES[key]
+        module = importlib.import_module(f".pages.{mod}", __package__)
+        page = getattr(module, cls)(self)
+        self.pages.built[key] = page
+        self.stack.add_named(page, key)
+        if key == "performance":
+            self.tight.add_setter(page.cards, "orientation", Gtk.Orientation.VERTICAL)
+            if self.profile is not None:
+                page.set_profile(self.profile)
+        elif key == "fans" and self.profile is not None:
+            page.on_profile(self.profile)
+        return page
+
+    def _park(self, key: str) -> bool:
+        """Destroy a monitor page nobody is looking at; it is rebuilt (quickly) on return.
+        The history lives in the shared store, so nothing is lost."""
+        page = self.pages.get_built(key)
+        if page is not None and key != self.current:
+            self.stack.remove(page)
+            del self.pages.built[key]
+            GLib.timeout_add_seconds(1, self._trim)
+        return GLib.SOURCE_REMOVE
+
+    @staticmethod
+    def _trim() -> bool:
+        import gc
+
+        from .lean import trim
+        gc.collect()
+        trim()
+        return GLib.SOURCE_REMOVE
+
+    def _row_header(self, row, _before) -> None:
+        if getattr(row, "section", None):
+            if row.get_header() is None:
+                h = label(row.section.upper(), ("sidebar-section",))
+                row.set_header(h)
+        else:
+            row.set_header(None)
+
+    def _row_selected(self, _lb, row) -> None:
+        if row is None:
+            return
+        old = self.pages.get_built(self.current) if self.current else None
+        page = self.pages[row.key]
+        if old is not None and old is not page:
+            if hasattr(old, "on_hidden"):
+                old.on_hidden()
+            if getattr(old, "is_monitor_page", False) and old.key != "dashboard":
+                GLib.timeout_add_seconds(PARK_AFTER_S, self._park, old.key)
+            GLib.timeout_add_seconds(2, self._trim)
+        self.current = row.key
+        self.stack.set_visible_child_name(row.key)
+        self.title.set_title(page.title)
+        self.content_page.set_title(page.title)
+        live = getattr(page, "is_monitor_page", False)
+        self.hub.set_interval(getattr(page, "rate_s", 1.0) if live else 1.0)
+        if self.caps is not None or live:
+            page.on_shown()
+
+    def show_page(self, key: str) -> None:
+        row = self.rows.get(key)
+        if row is not None:
+            self.list.select_row(row)
+            self.split.set_show_content(True)
+
+    # -- running state -------------------------------------------------------------------
+    def _sync_running(self) -> None:
+        """Sample only while the window can be seen."""
+        visible = self.get_visible() and self.get_mapped() and not self.get_property("suspended")
+        if visible and not self.hub.running:
+            self.hub.start()
+        elif not visible and self.hub.running:
+            self.hub.stop()
+
+    # -- data --------------------------------------------------------------------------------
+    def _load_caps(self) -> None:
+        def done(caps):
+            self.caps = caps
+            self._read_profile()
+            for page in self.pages.built.values():
+                if page.loaded:
+                    page.refresh()
+            if self.current:
+                self.pages[self.current].on_shown()
+            if not caps["profile"]["available"]:
+                self.chip.set_sensitive(False)
+                self.chip_label.set_label("Profile unavailable")
+
+        run_bg(self.ctl.capabilities, done=done, error=self.toast_error)
+
+    def _read_profile(self) -> None:
+        if self._profile_reading:
+            return
+        self._profile_reading = True
+
+        def done(res):
+            self._profile_reading = False
+            if res is not None and not self._profile_busy:
+                self.set_profile_state(res)
+
+        def read():
+            try:
+                return self.ctl.read(Capability.PROFILE)[0]
+            except Exception:  # profile is optional for the header
+                return None
+
+        run_bg(read, done=done, error=lambda e: setattr(self, "_profile_reading", False))
+
+    def telemetry(self) -> Telemetry:
+        """The old Telemetry model, built from the shared sampler (pages still use it)."""
+        st, info = self.hub.store, self.hub.info
+        b = info.get("battery") or {}
+        dg = info.get("dgpu") or {}
+        awake = dg.get("state") == "awake"
+        fans = {}
+        for key, lab in (info.get("sensors") or {}).get("fans", []):
+            v = st.last(f"fan.{key}")
+            if v is not None:
+                fans[lab] = int(v)
+        return Telemetry(
+            cpu_temp_c=st.last("temp.cpu"), fan_rpm=fans,
+            gpu_temp_c=st.last("dgpu.temp") if awake else None,
+            gpu_power_w=st.last("dgpu.power") if awake else None,
+            gpu_util_pct=st.last("dgpu.util") if awake else None,
+            battery_power_w=st.last("bat.power"), battery_status=b.get("status"),
+            battery_percent=b.get("percent"), profile=self.profile,
+            cpu_power_w=st.last("power.cpu"), gpu_runtime=dg.get("runtime"))
+
+    def _on_sample(self, hub) -> None:
+        if hub.ticks % PROFILE_EVERY == 0 and self.caps is not None:
+            self._read_profile()
+        t = self.telemetry()
+        self.on_telemetry(t)
+        if self.current:
+            page = self.pages.get_built(self.current)
+            if page is not None and getattr(page, "is_monitor_page", False) and page.loaded:
+                page.on_sample(hub)
+
+    def on_telemetry(self, t) -> None:
+        self.pw_icon.set_from_icon_name(battery_icon(t.battery_percent, t.battery_status))
+        self.pw_label.set_label(power_state_text(t.battery_status, t.battery_percent))
+        self.pw_box.set_tooltip_text(t.battery_status or "On AC power")
+        for page in self.pages.built.values():
+            page.on_telemetry(t)
 
     # -- header widgets ---------------------------------------------------------------------
     def _profile_chip(self) -> Gtk.Widget:
@@ -147,62 +347,6 @@ class MainWindow(Adw.ApplicationWindow):
         self.pw_box = box
         return box
 
-    # -- navigation --------------------------------------------------------------------------
-    def _row_selected(self, _lb, row) -> None:
-        if row is None:
-            return
-        page = self.pages[row.key]
-        self.stack.set_visible_child_name(row.key)
-        self.title.set_title(page.title)
-        self.content_page.set_title(page.title)
-        if self.caps is not None:
-            page.on_shown()
-
-    def show_page(self, key: str) -> None:
-        for i, (k, _t, _i) in enumerate(PAGES):
-            if k == key:
-                self.list.select_row(self.list.get_row_at_index(i))
-                self.split.set_show_content(True)
-
-    # -- data --------------------------------------------------------------------------------
-    def _load_caps(self) -> None:
-        def done(caps):
-            self.caps = caps
-            for page in self.pages.values():
-                if page.loaded:
-                    page.refresh()
-            self.pages[self.stack.get_visible_child_name()].on_shown()
-            if not caps["profile"]["available"]:
-                self.chip.set_sensitive(False)
-                self.chip_label.set_label("Profile unavailable")
-
-        run_bg(self.ctl.capabilities, done=done, error=self.toast_error)
-
-    def _poll(self) -> bool:
-        if self._polling:
-            return GLib.SOURCE_CONTINUE
-        self._polling = True
-
-        def done(res):
-            self._polling = False
-            t = res[0]
-            self.on_telemetry(t)
-
-        def fail(exc):
-            self._polling = False
-
-        run_bg(self.ctl.read, Capability.TELEMETRY, done=done, error=fail)
-        return GLib.SOURCE_CONTINUE
-
-    def on_telemetry(self, t) -> None:
-        if t.profile is not None and not self._profile_busy:
-            self.set_profile_state(t.profile)
-        self.pw_icon.set_from_icon_name(battery_icon(t.battery_percent, t.battery_status))
-        self.pw_label.set_label(power_state_text(t.battery_status, t.battery_percent))
-        self.pw_box.set_tooltip_text(t.battery_status or "On AC power")
-        for page in self.pages.values():
-            page.on_telemetry(t)
-
     # -- profile -------------------------------------------------------------------------------
     def set_profile_state(self, prof: Profile, confirmed: bool = True) -> None:
         if prof is self.profile:
@@ -212,9 +356,12 @@ class MainWindow(Adw.ApplicationWindow):
         title, _sub, icon = PROFILE_INFO[prof]
         self.chip_label.set_label(title)
         self.chip_icon.set_from_icon_name(icon)
-        self.pages["performance"].set_profile(prof)
-        if confirmed:  # fan curves are read per active profile: wait for the write
-            self.pages["fans"].on_profile(prof)
+        perf = self.pages.get_built("performance")
+        if perf is not None:
+            perf.set_profile(prof)
+        fans = self.pages.get_built("fans")
+        if confirmed and fans is not None:  # fan curves are read per active profile
+            fans.on_profile(prof)
 
     def _profile_action(self, _act, value) -> None:
         self.request_profile(Profile(value.get_string()))
@@ -228,7 +375,9 @@ class MainWindow(Adw.ApplicationWindow):
 
         def done(_res):
             self._profile_busy = False
-            self.pages["fans"].on_profile(prof)
+            fans = self.pages.get_built("fans")
+            if fans is not None:
+                fans.on_profile(prof)
             self.toast(f"{PROFILE_INFO[prof][0]} profile on")
 
         def fail(exc):
@@ -248,6 +397,9 @@ class MainWindow(Adw.ApplicationWindow):
         self.toasts.add_toast(t)
 
     def toast_error(self, exc: BaseException) -> None:
+        if os.environ.get("TUF_CONTROL_DEBUG"):
+            import traceback
+            traceback.print_exception(exc)
         t = Adw.Toast(title=GLib.markup_escape_text(humanize_error(exc)), timeout=6)
         self.toasts.add_toast(t)
 
@@ -280,7 +432,27 @@ class MainWindow(Adw.ApplicationWindow):
         self.last_dialog = dlg
 
     def _on_close(self, *_):
-        if self._timer:
-            GLib.source_remove(self._timer)
-            self._timer = None
+        self.hub.close()
         return False
+
+
+_css_loaded = False
+
+
+def _load_monitor_css() -> None:
+    """monitor.css: styles for the monitor pages, kept apart from the shared style.css."""
+    global _css_loaded
+    if _css_loaded:
+        return
+    _css_loaded = True
+    from pathlib import Path
+
+    from gi.repository import Gdk
+
+    from .theme import mono_family
+    css = (Path(__file__).with_name("monitor.css")).read_text().replace("@MONO@",
+                                                                        mono_family())
+    prov = Gtk.CssProvider()
+    prov.load_from_string(css)
+    Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), prov,
+                                              Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
