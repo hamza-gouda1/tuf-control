@@ -1,0 +1,3 @@
+{"type":"sync","status-code":200,"status":"OK","result":[
+ {"name":"core22","version":"20260909","revision":"2987","channel":"latest/stable","type":"base","download-size":77619200,"summary":"Runtime environment based on Ubuntu 22.04","publisher":{"display-name":"Canonical"}},
+ {"name":"firefox","version":"144.0","revision":"6901","channel":"latest/stable","type":"app","download-size":290000000,"summary":"Mozilla Firefox web browser","publisher":{"display-name":"Mozilla"}}]}

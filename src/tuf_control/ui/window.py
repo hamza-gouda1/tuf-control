@@ -22,6 +22,7 @@ PROFILE_EVERY = 2  # ticks between profile reads (the header chip follows outsid
 MONITOR = [
     ("dashboard", "Dashboard", "view-grid-symbolic", "dashboard", "DashboardPage"),
     ("processes", "Processes", "view-list-bullet-symbolic", "processes", "ProcessesPage"),
+    ("services", "Services", "system-run-symbolic", "services", "ServicesPage"),
     ("cpu", "Processor", "computer-symbolic", "cpu", "CpuPage"),
     ("memory", "Memory", "media-flash-symbolic", "memory", "MemoryPage"),
     ("dgpu", "NVIDIA graphics", "applications-graphics-symbolic", "gpu_monitor",
@@ -42,6 +43,7 @@ CONTROL = [
     ("automation", "Automation", "media-playlist-repeat-symbolic", "automation",
      "AutomationPage"),
     ("agent", "Agent access", "channel-secure-symbolic", "agent_access", "AgentAccessPage"),
+    ("updates", "Updates", "software-update-available-symbolic", "updates", "UpdatesPage"),
     ("about", "About", "help-about-symbolic", "misc", "AboutPage"),
 ]
 NAV = [("Monitor", MONITOR), ("Control", CONTROL)]
@@ -106,7 +108,11 @@ class MainWindow(Adw.ApplicationWindow):
                 row.section = section if i == 0 else None
                 box = Gtk.Box(spacing=12)
                 box.append(Gtk.Image.new_from_icon_name(icon))
-                box.append(label(title))
+                box.append(label(title, hexpand=key == "updates"))
+                if key == "updates":  # count of pending updates, from the cached check
+                    self.updates_badge = label("", ("nav-badge", "numeric"), xalign=0.5,
+                                               visible=False, valign=Gtk.Align.CENTER)
+                    box.append(self.updates_badge)
                 row.set_child(box)
                 self.list.append(row)
                 self.rows[key] = row
@@ -170,6 +176,9 @@ class MainWindow(Adw.ApplicationWindow):
         self.add_breakpoint(self.tight)
 
         self.list.select_row(self.rows["dashboard"])
+        self._updates_sig = None
+        self._updates_ticks = 0
+        self._poll_updates_badge()
         self._load_caps()  # reads the profile when done (the controller probes once)
         self.connect("close-request", self._on_close)
         self.connect("notify::suspended", lambda *_: self._sync_running())
@@ -345,7 +354,35 @@ class MainWindow(Adw.ApplicationWindow):
             battery_percent=b.get("percent"), profile=self.profile,
             cpu_power_w=st.last("power.cpu"), gpu_runtime=dg.get("runtime"))
 
+    # -- updates badge ---------------------------------------------------------------------
+    def set_updates_count(self, n: int | None) -> None:
+        self.updates_badge.set_label(str(n) if n else "")
+        self.updates_badge.set_visible(bool(n))
+        self.updates_badge.set_tooltip_text(f"{n} updates available" if n else None)
+
+    def _poll_updates_badge(self) -> None:
+        """stat() the update cache (written by tuf-controld or the Updates page); read it
+        only when it changed."""
+        from ..updates.check import cache_path
+        try:
+            st = cache_path().stat()
+            sig = (st.st_mtime_ns, st.st_size)
+        except OSError:
+            sig = None
+        if sig == self._updates_sig:
+            return
+        self._updates_sig = sig
+
+        def read():
+            from ..updates.check import load_report
+            rep = load_report()
+            return rep.total if rep else None
+        run_bg(read, done=self.set_updates_count, error=lambda e: None)
+
     def _on_sample(self, hub) -> None:
+        self._updates_ticks += 1
+        if self._updates_ticks % 30 == 0:
+            self._poll_updates_badge()
         if hub.ticks % PROFILE_EVERY == 0 and self.caps is not None:
             self._read_profile()
         t = self.telemetry()
@@ -502,6 +539,7 @@ def _load_monitor_css() -> None:
     from .theme import mono_family
     css = (Path(__file__).with_name("monitor.css")).read_text().replace("@MONO@",
                                                                         mono_family())
+    css += "\n" + Path(__file__).with_name("system.css").read_text()  # updates, services
     prov = Gtk.CssProvider()
     prov.load_from_string(css)
     Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), prov,

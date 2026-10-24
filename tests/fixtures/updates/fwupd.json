@@ -1,0 +1,20 @@
+{"devices": [
+  {"DeviceId": "3b27a1b5c0de11112222333344445555666677778", "Name": "System Firmware", "Version": "309", "Flags": 570425611, "Plugin": "uefi_capsule", "Vendor": "ASUSTeK COMPUTER INC."},
+  {"DeviceId": "29ab814eaaaabbbbccccddddeeeeffff00001111", "Name": "ASUS FHD webcam", "Version": "0.4", "Flags": 4503599627370498, "Plugin": "dfu", "Vendor": "ASUS"},
+  {"DeviceId": "4bde70ba00000000000000000000000000000000", "Name": "Core i7-14650HX", "Version": "0x00000133", "Flags": 1, "Plugin": "cpu"},
+  {"DeviceId": "362301da00000000000000000000000000000000", "Name": "UEFI dbx", "Version": "20260707", "Flags": 4644337115726115, "Plugin": "uefi_dbx"}
+ ],
+ "upgrades": {
+  "3b27a1b5c0de11112222333344445555666677778": [
+    {"Version": "310", "Summary": "ASUS FX608JHR system firmware", "Description": "<p>This release:</p><ul><li>Updates the Intel microcode</li><li>Fixes CVE-2026-1234</li></ul>", "Size": 13900000, "Urgency": 3, "Issues": ["CVE-2026-1234"], "Locations": ["https://fwupd.org/downloads/abc-FX608JHR310.cab"], "Checksum": ["0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c4b5a69788796a5b4c3d2e1f0"], "RemoteId": "lvfs"},
+    {"Version": "309", "Summary": "older"}
+  ],
+  "362301da00000000000000000000000000000000": [
+    {"Version": "20261001", "Summary": "UEFI revocation database", "Size": 14000, "Urgency": 2, "RemoteId": "lvfs"}
+  ]
+ },
+ "remotes": [
+  {"RemoteId": "lvfs", "Enabled": true, "Type": 1, "ModificationTime": 1792710267},
+  {"RemoteId": "lvfs-testing", "Enabled": false, "Type": 1, "ModificationTime": 18446744073709551615},
+  {"RemoteId": "vendor-directory", "Enabled": true, "Type": 3, "ModificationTime": 1784532874}
+ ]}

@@ -46,6 +46,11 @@ def config_path(directory: Path | None = None) -> Path:
     return (directory or config_dir()) / "config.json"
 
 
+def _updates_defaults() -> dict:
+    from ..updates.settings import DEFAULTS as UPDATES  # the section lives with its feature
+    return copy.deepcopy(UPDATES)
+
+
 DEFAULTS: dict = {
     "version": CONFIG_VERSION,
     "automation": {
@@ -64,6 +69,7 @@ DEFAULTS: dict = {
         "notifications": {"enabled": False, "colour": "#ffffff", "flashes": 2,
                           "duration_ms": 900, "apps": []},
     },
+    "updates": _updates_defaults(),
 }
 
 
@@ -122,6 +128,8 @@ def validate_config(data) -> dict:
     out["automation"]["rules"] = norm
 
     out["effects"] = validate_effects_section(data.get("effects", {}), DEFAULTS["effects"])
+    from ..updates.settings import validate_updates_section
+    out["updates"] = validate_updates_section(data.get("updates", {}), DEFAULTS["updates"])
     return out
 
 

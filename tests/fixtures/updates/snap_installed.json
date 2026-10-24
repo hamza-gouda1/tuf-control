@@ -1,0 +1,4 @@
+{"type":"sync","status-code":200,"status":"OK","result":[
+ {"name":"core22","version":"20260824","revision":"2900","tracking-channel":"latest/stable","type":"base"},
+ {"name":"firefox","version":"143.0","revision":"6800","tracking-channel":"latest/stable","type":"app"},
+ {"name":"firmware-updater","version":"0+git.1","revision":"167","type":"app"}]}

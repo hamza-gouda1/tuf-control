@@ -124,6 +124,7 @@ switch:checked > slider { background-color: #FFF7F4; }
 
 /* keyboard preview */
 .kbd-preview { border-radius: 14px; min-height: 120px; }
+button.palette-button { padding: 4px; min-width: 0; min-height: 0; }
 
 /* disabled-looking "coming soon" groups */
 .dimmed-group { opacity: 0.55; }

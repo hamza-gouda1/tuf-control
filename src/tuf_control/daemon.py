@@ -8,6 +8,10 @@ Hot-reloads ~/.config/tuf-control/config.json; SIGHUP forces a reload; SIGTERM/S
 cleanly: rules let go of what they hold (restoring previous values where asked) and the
 keyboard returns to its hardware mode. Status for the GUI/CLI is written to
 $XDG_RUNTIME_DIR/tuf-control/status.json about once a second.
+
+It also checks for software/firmware updates in the background (updates.scheduler: at most
+every 6 hours, never on a metered connection, in a short-lived child process) and posts a
+desktop notification only when something new needs an update.
 """
 from __future__ import annotations
 
@@ -39,6 +43,9 @@ from .automation.rules import Rule
 from .automation.sources import StateCollector
 from .controller import FAKE_ROOT_ENV, Controller
 from .effects.runner import EffectsRunner
+from .updates.scheduler import UpdateScheduler
+
+UPDATES_TICK_S = 60.0  # how often the loop asks whether an update check is due
 
 STATUS_NAME = "status.json"
 LOCK_NAME = "daemon.lock"
@@ -48,7 +55,8 @@ class Daemon:
     def __init__(self, ctl: Controller | None = None, *, config_file: Path | None = None,
                  status_file: Path | None = None, collector: StateCollector | None = None,
                  effects: EffectsRunner | None = None, clock=time.monotonic,
-                 wall=datetime.now, dry_run: bool | None = None) -> None:
+                 wall=datetime.now, dry_run: bool | None = None,
+                 updates: UpdateScheduler | None = None) -> None:
         self.ctl = ctl or Controller()
         self.clock, self.wall = clock, wall
         self.config_file = config_file or config_path()
@@ -69,6 +77,7 @@ class Daemon:
         self.started = wall().isoformat(timespec="seconds")
         self.last_state = None
         self.wake = threading.Event()
+        self.updates = updates if updates is not None else UpdateScheduler()
 
     # -- config --------------------------------------------------------------
     def reload(self, force: bool = False) -> bool:
@@ -89,6 +98,7 @@ class Daemon:
         self.collector.needs_apps = any(r.trigger.type == "app" for r in rules)
         self.collector.needs_profile = any(r.trigger.type == "profile" for r in rules)
         self.effects.configure(cfg["effects"])
+        self.updates.configure(cfg.get("updates") or {})
         return True
 
     # -- one automation step --------------------------------------------------------------
@@ -114,6 +124,7 @@ class Daemon:
                 "matched_apps": apps, "time": st.now.isoformat(timespec="minutes")},
             "log": [e.as_dict() for e in list(self.engine.log)[-40:]],
             "effects": self.effects.status(),
+            "updates": self.updates.status(),
         }
 
     def write_status(self, running: bool = True) -> None:
@@ -130,6 +141,7 @@ class Daemon:
         fx.start()
         next_auto = 0.0
         next_status = 0.0
+        next_updates = 0.0
         try:
             while not stop.is_set():
                 now = self.clock()
@@ -138,6 +150,13 @@ class Daemon:
                     self.wake.clear()
                     self.step()
                     next_auto = now + float(self.cfg["automation"]["poll_s"])
+                if now >= next_updates:  # cheap unless a check is due; that runs in a child
+                    next_updates = now + UPDATES_TICK_S
+                    try:
+                        self.updates.tick()
+                        self.updates.status(refresh=True)
+                    except Exception:
+                        pass
                 if now >= next_status:
                     self.write_status()
                     next_status = now + 1.0

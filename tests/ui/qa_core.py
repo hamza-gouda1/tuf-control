@@ -12,9 +12,9 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 
 # -- configuration shared by the harness and the tests --------------------------------------
-PAGES = ["dashboard", "processes", "cpu", "memory", "dgpu", "igpu", "fanmon", "storage",
-         "network", "performance", "fans", "gpu", "display", "battery", "keyboard",
-         "automation", "agent", "about"]
+PAGES = ["dashboard", "processes", "services", "cpu", "memory", "dgpu", "igpu", "fanmon",
+         "storage", "network", "performance", "fans", "gpu", "display", "battery", "keyboard",
+         "automation", "agent", "updates", "about"]
 
 SIZES = {  # name -> (width, height, maximised)
     "1920x1080": (1920, 1080, True),

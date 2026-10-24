@@ -43,6 +43,10 @@ def _parser() -> argparse.ArgumentParser:
     add_automation_parsers(sub)  # daemon, automation, kbd effect
     from .agent.cli_cmds import add_parsers as add_agent_parsers
     add_agent_parsers(sub)  # agent, mcp
+    from .updates.cli_cmds import add_parsers as add_updates_parsers
+    add_updates_parsers(sub)  # updates
+    from .services.cli_cmds import add_parsers as add_services_parsers
+    add_services_parsers(sub)  # services
     _json_everywhere(p)
     return p
 
@@ -146,6 +150,14 @@ def main(argv: list[str] | None = None, controller: Controller | None = None) ->
         try:
             return agent_cmds.run(args, controller)
         except TufControlError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+    if args.cmd in ("updates", "services"):  # no Controller: plain reads of the system
+        from .services import cli_cmds as services_cmds
+        from .updates import cli_cmds as updates_cmds
+        try:
+            return (updates_cmds if args.cmd == "updates" else services_cmds).run(args)
+        except (TufControlError, OSError, RuntimeError) as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 1
     try:

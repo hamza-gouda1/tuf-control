@@ -1,0 +1,3 @@
+io.missioncenter.MissionCenter	1.2.0	stable	x86_64	flathub	4.2 MB
+org.gnome.Platform	49.1	49	x86_64	flathub	312.5 MB
+org.freedesktop.Platform.GL.nvidia-580-182-01	580.182.01	1.4	x86_64	flathub	298,1 MB

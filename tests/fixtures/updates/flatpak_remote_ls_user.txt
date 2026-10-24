@@ -1,0 +1,1 @@
+com.example.Notes	3.1	stable	x86_64	flathub	1.1 kB

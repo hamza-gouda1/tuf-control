@@ -1,0 +1,4 @@
+io.missioncenter.MissionCenter	1.1.0	stable	x86_64	system
+org.gnome.Platform	49.0	49	x86_64	system
+org.freedesktop.Platform.GL.nvidia-580-182-01		1.4	x86_64	system
+com.example.Notes	3.0	stable	x86_64	user
