@@ -299,6 +299,9 @@ class FakeWorld:
             if pid in (3488, 2610, 2101):
                 io[0] += int(dt * L * (9e6 if pid == 3488 else 2e5))
                 io[1] += int(dt * L * (1.5e6 if pid == 3488 else 8e4))
+            (pd / "status").write_text(
+                f"Name:\t{comm}\nVmRSS:\t{rss * PAGE // 1024} kB\n"
+                f"VmSwap:\t{(mem * 1024 // 3) if mem else 0} kB\n")
             (pd / "io").write_text(f"rchar: {io[0]}\nwchar: {io[1]}\nread_bytes: {io[0]}\n"
                                    f"write_bytes: {io[1]}\n")
             if gpu == "igpu":

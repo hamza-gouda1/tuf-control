@@ -78,8 +78,13 @@ drop-in replacement. "Partial" means present but narrower than the original.
 See [docs/INSTALL.md](docs/INSTALL.md). User-level, no root, no downloads. The optional polkit
 helper is printed with `./install.sh --system` and never run for you.
 
-The installer also binds the Armoury Crate key (XF86Launch3) to open or raise TUF Control as a GNOME
-custom shortcut; skip it with `--no-hotkey`, pick another key with `--hotkey=KEYSYM`.
+The installer also binds the Armoury Crate keys (XF86Launch3, XF86Launch1) to TUF Control and the
+Copilot key to Claude. With the Focus Keys extension from bordeaux-gnome installed and enabled,
+those go into its shortcut list, so a press brings the open window to the front instead of a
+"TUF Control is ready" notification, and earlier custom shortcuts for them are migrated away;
+without it they are GNOME custom shortcuts. Skip them with `--no-hotkey`, pick another key with
+`--hotkey=KEYSYM`. The Quick Settings extension also shows the new profile in an OSD when Fn+F5
+changes it. Details in [docs/INSTALL.md](docs/INSTALL.md).
 
 ## Usage
 

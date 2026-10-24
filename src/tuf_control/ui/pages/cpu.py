@@ -51,9 +51,9 @@ class CpuPage(MonitorPage):
         fp = self.panel("Clock and temperature")
         fp.append(legend([("average clock (GHz)", "primary")]))
         fp.append(self.chart([Line("cpu.freq.avg", "avg", scale=1 / 1000)], floor=0,
-                             min_span=1, fmt=lambda v: f"{v:g} GHz", height=120))
+                             min_span=5, fmt=lambda v: f"{v:g} GHz", height=120))
         fp.append(legend([("package °C", "rose")]))
-        fp.append(self.chart([Line("temp.cpu", "pkg", "rose")], floor=20, min_span=20,
+        fp.append(self.chart([Line("temp.cpu", "pkg", "rose")], y_fixed=(20, 100),
                              fmt=lambda v: f"{v:.0f}°", height=120))
         self.policy_grid = StatGrid(2, 4)
         for key, cap in (("driver", "Scaling driver"), ("pstate", "intel_pstate"),

@@ -130,9 +130,11 @@ class KeyboardPage(Page):
             r.set_sensitive(False)
         self.fx_err.set_subtitle(str(exc))
         self.fx_err.set_visible(True)
+        self.preview.set_opacity(0.4)  # nothing to show: not a lit keyboard
         self._show()
 
     def _got_rgb(self, info) -> None:
+        self.preview.set_opacity(1.0)
         self.saved = effect_from_rgb_data(info.get("mode_data"))
         self.effect = dataclasses.replace(self.saved)
         # asusd keeps colours/speed per mode: switching the picker shows that mode's own

@@ -84,7 +84,7 @@ class EffectsSection(Adw.PreferencesGroup):
 
         self.pick = Adw.ComboRow(title="Effect", model=Gtk.StringList.new(
             ["Off"] + [EFFECTS[n].title for n in NAMES]))
-        self.pick.set_subtitle_lines(2)
+        self.pick.set_subtitle_lines(0)
         self.pick.connect("notify::selected", lambda *_: self._picked())
         self.add(self.pick)
         self.param_rows: list[Gtk.Widget] = []

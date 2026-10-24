@@ -13,7 +13,7 @@ from ..viewmodels import (
     validate_charge_limit,
 )
 from ..widgets import label
-from .base import Page, button, info_row, prefs_page, value_row
+from .base import Page, a11y_name, button, info_row, prefs_page, value_row
 
 
 class BatteryPage(Page):
@@ -31,6 +31,7 @@ class BatteryPage(Page):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
         box.add_css_class("tile")
         top = Gtk.Box(spacing=12)
+        self.top = top
         self.big = label("–", ("big-scale-value",))
         top.append(self.big)
         self.hint = label("", ("stat-sub",), wrap=True, hexpand=True, valign=Gtk.Align.CENTER)
@@ -48,6 +49,7 @@ class BatteryPage(Page):
         self.adj = Gtk.Adjustment(value=80, lower=lo, upper=hi, step_increment=1,
                                   page_increment=5)
         self.scale = Gtk.Scale(adjustment=self.adj, draw_value=False, hexpand=True)
+        a11y_name(self.scale, "Charge limit")
         for p in CHARGE_PRESETS:
             self.scale.add_mark(p, Gtk.PositionType.BOTTOM, None)
         self.adj.connect("value-changed", self._changed)
@@ -73,6 +75,13 @@ class BatteryPage(Page):
         for r in (self.h_row, self.cap_row, self.cyc_row, self.now_row):
             self.health.add(r)
         self.set_child(prefs_page(self.limit, g_extra, self.health))
+
+    def fit_width(self, level: int) -> None:
+        """Phone width: the presets drop below the value instead of squeezing the row."""
+        narrow = level == 3
+        self.top.set_orientation(Gtk.Orientation.VERTICAL if narrow
+                                 else Gtk.Orientation.HORIZONTAL)
+        self.presets.set_halign(Gtk.Align.START if narrow else Gtk.Align.FILL)
 
     def refresh(self) -> None:
         run_bg(lambda: self.ctl.get_battery_threshold()[0], done=self._got_limit,

@@ -33,7 +33,7 @@ class FanMonitorPage(MonitorPage):
             big.append(val)
             big.append(label("rpm", ("stat-unit",), valign=Gtk.Align.END))
             p.append(big)
-            p.append(self.chart([Line(f"fan.{key}", "rpm", colour)], floor=0, min_span=1000,
+            p.append(self.chart([Line(f"fan.{key}", "rpm", colour)], y_fixed=(0, 7000),
                                 fmt=rpm_fmt, height=150, window_s=WINDOW_S))
             g = StatGrid(2, 3)
             g.add("peak", "Peak (2 min)")
@@ -56,7 +56,7 @@ class FanMonitorPage(MonitorPage):
                            Line("dgpu.temp", "GPU", "gold", fill=False),
                            Line("temp.disk.nvme0n1.0", "NVMe", "slate", fill=False),
                            Line("temp.dimm0", "memory", "sage", fill=False)]
-        self.temp_chart = self.chart(self.temp_lines, floor=20, min_span=30,
+        self.temp_chart = self.chart(self.temp_lines, y_fixed=(20, 100),
                                      fmt=lambda v: f"{v:.0f}°", height=170)
         tp.append(self.temp_chart)
         self.temps = StatGrid(2, 4)

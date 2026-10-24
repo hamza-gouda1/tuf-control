@@ -16,7 +16,7 @@ from ...agent.audit import AuditLog
 from ...agent.store import access_path
 from ..tasks import run_bg
 from ..widgets import label
-from .base import Page, button, info_row, pill, prefs_page
+from .base import Page, a11y_name, button, info_row, pill, prefs_page
 
 esc = GLib.markup_escape_text
 CHECK_EVERY = 2     # telemetry ticks between file checks while visible
@@ -80,6 +80,7 @@ class AgentAccessPage(Page):
         self.st_row.add_prefix(Gtk.Image.new_from_icon_name("alarm-symbolic"))
         self.st_dur = Gtk.DropDown(model=Gtk.StringList.new([d for d, _ in present.DURATIONS]),
                                    valign=Gtk.Align.CENTER, selected=1)
+        a11y_name(self.st_dur, "Standing approval duration")
         self.st_btn = button("Allow", on_click=self._toggle_standing)
         self.st_row.add_suffix(self.st_dur)
         self.st_row.add_suffix(self.st_btn)
@@ -168,6 +169,7 @@ class AgentAccessPage(Page):
         lvl = acc.level if acc.level in present.PAGE_LEVELS else "read"
         self.level.set_selected(present.PAGE_LEVELS.index(lvl))
         self.level.set_subtitle(esc(present.LEVEL_HELP[lvl]))
+        self.level.set_tooltip_text(f"Access level: {policy.LEVEL_TITLES[lvl]}")
         self.high.set_active(acc.high_risk_tools)
         self._quiet = False
         on = acc.enabled and not acc.error
@@ -213,9 +215,10 @@ class AgentAccessPage(Page):
                           margin_end=12)
             box.append(label(r["time"], ("numeric", "dim-label"), width_chars=5))
             mid = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True)
-            mid.append(label(r["what"], ellipsize=3))
+            what = label(r["what"], ellipsize=3, tooltip_text=r["what"])
+            mid.append(what)
             sub = r["who"] + (" · " + r["detail"] if r["detail"] else "")
-            mid.append(label(sub, ("caption", "dim-label"), ellipsize=3))
+            mid.append(label(sub, ("caption", "dim-label"), ellipsize=3, tooltip_text=sub))
             box.append(mid)
             box.append(pill(r["label"], *((r["tone"],) if r["tone"] else ())))
             self.activity.append(box)

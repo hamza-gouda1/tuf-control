@@ -123,8 +123,9 @@ class MainWindow(Adw.ApplicationWindow):
         brand.append(label("TUF Control", ("brand-title",)))
         side_head.set_title_widget(brand)
         side_tv.add_top_bar(side_head)
-        side_tv.set_content(Gtk.ScrolledWindow(child=self.list,
-                                               hscrollbar_policy=Gtk.PolicyType.NEVER))
+        self.side_scroll = Gtk.ScrolledWindow(child=self.list,
+                                              hscrollbar_policy=Gtk.PolicyType.NEVER)
+        side_tv.set_content(self.side_scroll)
         foot = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, margin_start=18, margin_end=12,
                        margin_bottom=12, margin_top=6)
         self.mode_label = label("Fake hardware (safe)" if self.fake else "", ("sidebar-mode",))
@@ -133,8 +134,10 @@ class MainWindow(Adw.ApplicationWindow):
         self.split.set_sidebar(Adw.NavigationPage(title="TUF Control", child=side_tv))
 
         # content
-        self.stack = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE,
-                               transition_duration=140)
+        # not homogeneous: a hidden page must not set the window's minimum width
+        self.stack = Gtk.Stack(css_classes=["content-area"], transition_type=Gtk.StackTransitionType.CROSSFADE,
+                               transition_duration=140, hhomogeneous=False,
+                               vhomogeneous=False)
         self.pages = LazyPages(self)
         self.content_tv = Adw.ToolbarView()
         head = Adw.HeaderBar()
@@ -147,12 +150,22 @@ class MainWindow(Adw.ApplicationWindow):
         self.content_page = Adw.NavigationPage(title="Dashboard", child=self.content_tv)
         self.split.set_content(self.content_page)
 
+        # one breakpoint is active at a time (the last that matches): each repeats the
+        # collapse of the one before it. Registered widest first.
+        self.mid = Adw.Breakpoint.new(Adw.BreakpointCondition.parse("max-width: 900sp"))
+        self.add_breakpoint(self.mid)
         bp = Adw.Breakpoint.new(Adw.BreakpointCondition.parse("max-width: 720sp"))
+        self.bp720 = bp
         bp.add_setter(self.split, "collapsed", True)
         self.add_breakpoint(bp)
+        self.compact = Adw.Breakpoint.new(Adw.BreakpointCondition.parse("max-width: 640sp"))
+        self.compact.add_setter(self.split, "collapsed", True)
+        self.add_breakpoint(self.compact)
+        self.responders: list = []  # fn(level): 0 wide, 1 <= 900, 2 <= 640, 3 <= 460 sp
+        self.connect("notify::current-breakpoint", lambda *_: self._responsive())
         self.tight = Adw.Breakpoint.new(Adw.BreakpointCondition.parse("max-width: 460sp"))
         self.tight.add_setter(self.split, "collapsed", True)
-        self.tight.add_setter(self.pw_label, "visible", False)
+        self.tight.add_setter(self.pw_box, "visible", False)
         self.tight.add_setter(self.chip_label, "visible", False)
         self.add_breakpoint(self.tight)
 
@@ -173,18 +186,45 @@ class MainWindow(Adw.ApplicationWindow):
         self.pages.built[key] = page
         self.stack.add_named(page, key)
         if key == "performance":
-            self.tight.add_setter(page.cards, "orientation", Gtk.Orientation.VERTICAL)
+            self.responsive(lambda lv: page.cards.set_orientation(
+                Gtk.Orientation.VERTICAL if lv == 3 else Gtk.Orientation.HORIZONTAL))
             if self.profile is not None:
                 page.set_profile(self.profile)
-        elif key == "fans" and self.profile is not None:
-            page.on_profile(self.profile)
+        elif key == "processes":
+            self.responsive(page.fit_columns)
+        elif key in ("battery", "dgpu", "igpu"):
+            self.responsive(page.fit_width)
+        elif key == "fans":
+            self.responsive(page.fit_width)
+            if self.profile is not None:
+                page.on_profile(self.profile)
         return page
+
+    def level(self) -> int:
+        """Width class: 0 wide, 1 up to 900 sp, 2 up to 640 sp, 3 up to 460 sp (phone-like)."""
+        bp = self.get_current_breakpoint()
+        return 3 if bp is self.tight else 2 if bp is self.compact else (
+            1 if bp is not None else 0)
+
+    def responsive(self, fn) -> None:
+        """Call fn(level) now and whenever the width class changes. (Breakpoint setters
+        added after a breakpoint became active are not applied, so pages built while the
+        window is narrow would keep their wide layout.)"""
+        self.responders.append(fn)
+        fn(self.level())
+
+    def _responsive(self) -> None:
+        lv = self.level()
+        for fn in list(self.responders):
+            fn(lv)
 
     def _park(self, key: str) -> bool:
         """Destroy a monitor page nobody is looking at; it is rebuilt (quickly) on return.
         The history lives in the shared store, so nothing is lost."""
         page = self.pages.get_built(key)
         if page is not None and key != self.current:
+            self.responders = [f for f in self.responders if getattr(
+                f, "__self__", None) is not page]
             self.stack.remove(page)
             del self.pages.built[key]
             GLib.timeout_add_seconds(1, self._trim)
@@ -219,13 +259,22 @@ class MainWindow(Adw.ApplicationWindow):
                 GLib.timeout_add_seconds(PARK_AFTER_S, self._park, old.key)
             GLib.timeout_add_seconds(2, self._trim)
         self.current = row.key
+        GLib.idle_add(self._reveal_row, row)
         self.stack.set_visible_child_name(row.key)
         self.title.set_title(page.title)
+        self.title.set_tooltip_text(page.title)
         self.content_page.set_title(page.title)
         live = getattr(page, "is_monitor_page", False)
         self.hub.set_interval(getattr(page, "rate_s", 1.0) if live else 1.0)
         if self.caps is not None or live:
             page.on_shown()
+
+    def _reveal_row(self, row) -> bool:
+        """Keep the selected sidebar row on screen (a short window scrolls the list)."""
+        vp = self.side_scroll.get_child()
+        if row.get_mapped() and vp is not None and hasattr(vp, "scroll_to"):
+            vp.scroll_to(row, None)
+        return GLib.SOURCE_REMOVE
 
     def show_page(self, key: str) -> None:
         row = self.rows.get(key)

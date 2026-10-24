@@ -25,7 +25,7 @@ from ...automation.service import DaemonClient
 from ...effects.colour import hex_to_rgb, rgb_to_hex
 from ...effects.registry import EFFECTS
 from ..tasks import run_bg
-from .base import Page, button, info_row, pill, prefs_page
+from .base import Page, a11y_name, button, info_row, pill, prefs_page
 
 STATUS_EVERY = 2  # telemetry ticks (seconds) between daemon status reads
 esc = GLib.markup_escape_text
@@ -184,13 +184,14 @@ class AutomationPage(Page):
             if rule.priority != 50:
                 sub += f" · priority {rule.priority}"
             row = Adw.ActionRow(title=esc(rule.name), subtitle=esc(sub), activatable=True)
-            row.set_subtitle_lines(2)
+            row.set_subtitle_lines(0)
             row.add_prefix(Gtk.Image.new_from_icon_name(trigger_icon(rule.trigger.to_dict())))
             badge = pill("Active", "accent")
             badge.set_visible(False)
             row.add_suffix(badge)
             sw = Gtk.Switch(active=rule.enabled, valign=Gtk.Align.CENTER,
                             tooltip_text="Enable rule")
+            a11y_name(sw, f"Enable rule {rule.name}")
             sw.connect("notify::active", self._toggle_rule, rule.id)
             row.add_suffix(sw)
             row.add_suffix(Gtk.Image.new_from_icon_name("go-next-symbolic"))
@@ -214,7 +215,7 @@ class AutomationPage(Page):
         for p in presets:
             rule = Rule.from_dict(p)
             row = Adw.ActionRow(title=esc(rule.name), subtitle=esc(rule.describe()))
-            row.set_subtitle_lines(2)
+            row.set_subtitle_lines(0)
             row.add_prefix(Gtk.Image.new_from_icon_name(trigger_icon(p["trigger"])))
             row.add_suffix(button("Add", "flat", on_click=lambda p=p: self._add_preset(p)))
             self.sugg.add(row)
@@ -573,7 +574,7 @@ class RuleDialog(Adw.Dialog):
         for r in results:
             detail = r["detail"][:1].upper() + r["detail"][1:]
             row = Adw.ActionRow(title=esc(r["action"]), subtitle=esc(detail))
-            row.set_subtitle_lines(2)
+            row.set_subtitle_lines(0)
             row.add_suffix(pill("OK", "accent") if r["ok"] else pill("Error"))
             rows.append(row)
         for r in rows:

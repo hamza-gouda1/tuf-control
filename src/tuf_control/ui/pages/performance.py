@@ -6,7 +6,7 @@ from ...core import Profile
 from ..tasks import run_bg
 from ..viewmodels import PROFILE_INFO, PROFILE_ORDER, power_limits_view, snap_to_step
 from ..widgets import label
-from .base import Page, button, info_row, prefs_page
+from .base import Page, a11y_name, button, info_row, prefs_page
 
 
 class ProfileCards(Gtk.Box):
@@ -125,6 +125,7 @@ class PerformancePage(Page):
             adj = Gtk.Adjustment(value=lr.value, lower=lr.min, upper=lr.max,
                                  step_increment=lr.step, page_increment=lr.step * 5)
             scale = Gtk.Scale(adjustment=adj, draw_value=False, hexpand=True)
+            a11y_name(scale, lr.title)
             if lr.default is not None:
                 scale.add_mark(lr.default, Gtk.PositionType.BOTTOM, None)
             val = label(f"{lr.value} {lr.unit}", ("scale-value",), xalign=1.0)

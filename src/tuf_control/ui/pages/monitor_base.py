@@ -4,6 +4,7 @@ from __future__ import annotations
 from gi.repository import Adw, Gtk, Pango
 
 from ..charts import Chart, Line
+from ..viewmodels import nb
 from ..widgets import label
 from .base import Page
 
@@ -22,7 +23,7 @@ class MonitorPage(Page):
         self.charts: list[Gtk.Widget] = []
         self.body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16,
                             margin_top=22, margin_bottom=28, margin_start=16, margin_end=16)
-        clamp = Adw.Clamp(maximum_size=1120, tightening_threshold=860, child=self.body)
+        clamp = Adw.Clamp(maximum_size=1200, tightening_threshold=1000, child=self.body)
         self.scroller = Gtk.ScrolledWindow(child=clamp, hscrollbar_policy=Gtk.PolicyType.NEVER)
         self.set_child(self.scroller)
 
@@ -47,8 +48,8 @@ class MonitorPage(Page):
     def header(self, title: str, subtitle: str = "") -> tuple[Gtk.Label, Gtk.Label, Gtk.Box]:
         box = Gtk.Box(spacing=12)
         titles = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True, spacing=2)
-        t = label(title, ("hero-heading",), ellipsize=Pango.EllipsizeMode.END)
-        s = label(subtitle, ("section-caption",), wrap=True)
+        t = label(title, ("hero-heading",), wrap=True, wrap_mode=Pango.WrapMode.WORD_CHAR)
+        s = label(subtitle, ("section-caption",), wrap=True, wrap_mode=Pango.WrapMode.WORD_CHAR)
         titles.append(t)
         titles.append(s)
         box.append(titles)
@@ -58,6 +59,7 @@ class MonitorPage(Page):
         return t, s, pills
 
     def chart(self, lines: list[Line], **kw) -> Chart:
+        kw["height"] = int(kw.get("height", 120) * 1.3)  # roomier than the first cut
         c = Chart(self.hub, lines, **kw)
         self.charts.append(c)
         return c
@@ -79,7 +81,8 @@ class Panel(Gtk.Box):
         self.add_css_class("tile")
         self.add_css_class("monitor-panel")
         head = Gtk.Box(spacing=8)
-        self.title = label(title, ("panel-title",), hexpand=True)
+        self.title = label(title, ("panel-title",), hexpand=True, wrap=True,
+                           wrap_mode=Pango.WrapMode.WORD_CHAR)
         head.append(self.title)
         self.suffix_box = Gtk.Box(spacing=8)
         head.append(self.suffix_box)
@@ -101,8 +104,9 @@ class StatGrid(Gtk.FlowBox):
     def add(self, key: str, caption: str, tooltip: str | None = None) -> Gtk.Label:
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         box.add_css_class("stat-cell")
-        cap = label(caption, ("stat-caption",), ellipsize=Pango.EllipsizeMode.END)
-        val = label("–", ("stat-cell-value",), ellipsize=Pango.EllipsizeMode.END)
+        wrap = {"wrap": True, "wrap_mode": Pango.WrapMode.WORD_CHAR}  # never cut a value off
+        cap = label(caption, ("stat-caption",), **wrap)
+        val = label("–", ("stat-cell-value",), **wrap)
         box.append(cap)
         box.append(val)
         if tooltip:
@@ -117,6 +121,7 @@ class StatGrid(Gtk.FlowBox):
         lab = self.cells.get(key)
         if lab is None:
             return
+        text = nb(text)
         if lab.get_label() != text:
             lab.set_label(text)
         if tooltip is not None:
@@ -134,5 +139,6 @@ def note(text: str, css: str = "monitor-note") -> Gtk.Label:
 
 
 def set_text(lab: Gtk.Label, text: str) -> None:
+    text = nb(text)
     if lab.get_label() != text:
         lab.set_label(text)

@@ -59,6 +59,7 @@ class FansPage(Page):
         self.status.set_visible(False)
         foot = Gtk.Box(spacing=8, margin_start=10, margin_end=10, margin_bottom=10,
                        halign=Gtk.Align.END)
+        self.foot = foot
         self.reset_btn = button("Factory curve…", "flat", on_click=self._reset)
         self.revert_btn = button("Revert", "flat", on_click=self._revert)
         self.apply_btn = button("Apply…", "suggested-action", on_click=self._apply)
@@ -74,6 +75,13 @@ class FansPage(Page):
         self.page.add(self._status_group())
         self.set_child(self.page)
         self.fan_buttons["CPU"].set_active(True)
+
+    def fit_width(self, level: int) -> None:
+        """Phone width: the three buttons stack instead of needing a wider window."""
+        narrow = level == 3
+        self.foot.set_orientation(Gtk.Orientation.VERTICAL if narrow
+                                  else Gtk.Orientation.HORIZONTAL)
+        self.foot.set_halign(Gtk.Align.FILL if narrow else Gtk.Align.END)
 
     def _status_group(self):
         g = Adw.PreferencesGroup()

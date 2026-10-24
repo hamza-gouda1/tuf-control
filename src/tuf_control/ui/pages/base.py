@@ -32,11 +32,33 @@ class Page(Adw.Bin):
         return (self.win.caps or {}).get(name)
 
 
+def a11y_name(widget: Gtk.Widget, text: str) -> Gtk.Widget:
+    """Accessible name for a control that has no text of its own (switch, scale, radio)."""
+    widget.update_property([Gtk.AccessibleProperty.LABEL], [text])
+    return widget
+
+
 def prefs_page(*groups: Gtk.Widget) -> Adw.PreferencesPage:
     page = Adw.PreferencesPage()
     for g in groups:
         page.add(g)
+    widen(page)
     return page
+
+
+def widen(root: Gtk.Widget, maximum: int = 1100, tightening: int = 900) -> None:
+    """AdwPreferencesPage clamps its content to 600 px; use the width the window has."""
+    stack = [root]
+    while stack:
+        w = stack.pop()
+        if isinstance(w, Adw.Clamp):
+            w.set_maximum_size(maximum)
+            w.set_tightening_threshold(tightening)
+            return
+        c = w.get_first_child()
+        while c is not None:
+            stack.append(c)
+            c = c.get_next_sibling()
 
 
 def info_row(title: str, subtitle: str, icon: str = "dialog-information-symbolic") -> Adw.ActionRow:

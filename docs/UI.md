@@ -50,6 +50,16 @@ otherwise the system preference is followed.
   and arrow area) as a dark rectangle behind the list. Check with `--user-theme --popovers`.
 - The dGPU is never woken to read sensors: NVML (or `nvidia-smi`) is only used while the
   dGPU's runtime PM state is `active`, and released when it idles so it can sleep again.
+- Nothing is cut off. Text wraps (or ellipsizes with the full text in a tooltip); numbers and
+  their units use no-break spaces (`viewmodels.nb`) so a reading never splits across lines.
+  Secondary text is 72 % opacity on light (about 5:1, WCAG AA) and the softer 55 % on dark.
+- One width class drives the responsive layout: `MainWindow.responsive(fn)` calls `fn(level)`
+  now and on every breakpoint change (0 wide, 1 up to 900 sp, 2 up to 640 sp, 3 up to
+  460 sp). Process table columns drop out, button rows stack and the header sheds the battery
+  readout as the window narrows; the minimum window width is 360 px. Do not add breakpoint
+  setters after the fact: one added once a breakpoint is active is not applied.
+- Controls that have no text of their own (switches, scales, radio buttons, icon-only
+  buttons) get an accessible name (`pages.base.a11y_name`) and icon-only buttons a tooltip.
 - Monitor values come from `tuf_control.telemetry` (/proc, /sys, NVML; no dependencies).
   A reading that is missing is a gap in the graph, never a zero; what needs root (RAPL
   package power, per-process network) says so.
@@ -58,13 +68,23 @@ otherwise the system preference is followed.
 
 Monitor: Dashboard (live cards with 120 s graphs for CPU, memory, NVIDIA and Intel GPU,
 CPU fan, GPU fan, storage, network, battery; a card opens its page), Processes (apps grouped
-by systemd scope or all processes; CPU, private memory, disk I/O, GPU, VRAM; sort, filter,
-End task with SIGTERM then an offered SIGKILL), Processor (stacked user/system/iowait, 24-CPU
+by systemd scope plus one "System processes" group, or all processes; columns CPU, Memory,
+Swap (VmSwap), Drive (read + write), GPU, GPU memory and PID, each header carrying the
+machine-wide figure like Mission Center; sort, filter; Stop = SIGTERM and Force Stop =
+SIGKILL, both confirmed, refused for PID 1 and TUF Control itself; app names and icons come
+from the cgroup scope, the .desktop id, StartupWMClass or the executable), Processor (stacked
+user/system/iowait, 24-CPU
 grid with P/E cores, clock, temperatures, load, governor/EPP), Memory (in use / cache stack,
 composition bar, swap, zswap, pressure), NVIDIA graphics and Intel graphics (utilisation,
-clocks, temperature, power, VRAM, engines, processes; sleeping state), Fans & temps (both fans,
+clocks, temperature, power, VRAM, engines, processes; sleeping state; a dGPU whose runtime PM
+state is `error` shows "GPU unavailable: the NVIDIA driver lost the GPU" and is never polled),
+Fans & temps (both fans,
 all temperature sensors, link to Fan curves), Storage (per-disk rates, busy, temperature,
 file systems), Network (per-interface rates; virtual interfaces hidden by default).
+
+Graph axes never move with the data: percentages are 0 to 100, memory and VRAM 0 to the
+total, temperatures 20 to 100 degrees, fans 0 to 7k rpm; the rest (rates, clocks, power) start
+from a generous minimum span and only ever widen. The time axis is fixed (-120 s to now).
 
 Control: Performance (profile cards,
 power limits), Fans (8-point curve per fan and profile; drag or arrow keys; Apply / Revert /
@@ -93,7 +113,7 @@ and direction as enum *names* ("Low"/"Med"/"High", "Right"/"Left"/"Up"/"Down"), 
 to `asusctl aura effect`, read back after each Apply); the other write calls have only been
 tested against a recording transport.
 
-## Tests and screenshots
+## Tests, QA lint and screenshots
 
     PYTHONPATH=src python3 -m unittest discover -s tests      # includes tests/ui (no display)
     python3 tests/ui/screenshots.py                           # docs/screenshots/*-{dark,light}.png
@@ -112,3 +132,44 @@ the graphs), and renders each page with `Gtk.WidgetPaintable` -> `Gsk.CairoRende
 show the app's own styling. The automation config and daemon status always live in the run's
 temporary directory; `--automation` starts a real `tuf-controld` against the fake tree with demo
 rules and stops it afterwards.
+
+## UI QA lint
+
+`tests/ui/qa_lint.py` runs every page, dialog, toast and popover headless and audits the widget
+tree and the rendered pixels. It re-executes itself under
+`systemd-run --user --scope -p MemoryMax=1500M -p MemorySwapMax=0`, one GTK process at a time,
+each with a timeout, against the fake tree (nothing real is read or written).
+
+    python3 tests/ui/qa_lint.py                 # full matrix, about 20 minutes
+    python3 tests/ui/qa_lint.py --quick         # 1280x720 and 360x640, dark and light
+    python3 tests/ui/qa_lint.py --sizes 360x640 --variants dark --pages fans,battery
+    TUF_QA_SLOW=1 python3 -m unittest tests.ui.test_qa_lint   # the --quick run as a test
+
+Matrix: sizes 1920x1080 (maximised), 1280x720, 900x700, 640x700, 360x640; variants `dark`,
+`light` and `usertheme` (dark with the real `~/.config/gtk-4.0/gtk.css` and `settings.ini`,
+read-only); extra modes at 1280x720 and 640x700: `rtl`, `scale` (text scaling 1.5), `long`
+(80-character process names, very long GPU, disk and mount names), `empty` (no sensors, battery,
+dGPU or ASUS firmware) and `ppt` (readable power limits). It writes `tests/ui/qa_report.md`
+(findings grouped by kind with the combinations they occur in) and exits 1 on any failure.
+
+Checks: GTK/Adwaita/GLib warnings on stderr (harness noise is allow-listed in `qa_core.py`);
+labels ellipsized without a tooltip or clipped; widgets outside the window, their parent or a
+scrolled viewport; the page's minimum width against the window (with the widest widget named);
+unexpected horizontal scrollbars; overlapping siblings; zero-size and too small interactive
+widgets (under 24 px fail, under 32 px warn); icon-only buttons without tooltip or accessible
+name, and unlabelled switches, scales and radio buttons; text contrast on the rendered pixels
+(WCAG 4.5:1, 3:1 for large text) at every scroll position; keyboard focus (focusable chain,
+reading order of the Tab stops, a visible focus ring); header bar overlap; blank pages; dialog
+bounds and centring; toast overlap with the profile chip; popovers drawn as one clear
+surface; stale colours after a live dark to light switch (palette comparison with a fresh
+light start). `tests/ui/test_qa_lint.py` and `test_ui_geometry.py` cover the pure logic
+(contrast maths, log allowlist, geometry, number formatting, fan editor hit sizes and readout
+placement) with no display and run with the normal suite.
+
+Limits: the headless compositor never gives the window keyboard focus, and `GtkListBox` then
+refuses to step off a row, so Tab cannot be driven; focus is checked from the widget tree
+instead. `--real` adds one read-only pass against this machine's real telemetry (no writes, dialogs,
+screenshots or label texts kept; automation, agent and daemon state go to a temp dir). HiDPI
+(scale 2) is not run: a headless mutter has no scale option, and layout is identical in
+logical pixels; only the Cairo-drawn widgets would differ and they draw in logical units.
+

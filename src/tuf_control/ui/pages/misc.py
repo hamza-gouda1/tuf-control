@@ -66,7 +66,7 @@ class AboutPage(Page):
                 sub = sub[:1].upper() + sub[1:]
                 badge = pill("Unavailable")
             row = Adw.ActionRow(title=title, subtitle=sub)
-            row.set_subtitle_lines(2)
+            row.set_subtitle_lines(0)
             row.add_suffix(badge)
             self.support.add(row)
             self.rows.append(row)

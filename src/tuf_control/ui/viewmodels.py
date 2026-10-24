@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import colorsys
 import math
+import re
 from collections import deque
 from dataclasses import dataclass, field
 
@@ -47,6 +48,64 @@ def fmt_num(value: float | None, digits: int = 0) -> str:
     if value is None or (isinstance(value, float) and math.isnan(value)):
         return DASH
     return f"{value:.{digits}f}"
+
+
+_NB_RE = re.compile(r"(?<=[\d%]) (?=[\d°%A-Za-zµ/])")
+
+
+def nb(text: str) -> str:
+    """No-break spaces inside number groups and between a number and its unit
+    ("5 300 rpm", "12.4 °C", "42 %"), so a wrapping label never splits a reading across
+    two lines. Spaces between words are left alone."""
+    return _NB_RE.sub("\u00a0", text)
+
+
+def norm_app_key(text: str) -> str:
+    """One comparable form for an application id, desktop file id, StartupWMClass or
+    executable name: lower case, no .desktop, only the last part of a reverse-DNS id,
+    no separators ("app-gnome-tuf\\x2dcontrol\\x2dgui" scope -> "tufcontrolgui")."""
+    t = text.strip().lower()
+    if t.endswith(".desktop"):
+        t = t[:-8]
+    if t.count(".") >= 2:
+        t = t.rsplit(".", 1)[-1]
+    return re.sub(r"[^a-z0-9]", "", t)
+
+
+OWN_APP_ID = "io.github.hamzagouda.TufControl"
+OWN_APP_KEYS = {norm_app_key(k) for k in (OWN_APP_ID, "tuf-control", "tuf-control-gui")}
+
+
+def desktop_index(entries) -> dict[str, object]:
+    """key -> app info for (desktop id, StartupWMClass, executable basename) triples,
+    first entry wins. `entries` yields (info, desktop_id, wm_class, exec_line)."""
+    out: dict[str, object] = {}
+    for info, did, wm, exec_line in entries:
+        keys = [did, wm or ""]
+        first = (exec_line or "").split(" ")[0]
+        keys.append(first.rsplit("/", 1)[-1])
+        for k in keys:
+            nk = norm_app_key(k)
+            if nk and nk not in out:
+                out[nk] = info
+    return out
+
+
+def signal_refusal(pid: int | None, own_pids, kind: str = "proc") -> str | None:
+    """Why Stop / Force Stop must not signal this target (None when it may)."""
+    if pid == 1:
+        return "PID 1 is the init system: stopping it would take the session down"
+    if pid is not None and pid in own_pids:
+        return "This is TUF Control itself"
+    return None
+
+
+def column_totals(cpu, mem_pct, swap_pct, drive_pct, gpu_pct, vram_pct) -> dict[str, str]:
+    """Header second lines like Mission Center's ("4%"); '' while unknown."""
+    def f(v):
+        return "" if v is None else f"{v:.0f}%"
+    return {"cpu": f(cpu), "mem": f(mem_pct), "swap": f(swap_pct), "disk": f(drive_pct),
+            "gpu": f(gpu_pct), "vram": f(vram_pct)}
 
 
 def fmt_rpm(value: int | None) -> str:
@@ -358,6 +417,21 @@ class CurveGeometry:
         return self.plot_w / (hi_t - lo_t), self.plot_h / FanCurve.PWM_RANGE[1]
 
 
+def bubble_rect(x: float, y: float, tw: float, th: float, w: float, h: float,
+                left: float, right: float) -> tuple[float, float, float, float]:
+    """Where the fan-curve readout bubble ("62° · 62%") goes for a point at (x, y) on a
+    w×h canvas: centred above the point (below it when there is no room), kept over the
+    plot horizontally, and never outside the canvas, so it is not clipped at an edge."""
+    bw, bh = tw + 16.0, th + 8.0
+    bx = min(max(x - bw / 2, left), w - right - bw)
+    bx = max(2.0, min(bx, w - bw - 2.0))
+    by = y - th - 22.0
+    if by <= 2.0:
+        by = y + 14.0
+    by = max(2.0, min(by, h - bh - 2.0))
+    return bx, by, bw, bh
+
+
 # -- battery -----------------------------------------------------------------------------
 
 CHARGE_PRESETS = (60, 80, 100)
@@ -423,7 +497,10 @@ def gpu_action_text(action: GpuAction | None, pending: GpuMode | None = None) ->
     }.get(action) if action is not None else None
 
 
+DGPU_LOST_TEXT = ("GPU unavailable: the NVIDIA driver lost the GPU (runtime power error). "
+                  "A restart usually recovers it.")
 DGPU_POWER_TEXT = {
+    "error": "Unavailable (lost by the driver)",
     "active": "Active", "suspended": "Sleeping", "off": "Powered off",
     "disabled": "Disabled in firmware", "mux-discreet": "Driving the display",
     "suspending": "Going to sleep", "resuming": "Waking up",

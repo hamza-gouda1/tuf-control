@@ -98,6 +98,7 @@ class Chart(Gtk.DrawingArea):
         self._xs: list[list[float]] = [[] for _ in lines]
         self._ys: list[list[float]] = [[] for _ in lines]
         self.hover_x: float | None = None
+        self._seen: tuple[float, float] | None = None  # axis range only ever widens
         if not compact:
             mo = Gtk.EventControllerMotion()
             mo.connect("motion", self._motion)
@@ -117,7 +118,7 @@ class Chart(Gtk.DrawingArea):
         dark = theme.is_dark()
         pal = theme.colours()
         layout = make_layout(cr)
-        layout.set_font_description(theme.mono_font(7.5 if self.compact else 8.0))
+        layout.set_font_description(theme.mono_font(8.5 if self.compact else 9.5))
         now = store.last_t
         t1 = now if now is not None else 0.0
         t0 = t1 - self.window_s
@@ -155,7 +156,7 @@ class Chart(Gtk.DrawingArea):
                         lo = v
                     if v > hi:
                         hi = v
-        target = 3 if self.compact else max(2, min(4, int((h - 28) / 34)))
+        target = 3 if self.compact else max(3, min(6, int((h - 28) / 30)))
         if self.y_fixed:
             ymin, ymax = self.y_fixed
             if hi > ymax:  # never clip a real value
@@ -166,6 +167,11 @@ class Chart(Gtk.DrawingArea):
             ymin, ymax, step = nice_range(lo if lo != math.inf else 0.0,
                                           hi if hi != -math.inf else 0.0,
                                           self.floor, self.min_span, target)
+            # the axis must not move with the data: it only widens, never shrinks
+            if self._seen is not None:
+                ymin, ymax = min(ymin, self._seen[0]), max(ymax, self._seen[1])
+                step = nice_step(ymax - ymin, target)
+            self._seen = (ymin, ymax)
         ticks = []
         v = ymin
         while v <= ymax + step * 1e-6 and len(ticks) < 12:
@@ -209,9 +215,9 @@ class Chart(Gtk.DrawingArea):
             cr.set_dash([])
         # time axis
         ty = gt + ph + (2 if self.compact else 5)
-        for frac, lab in ((0.0, f"−{int(self.window_s)} s"),
-                         (0.5, f"−{int(self.window_s / 2)} s"),
-                          (1.0, "now")):
+        marks = ((0.0, 0.5, 1.0) if self.compact else (0.0, 0.25, 0.5, 0.75, 1.0))
+        for frac in marks:
+            lab = "now" if frac == 1.0 else f"−{int(self.window_s * (1 - frac))} s"
             x = gl + frac * pw
             if not self.compact and 0 < frac < 1:
                 cr.set_source_rgba(*pal["grid"])
@@ -498,7 +504,9 @@ class Meter(Gtk.DrawingArea):
 
 def legend(items: list[tuple[str, str]]) -> Gtk.Box:
     """A row of colour swatches with labels."""
-    box = Gtk.Box(spacing=14)
+    box = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE, column_spacing=14, row_spacing=2,
+                      max_children_per_line=len(items) or 1, homogeneous=False,
+                      valign=Gtk.Align.CENTER)  # wraps onto a second line when narrow
     box.add_css_class("chart-legend")
     for text, name in items:
         sw = Gtk.DrawingArea(content_width=10, content_height=10, valign=Gtk.Align.CENTER)
@@ -510,8 +518,8 @@ def legend(items: list[tuple[str, str]]) -> Gtk.Box:
         sw.set_draw_func(draw)
         item = Gtk.Box(spacing=6)
         item.append(sw)
-        lab = Gtk.Label(label=text, xalign=0)
-        lab.set_ellipsize(Pango.EllipsizeMode.END)
+        lab = Gtk.Label(label=text, xalign=0, wrap=True, wrap_mode=Pango.WrapMode.WORD_CHAR)
         item.append(lab)
         box.append(item)
+        item.get_parent().set_focusable(False)
     return box

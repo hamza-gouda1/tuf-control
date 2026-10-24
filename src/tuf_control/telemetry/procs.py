@@ -42,6 +42,19 @@ def parse_io(data: bytes) -> tuple[int, int] | None:
     return None if r is None or w is None else (r, w)
 
 
+def parse_vmswap(data: bytes) -> int | None:
+    """Swapped-out bytes of a process: the VmSwap line of /proc/pid/status (kB there).
+    None when the line is absent (kernel threads, or a kernel without swap accounting)."""
+    i = data.find(b"\nVmSwap:")
+    if i < 0:
+        return None
+    line = data[i + 1:data.find(b"\n", i + 1)]
+    try:
+        return int(line.split()[1]) * 1024
+    except (IndexError, ValueError):
+        return None
+
+
 def unescape_unit(s: str) -> str:
     return re.sub(r"\\x([0-9a-fA-F]{2})", lambda m: chr(int(m.group(1), 16)), s)
 
@@ -71,7 +84,7 @@ def app_from_cgroup(text: str) -> tuple[str | None, str | None]:
 
 class Proc:
     __slots__ = ("pid", "ppid", "start", "name", "cmd", "uid", "state", "threads", "cpu",
-                 "mem", "rss", "io_read", "io_write", "gpu", "vram", "app", "unit", "kthread",
+                 "mem", "rss", "swap", "io_read", "io_write", "gpu", "vram", "app", "unit", "kthread",
                  "_ticks", "_io", "_t", "seen")
 
     def __init__(self, pid: int, start: int) -> None:
@@ -82,6 +95,7 @@ class Proc:
         self.ppid = self.threads = 0
         self.cpu = self.io_read = self.io_write = None
         self.mem = self.rss = 0
+        self.swap = None
         self.gpu = self.vram = None
         self.app = self.unit = None
         self.kthread = False
@@ -165,6 +179,9 @@ class ProcessWalker:
             else:
                 p.rss = rss_pages * PAGE
                 p.mem = p.rss
+            if not p.kthread:
+                stx = read_bytes(base + "/status", 4096)
+                p.swap = parse_vmswap(stx) if stx else None
             if p.uid == self.my_uid:
                 io = read_bytes(base + "/io", 1024)
                 cur = parse_io(io) if io else None

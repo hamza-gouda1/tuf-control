@@ -38,7 +38,7 @@ class StoragePage(MonitorPage):
         p = Panel(title, legend([("read", "primary"), ("write", "gold")]))
         p.append(self.chart([Line(f"disk.{name}.read", "read"),
                              Line(f"disk.{name}.write", "write", "gold", fill=False)],
-                            floor=0, min_span=1e5, fmt=fmt.axis_rate, height=150))
+                            floor=0, min_span=1e7, fmt=fmt.axis_rate, height=150))
         p.append(legend([("busy %", "slate")]))
         p.append(self.chart([Line(f"disk.{name}.busy", "busy", "slate")], y_fixed=(0, 100),
                             fmt=lambda v: f"{v:.0f}%", height=80))
@@ -93,15 +93,16 @@ class StoragePage(MonitorPage):
             self.fs_rows.append(note("No block-device file systems mounted."))
         for m in mounts:
             row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+            wrap = {"wrap": True, "wrap_mode": Pango.WrapMode.WORD_CHAR}
             top = Gtk.Box(spacing=10)
-            top.append(label(m["mount"], ("fs-mount",), ellipsize=Pango.EllipsizeMode.MIDDLE))
-            top.append(label(f"{m['fstype']} · {m['source']}", ("dim-label", "stat-sub"),
-                             hexpand=True, ellipsize=Pango.EllipsizeMode.END))
+            top.append(label(m["mount"], ("fs-mount",), hexpand=True, **wrap))
             frac = m["used"] / m["size"] if m["size"] else 0
             top.append(label(f"{fmt.bytes_(m['used'])} of {fmt.bytes_(m['size'])} · "
                              f"{fmt.bytes_(m['avail'])} free", ("numeric", "stat-sub"),
-                             xalign=1.0))
+                             xalign=1.0, **wrap))
             row.append(top)
+            row.append(label(f"{m['fstype']} · {m['source']}", ("dim-label", "stat-sub"),
+                             **wrap))
             meter = Meter(height=8)
             meter.set_hexpand(True)
             meter.set_value(frac, "rose" if frac > 0.9 else "primary")

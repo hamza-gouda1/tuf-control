@@ -302,6 +302,13 @@ class NvidiaGpu:
         rs, ps = runtime_state(self.dev["dir"])
         out.update({"runtime": rs, "power_state": ps, "addr": self.dev["addr"],
                     "name": self.name()})
+        if rs == "error":  # the driver lost the GPU (NVRM rpc errors): do not poll it
+            self.release()
+            self._idle = 0
+            self.procs = {}
+            out["state"] = "lost"
+            info["dgpu"] = out
+            return
         if rs is not None and rs != "active":
             self.release()
             self._idle = 0

@@ -7,6 +7,7 @@ from ...telemetry import fmt
 from ...telemetry.gpu_intel import ENGINE_NAMES
 from ...telemetry.util import join, read_str
 from ..charts import Line, legend
+from ..viewmodels import DGPU_LOST_TEXT
 from ..widgets import label
 from .monitor_base import MonitorPage, StatGrid, note, set_text
 
@@ -23,6 +24,8 @@ class ProcTable(Gtk.Box):
         self._key = None
         self._names: dict[int, str] = {}
         self.empty = note("No processes reported.")
+        self.show_pid = True
+        self.pid_labels: list[Gtk.Label] = []
 
     def name(self, pid: int) -> str:
         n = self._names.get(pid)
@@ -44,21 +47,33 @@ class ProcTable(Gtk.Box):
         if not rows:
             self.append(self.empty)
             return
+        self.pid_labels = []
         head = Gtk.Box(spacing=12)
         head.add_css_class("gpu-procs-head")
         head.append(label("Process", ("stat-caption",), hexpand=True))
+        self.pid_labels.append(label("PID", ("stat-caption",), xalign=1.0, width_chars=6))
+        head.append(self.pid_labels[-1])
         for c in self.columns:
-            head.append(label(c, ("stat-caption",), xalign=1.0, width_chars=9))
+            head.append(label(c, ("stat-caption",), xalign=1.0, width_chars=7))
         self.append(head)
         for pid, cells in rows:
             r = Gtk.Box(spacing=12)
             r.add_css_class("gpu-procs-row")
-            r.append(label(f"{self.name(pid)}", ("numeric",), hexpand=True,
-                           ellipsize=Pango.EllipsizeMode.END))
-            r.append(label(str(pid), ("dim-label", "numeric"), xalign=1.0, width_chars=7))
+            r.append(label(f"{self.name(pid)}", ("numeric",), hexpand=True, wrap=True,
+                           wrap_mode=Pango.WrapMode.WORD_CHAR))
+            self.pid_labels.append(label(str(pid), ("dim-label", "numeric"), xalign=1.0,
+                                         width_chars=6))
+            r.append(self.pid_labels[-1])
             for c in cells:
-                r.append(label(c, ("numeric",), xalign=1.0, width_chars=9))
+                r.append(label(c, ("numeric",), xalign=1.0, width_chars=7))
             self.append(r)
+        self.set_show_pid(self.show_pid)
+
+    def set_show_pid(self, show: bool) -> None:
+        """The PID column goes first when the window is phone-sized."""
+        self.show_pid = show
+        for lab in self.pid_labels:
+            lab.set_visible(show)
 
 
 class IntelGpuPage(MonitorPage):
@@ -90,7 +105,7 @@ class IntelGpuPage(MonitorPage):
                                                 ("requested MHz", "gold")]))
         fp.append(self.chart([Line("igpu.freq", "actual"),
                               Line("igpu.freq_req", "requested", "gold", fill=False)],
-                             floor=0, min_span=200, fmt=lambda v: f"{v:.0f}", height=130))
+                             floor=0, min_span=1600, fmt=lambda v: f"{v:.0f}", height=130))
         ep = self.panel("Engines")
         self.engines = StatGrid(2, 5)
         ep.append(self.engines)
@@ -98,6 +113,9 @@ class IntelGpuPage(MonitorPage):
         pp = self.panel("Processes using the iGPU")
         self.procs = ProcTable(self.hub.root, ["busy"])
         pp.append(self.procs)
+
+    def fit_width(self, level: int) -> None:
+        self.procs.set_show_pid(level < 3)
 
     def update(self) -> None:
         st = self.hub.store
@@ -163,17 +181,20 @@ class NvidiaGpuPage(MonitorPage):
         vp.append(self.vram_chart)
         cp = self.panel("Clock, temperature and power")
         cp.append(legend([("graphics MHz", "primary")]))
-        cp.append(self.chart([Line("dgpu.gr_mhz", "graphics")], floor=0, min_span=300,
+        cp.append(self.chart([Line("dgpu.gr_mhz", "graphics")], floor=0, min_span=3000,
                              fmt=lambda v: f"{v:.0f}", height=110))
         cp.append(legend([("°C", "rose"), ("W", "gold")]))
         cp.append(self.chart([Line("dgpu.temp", "°C", "rose", fill=False),
-                              Line("dgpu.power", "W", "gold", fill=False)], floor=0,
-                             min_span=20, fmt=lambda v: f"{v:.0f}", height=110))
+                              Line("dgpu.power", "W", "gold", fill=False)], y_fixed=(0, 100),
+                             fmt=lambda v: f"{v:.0f}", height=110))
         pp = self.panel("Processes using the dGPU")
         self.procs = ProcTable(self.hub.root, ["type", "VRAM", "SM"])
         pp.append(self.procs)
         pp.append(note("A process listed here with a few MiB (often the compositor) holds a "
                        "context on the GPU; that alone can keep it from sleeping."))
+
+    def fit_width(self, level: int) -> None:
+        self.procs.set_show_pid(level < 3)
 
     def update(self) -> None:
         st = self.hub.store
@@ -191,6 +212,16 @@ class NvidiaGpuPage(MonitorPage):
         g.set("runtime", f"{rs or 'no runtime PM'} · {ps or '–'}")
         g.set("source", {"nvml": "NVML (libnvidia-ml)", "nvidia-smi": "nvidia-smi (every 5 s)",
                          "fake": "fake tree"}.get(dg.get("backend"), "–"))
+        if stt == "lost":
+            set_text(self.state_label, "Unavailable")
+            self.sleep_note.set_visible(True)
+            set_text(self.sleep_note, DGPU_LOST_TEXT)
+            g.set("runtime", "power error · driver lost the GPU")
+            for k in ("util", "vram", "gr", "mem", "temp", "power", "pstate", "fan", "enc"):
+                g.set(k, "–")
+            self.procs.set_rows([])
+            self.redraw()
+            return
         if stt in ("sleeping", "idle-released"):
             set_text(self.state_label, f"Sleeping ({ps or 'D3'})" if stt == "sleeping"
                      else "Idle, released")

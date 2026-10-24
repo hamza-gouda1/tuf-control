@@ -9,6 +9,7 @@ from gi.repository import Adw, GLib, Gtk, Pango, PangoCairo
 from . import theme
 from .viewmodels import (
     CurveGeometry,
+    bubble_rect,
     FanCurveModel,
     History,
     pwm_to_pct,
@@ -245,7 +246,7 @@ class FanCurveCanvas(Gtk.DrawingArea):
         lo_t, hi_t = FanCurve.TEMP_RANGE
         # grid + axis labels
         layout = PangoCairo.create_layout(cr)
-        layout.set_font_description(theme.mono_font(8.5))
+        layout.set_font_description(theme.mono_font(9.5))
         cr.set_line_width(1)
         for pct in (0, 25, 50, 75, 100):
             _, y = g.to_px(lo_t, pct * 255 / 100)
@@ -317,12 +318,11 @@ class FanCurveCanvas(Gtk.DrawingArea):
         if self.active is not None:
             t, p = self.model.points[self.active]
             x, y = pts[self.active]
-            layout.set_font_description(theme.mono_font(9, "Semi-Bold"))
+            layout.set_font_description(theme.mono_font(10.5, "Semi-Bold"))
             layout.set_text(f"{t}° · {pwm_to_pct(p):.0f}%", -1)
             tw, th = layout.get_pixel_size()
-            bx = min(max(x - tw / 2 - 8, g.left), w - g.right - tw - 16)
-            by = y - th - 22 if y - th - 22 > 2 else y + 14
-            _round_rect(cr, bx, by, tw + 16, th + 8, 7)
+            bx, by, bw, bh = bubble_rect(x, y, tw, th, w, h, g.left, g.right)
+            _round_rect(cr, bx, by, bw, bh, 7)
             cr.set_source_rgba(*pal["line"], 0.95)
             cr.fill()
             cr.set_source_rgb(1, 0.97, 0.96)

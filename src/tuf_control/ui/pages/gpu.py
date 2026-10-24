@@ -5,6 +5,7 @@ from gi.repository import Adw, Gtk
 from ...core import GpuAction
 from ..tasks import run_bg
 from ..viewmodels import (
+    DGPU_LOST_TEXT,
     DGPU_POWER_TEXT,
     GPU_MODE_INFO,
     GPU_UI_ORDER,
@@ -12,7 +13,7 @@ from ..viewmodels import (
     gpu_action_text,
     gpu_switch_requirement,
 )
-from .base import Page, button, info_row, pill, prefs_page, value_row
+from .base import Page, a11y_name, button, info_row, pill, prefs_page, value_row
 
 
 class GpuPage(Page):
@@ -72,6 +73,7 @@ class GpuPage(Page):
             title, sub = GPU_MODE_INFO[mode]
             row = Adw.ActionRow(title=title, subtitle=sub)
             chk = Gtk.CheckButton(valign=Gtk.Align.CENTER)
+            a11y_name(chk, title)
             if group:
                 chk.set_group(group)
             group = group or chk
@@ -135,5 +137,6 @@ class GpuPage(Page):
         asleep = t.gpu_runtime not in (None, "active")
         self.temp_val.set_label("–" if asleep else f"{fmt_num(t.gpu_temp_c)} °C")
         self.draw_val.set_label("–" if asleep else f"{fmt_num(t.gpu_power_w, 1)} W")
+        self.power_row.set_subtitle(DGPU_LOST_TEXT if t.gpu_runtime == "error" else "")
         if t.gpu_runtime:
             self.power_val.set_label(DGPU_POWER_TEXT.get(t.gpu_runtime, t.gpu_runtime))

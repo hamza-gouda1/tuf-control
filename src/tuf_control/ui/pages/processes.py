@@ -15,26 +15,45 @@ from gi.repository import Gio, GLib, GObject, Gtk, Pango
 from ...telemetry import fmt
 from ...telemetry.procs import alive, kill
 from ..widgets import label
+from ..viewmodels import (OWN_APP_ID, OWN_APP_KEYS, column_totals, desktop_index,
+                          norm_app_key, signal_refusal)
 from .monitor_base import MonitorPage, set_text
 
 COLUMNS = [  # key, title, width chars, tooltip
     ("name", "Name", 0, None),
-    ("pid", "PID", 7, None),
-    ("cpu", "CPU", 7, "Share of the whole processor (all logical CPUs = 100 %)"),
-    ("mem", "Memory", 9, "Private memory: resident minus shared pages (statm)"),
-    ("disk", "Disk", 10, "Read + write at the storage layer, per second (your processes only)"),
-    ("gpu", "GPU", 6, "Busiest engine on the iGPU (DRM fdinfo) or SM use on the dGPU (NVML)"),
-    ("vram", "VRAM", 9, "dGPU memory (NVML)"),
+    ("pid", "PID", 6, None),
+    ("cpu", "CPU", 6, "Share of the whole processor (all logical CPUs = 100 %)"),
+    ("mem", "Memory", 8, "Private memory: resident minus shared pages (statm)"),
+    ("swap", "Swap", 8, "Swapped-out memory of the process (VmSwap in /proc/PID/status)"),
+    ("disk", "Drive", 9, "Read + write at the storage layer, per second (your processes only)"),
+    ("gpu", "GPU", 5, "Busiest engine on the iGPU (DRM fdinfo) or SM use on the dGPU (NVML)"),
+    ("vram", "GPU memory", 9, "dGPU memory (NVML)"),
 ]
 SORT_KEYS = {
     "name": lambda r: r.name.lower(),
     "pid": lambda r: r.pid or 0,
     "cpu": lambda r: r.cpu or 0.0,
     "mem": lambda r: r.mem or 0,
+    "swap": lambda r: r.swap or 0,
     "disk": lambda r: (r.io_r or 0) + (r.io_w or 0),
     "gpu": lambda r: r.gpu or 0.0,
     "vram": lambda r: r.vram or 0,
 }
+
+
+SYSTEM_KEY = "__system__"
+
+
+def _ancestors(w):
+    p = w.get_parent()
+    while p is not None:
+        yield p
+        p = p.get_parent()
+
+
+def _sum_opt(values) -> int | None:
+    vals = [v for v in values if v is not None]
+    return sum(vals) if vals else None
 
 
 class Row(GObject.Object):
@@ -51,6 +70,7 @@ class Row(GObject.Object):
         self.cmd = ""
         self.cpu = self.gpu = None
         self.mem = self.vram = 0
+        self.swap = None
         self.io_r = self.io_w = None
         self.count = 1
         self.children: Gio.ListStore | None = None
@@ -68,6 +88,8 @@ class Row(GObject.Object):
             return fmt.pct(self.cpu, 1) if self.cpu is not None else "–"
         if col == "mem":
             return fmt.bytes_(self.mem) if self.mem else "–"
+        if col == "swap":
+            return fmt.bytes_(self.swap) if self.swap is not None else "–"
         if col == "disk":
             if self.io_r is None and self.io_w is None:
                 return "–"
@@ -104,16 +126,25 @@ class ProcessesPage(MonitorPage):
             self.mode[key] = b
         bar.append(seg)
         self.search = Gtk.SearchEntry(placeholder_text="Filter by name, command or PID",
-                                      hexpand=True)
+                                      hexpand=True,
+                                      tooltip_text="Filter by name, command or PID")
         self.search.connect("search-changed", lambda *_: self._rebuild(force=True))
         bar.append(self.search)
-        self.end_btn = Gtk.Button(label="End task…", sensitive=False)
-        self.end_btn.add_css_class("destructive-action")
-        self.end_btn.connect("clicked", lambda *_: self._end_task())
-        bar.append(self.end_btn)
         outer.append(bar)
-        self.summary = label("", ("section-caption", "numeric"))
-        outer.append(self.summary)
+        self.end_btn = Gtk.Button(label="Stop", sensitive=False,
+                                  tooltip_text="Ask the selected app or process to quit (SIGTERM)")
+        self.end_btn.connect("clicked", lambda *_: self._end_task(signal.SIGTERM))
+        self.kill_btn = Gtk.Button(label="Force Stop", sensitive=False,
+                                   tooltip_text="Kill the selected app or process (SIGKILL)")
+        self.kill_btn.add_css_class("destructive-action")
+        self.kill_btn.connect("clicked", lambda *_: self._end_task(signal.SIGKILL))
+        sum_row = Gtk.Box(spacing=8)
+        self.summary = label("", ("section-caption", "numeric"), hexpand=True, wrap=True,
+                             wrap_mode=Pango.WrapMode.WORD_CHAR)
+        sum_row.append(self.summary)
+        sum_row.append(self.end_btn)  # a second row: the filter keeps its width when narrow
+        sum_row.append(self.kill_btn)
+        outer.append(sum_row)
 
         self.root_store = Gio.ListStore(item_type=Row)
         self.tree = Gtk.TreeListModel.new(self.root_store, False, False, self._children)
@@ -146,11 +177,21 @@ class ProcessesPage(MonitorPage):
 
         self.rows: dict = {}
         self.apps: dict[str, tuple[str, object] | None] = {}  # app id -> (name, gicon)
+        self._dindex: dict | None = None
+        self._aligned = False
         self.view = "apps"
         self._gen = -1
         self._order: list = []
         self.mode["apps"].set_active(True)
         cv.get_sorter().connect("changed", lambda *_: self._rebuild(force=True))
+
+    def fit_columns(self, level: int) -> None:
+        """Fewer columns as the window narrows (Drive, Swap and GPU memory up to 900 sp; PID and GPU too
+        up to 460 sp) so the table never needs a horizontal scrollbar."""
+        hide = ({"disk", "vram", "swap"} if level >= 1 else set()) | (
+            {"pid", "gpu"} if level >= 3 else set())
+        for key, col in self.cols.items():
+            col.set_visible(key not in hide)
 
     # -- visibility --------------------------------------------------------------------
     def on_shown(self) -> None:
@@ -195,7 +236,7 @@ class ProcessesPage(MonitorPage):
                 w.img.set_visible(row.kind == "app")
                 w.img.set_from_icon_name("application-x-executable-symbolic")
             w.lab.set_label(row.text("name"))
-            w.set_tooltip_text(row.cmd or None)
+            w.set_tooltip_text(row.cmd or row.text("name"))
             row.cells["name"] = w.lab
         else:
             w.set_label(row.text(key))
@@ -218,6 +259,16 @@ class ProcessesPage(MonitorPage):
             found = self.apps[app_id]
             return found if found is None or found[1] is not None or launched else None
         found = None
+        nk = norm_app_key(app_id)
+        if nk in OWN_APP_KEYS:  # this app, whatever launcher or scope name started it
+            try:
+                info = Gio.DesktopAppInfo.new(OWN_APP_ID + ".desktop")
+            except TypeError:
+                info = None
+            found = (info.get_name() if info else "TUF Control",
+                     info.get_icon() if info else Gio.ThemedIcon.new(OWN_APP_ID))
+            self.apps[app_id] = found
+            return found
         for cand in (app_id, app_id.split(".")[-1] if "." in app_id else None,
                      app_id.lower()):
             if not cand:
@@ -229,6 +280,10 @@ class ProcessesPage(MonitorPage):
             if info is not None:
                 found = (info.get_name(), info.get_icon())
                 break
+        if found is None:  # by StartupWMClass, executable name or a differently spelled id
+            info = self._desktop_index().get(nk)
+            if info is not None:
+                found = (info.get_name(), info.get_icon())
         for d in ("/etc/xdg/autostart", os.path.expanduser("~/.config/autostart")):
             if found is None and os.path.exists(f"{d}/{app_id}.desktop"):
                 info = Gio.DesktopAppInfo.new_from_filename(f"{d}/{app_id}.desktop")
@@ -241,6 +296,17 @@ class ProcessesPage(MonitorPage):
             found = (base.replace("-", " ").replace("_", " ").strip().title() or app_id, None)
         self.apps[app_id] = found
         return found
+
+    def _desktop_index(self) -> dict:
+        """Built once, on first need: every installed app by id, StartupWMClass and exec."""
+        if self._dindex is None:
+            def entries():
+                for info in Gio.AppInfo.get_all():
+                    if isinstance(info, Gio.DesktopAppInfo):
+                        yield (info, info.get_id() or "", info.get_startup_wm_class(),
+                               info.get_string("Exec") or "")
+            self._dindex = desktop_index(entries())
+        return self._dindex
 
     def _mode_changed(self, b, key):
         if b.get_active() and key != self.view:
@@ -270,6 +336,7 @@ class ProcessesPage(MonitorPage):
             r.name = f"[{p.name}]" if p.kthread else p.name
             r.cmd = p.cmd
         r.cpu, r.mem, r.io_r, r.io_w = p.cpu, p.mem, p.io_read, p.io_write
+        r.swap = p.swap
         r.gpu, r.vram = p.gpu, p.vram
         r.procs = [p]
         return r
@@ -311,6 +378,7 @@ class ProcessesPage(MonitorPage):
                 groups.setdefault(app, []).append(p)
             rows = []
             n_procs = 0
+            assigned: set[int] = set()
             for app, members in groups.items():
                 info = self._app_info(app, any((m.unit or "").startswith("app-")
                                                for m in members))
@@ -327,27 +395,24 @@ class ProcessesPage(MonitorPage):
                     r.children = Gio.ListStore(item_type=Row)
                     r.cmd = app
                 live.add(app)
-                kids = [self._proc_row(m) for m in members]
-                for k in kids:
-                    live.add(k.key)
-                kids.sort(key=keyf, reverse=desc)
-                r.count = len(kids)
-                n_procs += len(kids)
-                r.cpu = sum(k.cpu or 0 for k in kids)
-                r.mem = sum(k.mem for k in kids)
-                ios = [k for k in kids if k.io_r is not None]
-                r.io_r = sum(k.io_r for k in ios) if ios else None
-                r.io_w = sum(k.io_w or 0 for k in ios) if ios else None
-                r.gpu = min(100.0, sum(k.gpu or 0 for k in kids)) or None
-                r.vram = sum(k.vram or 0 for k in kids)
-                r.uid = kids[0].uid if all(k.uid == kids[0].uid for k in kids) else -1
-                r.procs = [k.procs[0] for k in kids]
-                if [id(k) for k in kids] != [id(k) for k in r.child_rows]:
-                    r.child_rows = kids
-                    r.children.splice(0, r.children.get_n_items(), kids)
+                n_procs += self._fill_group(r, members, keyf, desc, live)
+                assigned.update(m.pid for m in members)
                 rows.append(r)
             rows.sort(key=keyf, reverse=desc)
-            set_text(self.summary, f"{len(rows)} apps · {n_procs} of {len(procs)} processes · "
+            others = [p for p in procs if p.pid not in assigned and not p.kthread and (
+                not q or q in p.name.lower() or q in p.cmd.lower() or q == str(p.pid))]
+            if others:  # everything that is not an app, in one group at the bottom
+                r = self.rows.get(SYSTEM_KEY)
+                if r is None:
+                    r = self.rows[SYSTEM_KEY] = Row(SYSTEM_KEY, "app")
+                    r.name, r.cmd = "System processes", "Services and background processes"
+                    r.children = Gio.ListStore(item_type=Row)
+                live.add(SYSTEM_KEY)
+                self._fill_group(r, others, keyf, desc, live)
+                r.count = len(others)
+                rows.append(r)
+            n_apps = len(rows) - (1 if others else 0)
+            set_text(self.summary, f"{n_apps} apps · {n_procs} of {len(procs)} processes · "
                      f"CPU {total_cpu:.1f} %")
         for k in [k for k in self.rows if k not in live]:
             del self.rows[k]
@@ -358,6 +423,72 @@ class ProcessesPage(MonitorPage):
                 text = r.text(col)
                 if w.get_label() != text:
                     w.set_label(text)
+        self._update_titles(total_cpu)
+
+    def _update_titles(self, total_cpu: float) -> None:
+        """Column headers carry the machine-wide figure under the name, like Mission
+        Center ("CPU / 4%"): CPU, memory, swap, drive busy, GPU busy, VRAM used."""
+        st, info = self.hub.store, self.hub.info
+        mem = info.get("mem") or {}
+        tot = mem.get("total") or 0
+        memp = 100.0 * (tot - (mem.get("available") or 0)) / tot if tot else None
+        swp = 100.0 * (mem.get("swap_used") or 0) / mem["swap_total"] \
+            if mem.get("swap_total") else None
+        disks = (info.get("disk") or {}).get("disks") or {}
+        busy = [b for b in (st.last(f"disk.{n}.busy") for n in disks) if b is not None]
+        gpus = [g for g in (st.last("igpu.util"), st.last("dgpu.util")) if g is not None]
+        q = (info.get("dgpu") or {}).get("q") or {}
+        vram = 100.0 * q["vram_used"] / q["vram_total"] \
+            if q.get("vram_used") is not None and q.get("vram_total") else None
+        tots = column_totals(total_cpu, memp, swp, max(busy) if busy else None,
+                             max(gpus) if gpus else None, vram)
+        for key, title, _c, _t in COLUMNS:
+            want = f"{title}\n{tots[key]}" if tots.get(key) else title
+            col = self.cols[key]
+            if col.get_title() != want:
+                col.set_title(want)
+        if not self._aligned:
+            self._aligned = True
+            GLib.idle_add(self._align_headers)
+
+    def _align_headers(self) -> bool:
+        """Numeric columns right-align their cells; their header text follows."""
+        stack = [self.cv]
+        while stack:
+            w = stack.pop()
+            if isinstance(w, Gtk.Label) and any(
+                    a.__gtype__.name == "GtkColumnViewTitle" for a in _ancestors(w)):
+                if w.get_text().split("\n")[0] != "Name":
+                    w.set_xalign(1.0)
+                    w.set_justify(Gtk.Justification.RIGHT)
+                    w.set_hexpand(True)
+            c = w.get_first_child()
+            while c is not None:
+                stack.append(c)
+                c = c.get_next_sibling()
+        return GLib.SOURCE_REMOVE
+
+    def _fill_group(self, r: Row, members, keyf, desc, live) -> int:
+        """Sum a group's member processes into its row; returns how many there are."""
+        kids = [self._proc_row(m) for m in members]
+        for k in kids:
+            live.add(k.key)
+        kids.sort(key=keyf, reverse=desc)
+        r.count = len(kids)
+        r.cpu = sum(k.cpu or 0 for k in kids)
+        r.mem = sum(k.mem for k in kids)
+        r.swap = _sum_opt(k.swap for k in kids)
+        ios = [k for k in kids if k.io_r is not None]
+        r.io_r = sum(k.io_r for k in ios) if ios else None
+        r.io_w = sum(k.io_w or 0 for k in ios) if ios else None
+        r.gpu = min(100.0, sum(k.gpu or 0 for k in kids)) or None
+        r.vram = sum(k.vram or 0 for k in kids)
+        r.uid = kids[0].uid if all(k.uid == kids[0].uid for k in kids) else -1
+        r.procs = [k.procs[0] for k in kids]
+        if [id(k) for k in kids] != [id(k) for k in r.child_rows]:
+            r.child_rows = kids
+            r.children.splice(0, r.children.get_n_items(), kids)
+        return len(kids)
 
     def _splice(self, rows: list[Row]) -> None:
         selected = self._selected_row()
@@ -390,27 +521,46 @@ class ProcessesPage(MonitorPage):
 
     def _selection_changed(self) -> None:
         r = self._selected_row()
-        mine = r is not None and r.uid == os.getuid()
-        self.end_btn.set_sensitive(bool(mine))
-        self.end_btn.set_tooltip_text(None if r is None or mine else
-                                      "Owned by another user: ending it needs root")
+        mine = r is not None and r.uid == os.getuid() and self._refusal(r) is None
+        for b in (self.end_btn, self.kill_btn):
+            b.set_sensitive(bool(mine))
+        why = None
+        if r is not None and not mine:
+            why = self._refusal(r) or "Owned by another user: stopping it needs root"
+        self.end_btn.set_tooltip_text(why or "Ask the selected app or process to quit (SIGTERM)")
+        self.kill_btn.set_tooltip_text(why or "Kill the selected app or process (SIGKILL)")
+
+    def _refusal(self, r: Row) -> str | None:
+        own = {os.getpid()}
+        for p in r.procs:
+            why = signal_refusal(p.pid, own)
+            if why:
+                return why
+        return signal_refusal(r.pid, own)
 
     def _targets(self, r: Row) -> list[tuple[int, int]]:
         return [(p.pid, p.start) for p in r.procs if p.uid == os.getuid()]
 
-    def _end_task(self) -> None:
+    def _end_task(self, sig=signal.SIGTERM) -> None:
         r = self._selected_row()
-        if r is None:
+        if r is None or self._refusal(r):
             return
         targets = self._targets(r)
         if not targets:
             return
         what = r.name if r.kind == "app" else f"{r.name} (PID {r.pid})"
         n = len(targets)
-        body = (f"Asks {'its ' + str(n) + ' processes' if n > 1 else 'it'} to quit (SIGTERM). "
-                "Unsaved work may be lost.")
-        self.win.confirm(f"End {what}?", body, "End task",
-                         lambda: self._signal(what, targets, signal.SIGTERM), destructive=True)
+        who = f"its {n} processes" if n > 1 else "it"
+        if sig == signal.SIGKILL:
+            self.win.confirm(f"Force stop {what}?",
+                             f"Kills {who} at once (SIGKILL). It gets no chance to save "
+                             "anything.", "Force Stop",
+                             lambda: self._signal(what, targets, signal.SIGKILL),
+                             destructive=True)
+            return
+        self.win.confirm(f"Stop {what}?", f"Asks {who} to quit (SIGTERM). Unsaved work may "
+                         "be lost.", "Stop", lambda: self._signal(what, targets, signal.SIGTERM),
+                         destructive=True)
 
     def _signal(self, what: str, targets, sig) -> None:
         if self.hub.fake:  # fake PIDs could belong to real processes: never signal them

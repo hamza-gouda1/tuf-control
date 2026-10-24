@@ -5,6 +5,17 @@ All notable changes to this project. Format follows Keep a Changelog; versions f
 ## [Unreleased]
 
 ### Added
+- Quick Settings extension: an OSD names the new performance profile (Quiet / Balanced /
+  Performance) when it changes outside the menu, e.g. Fn+F5 through asusd, with the
+  power-profiles-daemon fallback too. Not for the startup value; bursts within 300 ms show only
+  the last. `ProfileAnnouncer` in `profiles.js`, tested with a fake clock and enable/disable cycles.
+- `install.sh`: when the Focus Keys extension (bordeaux-gnome) is installed and enabled, the
+  Armoury keys (XF86Launch3, XF86Launch1) and the Copilot key go into its `bindings` (merged,
+  recorded, removed again by `--uninstall`) so a press raises the open window instead of a
+  "TUF Control is ready" notification. An earlier install is migrated: our TUF Control and
+  Claude custom shortcuts and the retargeted XF86Launch1 one are removed; `takeover.tsv` is kept
+  and `--uninstall` puts the original Armoury shortcut back in the list. `--no-focus-keys` keeps
+  custom shortcuts. The mic key stays a custom shortcut.
 - System monitor: `tuf_control.telemetry` (/proc, /sys, NVML via ctypes; one sampler, ring
   buffers), a new Dashboard with live cards, and Processes, Processor, Memory, NVIDIA graphics,
   Intel graphics, Fans & temps, Storage and Network pages. Pages build on first visit; Cairo

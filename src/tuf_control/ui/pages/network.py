@@ -14,17 +14,15 @@ class NetworkPage(MonitorPage):
     def __init__(self, win) -> None:
         super().__init__(win)
         self.name, self.sub, pills = self.header("Network", "")
-        self.virtual = Gtk.Switch(valign=Gtk.Align.CENTER)
+        self.virtual = Gtk.CheckButton(label="Show virtual interfaces", valign=Gtk.Align.CENTER)
+        self.virtual.add_css_class("tall-check")
         self.virtual.connect("notify::active", lambda *_: self.update())
-        box = Gtk.Box(spacing=8, valign=Gtk.Align.CENTER)
-        box.append(Gtk.Label(label="Virtual interfaces"))
-        box.append(self.virtual)
-        pills.append(box)
+        pills.append(self.virtual)
         tp = self.panel("All physical interfaces", suffix=legend([("receive", "primary"),
                                                                   ("send", "gold")]))
         tp.append(self.chart([Line("net.rx", "receive"), Line("net.tx", "send", "gold",
                                                               fill=False)],
-                             floor=0, min_span=1e5, fmt=fmt.axis_rate, height=170))
+                             floor=0, min_span=1e6, fmt=fmt.axis_rate, height=170))
         self.ifaces: dict[str, tuple] = {}
         self.box = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE, homogeneous=True,
                                min_children_per_line=1, max_children_per_line=2,
@@ -38,7 +36,7 @@ class NetworkPage(MonitorPage):
         p = Panel(f"{name} · {meta['kind']}")
         p.append(self.chart([Line(f"net.{name}.rx", "receive"),
                              Line(f"net.{name}.tx", "send", "gold", fill=False)],
-                            floor=0, min_span=1e4, fmt=fmt.axis_rate, height=110))
+                            floor=0, min_span=1e5, fmt=fmt.axis_rate, height=110))
         g = StatGrid(2, 3)
         for key, cap in (("rx", "Receive"), ("tx", "Send"), ("state", "State"),
                          ("rxt", "Received since boot"), ("txt", "Sent since boot"),

@@ -45,10 +45,11 @@ class MetricCard(Gtk.Box):
                              valign=Gtk.Align.END)
         row.append(self.extra)
         self.append(row)
-        self.chart = page.chart(lines, window_s=WINDOW_S, compact=True, height=86, **chart_kw)
+        self.chart = page.chart(lines, window_s=WINDOW_S, compact=True, height=112, **chart_kw)
         self.chart.set_margin_top(6)
         self.append(self.chart)
-        self.foot = label("", ("stat-sub", "numeric"), ellipsize=Pango.EllipsizeMode.END)
+        self.foot = label("", ("stat-sub", "numeric"), wrap=True,
+                          wrap_mode=Pango.WrapMode.WORD_CHAR)
         self.foot.set_margin_top(4)
         self.append(self.foot)
 
@@ -89,14 +90,14 @@ class DashboardPage(MonitorPage):
         self.pills = Gtk.Box(spacing=6, halign=Gtk.Align.START)
         self.body.append(self.pills)
         pct = dict(y_fixed=(0, 100), fmt=lambda v: f"{v:.0f}%")
-        rpm = dict(floor=0, min_span=1000, fmt=lambda v: f"{v / 1000:g}k")
-        rate = dict(floor=0, min_span=1e5, fmt=fmt.axis_rate)
+        rpm = dict(y_fixed=(0, 7000), fmt=lambda v: f"{v / 1000:g}k")
+        rate = dict(floor=0, min_span=1e6, fmt=fmt.axis_rate)
         C = MetricCard
         self.cpu = C(self, "cpu", "Processor", "computer-symbolic", [Line("cpu.total")], **pct)
         self.cpu_temp = self.cpu.mini("°C pkg")
         self.cpu_freq = self.cpu.mini("GHz avg")
         self.mem = C(self, "memory", "Memory", "media-flash-symbolic",
-                     [Line("mem.in_use", scale=1 / GIB)], floor=0, min_span=1,
+                     [Line("mem.in_use", scale=1 / GIB)], floor=0, min_span=16,
                      fmt=lambda v: f"{v:g} G")
         self.mem_swap = self.mem.mini("GiB swap")
         self.mem_avail = self.mem.mini("GiB avail")
@@ -124,7 +125,7 @@ class DashboardPage(MonitorPage):
                      **rate)
         self.net_tx = self.net.mini("up")
         self.bat = C(self, "battery", "Battery", "battery-level-80-symbolic",
-                     [Line("bat.power")], floor=0, min_span=10, fmt=lambda v: f"{v:g} W")
+                     [Line("bat.power")], floor=0, min_span=60, fmt=lambda v: f"{v:g} W")
         self.bat_pct = self.bat.mini("% charge")
         self.bat_health = self.bat.mini("% health")
 
@@ -229,6 +230,7 @@ class DashboardPage(MonitorPage):
                      (f" · requested {req:.0f} MHz" if req is not None else ""))
             set_text(self.igpu.title, (ig.get("name") or "Intel graphics")
                      .replace(" Graphics", ""))
+            self.igpu.title.set_tooltip_text(ig.get("name") or "Intel graphics")
         else:
             self.igpu.set_value("–")
             set_text(self.igpu.foot, ig.get("reason") or "No Intel GPU")
@@ -297,7 +299,15 @@ class DashboardPage(MonitorPage):
             return
         name = dg.get("name") or "NVIDIA graphics"
         set_text(c.title, name.replace("NVIDIA GeForce ", "GeForce ").replace(" Laptop GPU", ""))
+        c.title.set_tooltip_text(name)
         state = dg.get("state")
+        if state == "lost":
+            c.set_value("Unavailable")
+            set_text(c.foot, "driver lost the GPU · restart usually recovers it")
+            c.set_badge("Error", "gold")
+            set_text(self.dgpu_temp, "–")
+            set_text(self.dgpu_power, "–")
+            return
         if state in ("sleeping", "idle-released"):
             sleeping = state == "sleeping"
             c.set_value("Sleeping" if sleeping else "Idle")
