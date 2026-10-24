@@ -24,11 +24,50 @@ GNOME Shell 46 only. On Wayland a new extension appears after you log out and in
 `xyz.ljones.Asusd` and falls back to power-profiles-daemon. It never sets colours: it follows the
 shell theme.
 
-## Armoury Crate key shortcut
+When the profile changes outside its menu, for example with **Fn+F5** (asusd cycles the platform
+profile and announces it with `PropertiesChanged`) or from another app, it shows the new profile
+(Quiet, Balanced or Performance) in an on-screen display like the volume keys do. The value it
+reads at startup is not announced, and several presses within 300 ms show only the last one.
+
+## App keys with Focus Keys (recommended)
+
+A GNOME custom shortcut runs a command. On Wayland a command cannot hand the focus to an app that
+is already running, so pressing the Armoury key with TUF Control open only gives a "TUF Control is
+ready" notification. The `focus-keys@hamza-gouda` extension from
+[bordeaux-gnome](https://github.com/hamza-gouda1/bordeaux-gnome) has the shell raise the window
+instead (on any workspace), or start the app when it is not running.
+
+When it is installed for your user **and enabled** (bordeaux-gnome's `./install.sh` does both),
+`./install.sh` writes our keys into its shortcut list instead of making custom shortcuts:
+
+| Key | Opens |
+| --- | --- |
+| XF86Launch3 (Armoury Crate key, or the `--hotkey` you chose) | TUF Control |
+| XF86Launch1 (the other Armoury key code, only with the default `--hotkey`) | TUF Control |
+| Copilot key, `<Shift><Super>XF86TouchpadOff` (`--copilot-key`) | Claude (`com.anthropic.Claude.desktop`) |
+
+The mic key stays a custom shortcut (`playerctl play-pause` is a command, not an app). Entries you
+already have are kept; a key used by one of your own custom shortcuts is skipped with a note. Our
+entries are listed in `~/.local/state/tuf-control/backup/focus-keys.added` and `--uninstall`
+removes exactly those (the list as it was before is in `focus-keys.orig`).
+
+**Migration from an earlier install:** the custom shortcuts "TUF Control" (`.../tuf-control/`),
+"Claude" (`.../tuf-control-claude/`) and the XF86Launch1 shortcut that was retargeted from the
+old "ASUS Armoury Control Center" are removed, so the extension is the only owner of those keys
+(the shell gives each key to one grab). `takeover.tsv` is kept, so `--uninstall` still restores
+your original "ASUS Armoury Control Center" shortcut and puts it back in the list.
+
+Order: run bordeaux-gnome's `./install.sh` first, then this one; log out and back in once so the
+extension starts. Without the extension (or with `--no-focus-keys`) everything below applies
+unchanged; running `./install.sh` again after removing the extension brings the custom shortcuts
+back.
+
+## Armoury Crate key shortcut (without Focus Keys)
 
 `./install.sh` also adds a GNOME custom shortcut named "TUF Control" that runs
 `~/.local/bin/tuf-control-gui` on **XF86Launch3**. The app has a fixed application id, so
-pressing the key again raises the running window instead of starting a second copy. Your other
+pressing the key again does not start a second copy (on Wayland GNOME may only notify you that it
+is ready; see Focus Keys above). Your other
 custom shortcuts are kept: the entry `.../custom-keybindings/tuf-control/` is appended to the list,
 the previous list is saved to `~/.local/state/tuf-control/backup/custom-keybindings.list`, and
 `--uninstall` removes only our entry. If another custom shortcut already uses the key, ours is not

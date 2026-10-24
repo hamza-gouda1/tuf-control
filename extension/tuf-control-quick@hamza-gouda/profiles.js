@@ -135,3 +135,70 @@ export class ProfileModel extends Emitter {
         this.clear();
     }
 }
+
+/**
+ * Announces profile changes that happen after startup (Fn+F5 cycles them in
+ * asusd, other apps may set them too) through `show(profile)`, typically an
+ * OSD. The first profile a backend reports is only a baseline, and so is any
+ * switch of backend; a burst of changes within `delay` ms shows only the last.
+ *
+ * timers = {schedule(ms, fn) -> handle, cancel(handle)}
+ */
+export class ProfileAnnouncer {
+    constructor(model, {schedule, cancel, show, delay = 300}) {
+        this._model = model;
+        this._schedule = schedule;
+        this._cancel = cancel;
+        this._show = show;
+        this._delay = delay;
+        this._backend = model.backend;
+        this._last = model.profile;
+        this._pending = null;
+        this.shown = 0;
+        this._id = model.connect(() => this._changed());
+    }
+
+    _changed() {
+        const backend = this._model.backend, profile = this._model.profile;
+        if (backend !== this._backend) {
+            this._backend = backend;
+            this._last = profile;
+            this._stop();
+            return;
+        }
+        if (!profile)
+            return;
+        if (this._last === null) {
+            this._last = profile;
+            return;
+        }
+        if (profile === this._last && this._pending === null)
+            return; // something else changed (choices, charge limit)
+        this._last = profile;
+        this._stop();
+        this._pending = this._schedule(this._delay, () => {
+            this._pending = null;
+            this.shown++;
+            this._show(this._last);
+        });
+    }
+
+    _stop() {
+        if (this._pending !== null) {
+            this._cancel(this._pending);
+            this._pending = null;
+        }
+    }
+
+    get pending() {
+        return this._pending !== null;
+    }
+
+    destroy() {
+        if (!this._model)
+            return;
+        this._stop();
+        this._model.disconnect(this._id);
+        this._model = null;
+    }
+}

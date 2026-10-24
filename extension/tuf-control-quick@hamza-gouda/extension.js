@@ -2,9 +2,11 @@
 // SPDX-FileCopyrightText: 2026 Hamza Gouda
 //
 // TUF Control Quick Settings: a "Performance" menu toggle with a Quiet /
-// Balanced / Performance submenu. The look is the shell theme's own; nothing
-// here sets colours.
+// Balanced / Performance submenu, and an OSD naming the new profile whenever
+// it changes outside the menu too (Fn+F5 cycles it in asusd). The look is the
+// shell theme's own; nothing here sets colours.
 
+import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
 import Gio from 'gi://Gio';
 
@@ -15,7 +17,7 @@ import {QuickMenuToggle, SystemIndicator} from 'resource:///org/gnome/shell/ui/q
 
 import {AsusdProfileSource, GpuModeSource, PpdProfileSource} from './dbus.js';
 import {
-    ICONS, LABELS, PROFILES, ProfileModel, chargeLabel, gpuModeName, subtitleFor,
+    ICONS, LABELS, PROFILES, ProfileAnnouncer, ProfileModel, chargeLabel, gpuModeName, subtitleFor,
 } from './profiles.js';
 
 const APP_DESKTOP_ID = 'io.github.hamzagouda.TufControl.desktop';
@@ -146,9 +148,26 @@ export default class TufControlQuickExtension extends Extension {
         ]);
         this._indicator = new ProfileIndicator(this._model, this._asusd, this._gpu);
         Main.panel.statusArea.quickSettings.addExternalIndicator(this._indicator);
+        // GNOME shows nothing when Fn+F5 (asusd) or another app switches the
+        // profile: show the new one in an OSD, like the volume keys do.
+        this._announcer = new ProfileAnnouncer(this._model, {
+            schedule: (ms, fn) => {
+                const id = GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms, () => {
+                    fn();
+                    return GLib.SOURCE_REMOVE;
+                });
+                GLib.Source.set_name_by_id(id, '[tuf-control-quick] profile osd');
+                return id;
+            },
+            cancel: id => GLib.source_remove(id),
+            show: profile => Main.osdWindowManager.show(-1,
+                Gio.ThemedIcon.new(ICONS[profile] ?? ICONS.balanced), LABELS[profile] ?? profile, null),
+        });
     }
 
     disable() {
+        this._announcer?.destroy();
+        this._announcer = null;
         // Destroying the indicator removes its quick settings items from the grid.
         this._indicator?.destroy();
         this._indicator = null;

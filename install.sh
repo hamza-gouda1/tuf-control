@@ -28,14 +28,22 @@ HOTKEY=${TUF_CONTROL_HOTKEY:-XF86Launch3}
 # Copilot key (Shift+Super+F23; XKB calls F23 XF86TouchpadOff) opens Claude, the mic key toggles music.
 COPILOT_KEY=${TUF_CONTROL_COPILOT_KEY:-<Shift><Super>XF86TouchpadOff}
 MIC_KEY=${TUF_CONTROL_MIC_KEY:-XF86AudioMicMute}
+# The Focus Keys GNOME Shell extension (from bordeaux-gnome) raises an app's open window from
+# a shortcut; a custom shortcut running a launcher only gets an "is ready" notification on
+# Wayland. When it is installed and enabled, the app keys are written into its `bindings`.
+FOCUS_UUID=focus-keys@hamza-gouda
+FOCUS_SCHEMA=org.gnome.shell.extensions.focus-keys
+FOCUS_SCHEMAS=$DATA_HOME/gnome-shell/extensions/$FOCUS_UUID/schemas
+CLAUDE_ID=com.anthropic.Claude
 
-DRY=0 UNINSTALL=0 SYSTEM=0 WITH_EXT=1 WITH_HOTKEY=1 WITH_COPILOT=1 WITH_MIC=1
+DRY=0 UNINSTALL=0 SYSTEM=0 WITH_EXT=1 WITH_HOTKEY=1 WITH_COPILOT=1 WITH_MIC=1 WITH_FOCUS=1
 
 usage() {
     cat <<USAGE
 Usage: ./install.sh [--dry-run] [--uninstall] [--system] [--no-extension]
                   [--no-hotkey] [--hotkey=KEYSYM]
                   [--no-copilot-key] [--copilot-key=ACCEL] [--no-mic-key] [--mic-key=KEYSYM]
+                  [--no-focus-keys]
 
   (default)       install for the current user under ~/.local (no root, no downloads)
   --dry-run       show what would happen, change nothing
@@ -55,6 +63,11 @@ Usage: ./install.sh [--dry-run] [--uninstall] [--system] [--no-extension]
   --no-mic-key    do not bind the mic key to play/pause (this also leaves the
                   mic-mute settings of GNOME alone)
   --mic-key=KEYSYM  other key for play/pause (default XF86AudioMicMute)
+  --no-focus-keys use GNOME custom shortcuts for the app keys even when the Focus Keys
+                  extension (bordeaux-gnome) is installed. With it, the Armoury keys
+                  (XF86Launch3 and XF86Launch1) and the Copilot key go into its shortcut
+                  list instead, so a second press brings the open window to the front;
+                  our earlier custom shortcuts for them are removed
 USAGE
 }
 
@@ -70,6 +83,7 @@ for arg in "$@"; do
         --copilot-key=*) COPILOT_KEY=${arg#--copilot-key=} ;;
         --no-mic-key) WITH_MIC=0 ;;
         --mic-key=*) MIC_KEY=${arg#--mic-key=} ;;
+        --no-focus-keys) WITH_FOCUS=0 ;;
         -h | --help) usage; exit 0 ;;
         *) echo "unknown option: $arg" >&2; usage >&2; exit 2 ;;
     esac
@@ -206,9 +220,22 @@ add_shortcut() {
 }
 
 # The owner's old shortcut on XF86Launch1 that opens the retired asus-control app is retargeted
-# to TUF Control. Its old name/command/binding are kept in takeover.tsv for uninstall.
+# to TUF Control (MODE retarget) or, when Focus Keys takes the key, removed (MODE remove: the
+# path goes to MIGRATE). Its old name/command/binding are kept in takeover.tsv for uninstall.
 takeover_launch1() {
-    local p n c tsv=$BACKUP_DIR/takeover.tsv
+    local mode=${1:-retarget} p n c b tsv=$BACKUP_DIR/takeover.tsv
+    # Taken over earlier and since removed by a Focus Keys install: bring it back as TUF Control.
+    if [ "$mode" = retarget ] && [ -e "$tsv" ]; then
+        while IFS=$'\t' read -r p n c b; do
+            [ -n "$p" ] || continue
+            case " ${KB_CUR[*]} " in *" $p "*) continue ;; esac
+            say "shortcut $b: re-adding \"TUF Control\" ($BIN_DIR/tuf-control-gui)"
+            act gsettings set "$KB_ITEM:$p" name 'TUF Control'
+            act gsettings set "$KB_ITEM:$p" command "$BIN_DIR/tuf-control-gui"
+            act gsettings set "$KB_ITEM:$p" binding "$b"
+            KB_NEW+=("$p")
+        done <"$tsv"
+    fi
     for p in "${KB_CUR[@]}"; do
         [ -n "$p" ] || continue
         case $p in "$KB_BASE"/tuf-control*) continue ;; esac
@@ -216,10 +243,14 @@ takeover_launch1() {
         [ "${n#XF86}" = Launch1 ] || continue
         n=$(kb_get "$p" name)
         c=$(kb_get "$p" command)
-        case "$c|$n" in
-            *asus-control*|*Armoury*) ;;
-            *) say "shortcut: XF86Launch1 is used by \"$n\" ($c), left alone"; continue ;;
-        esac
+        if [ -e "$tsv" ] && grep -q "^$p	" "$tsv"; then
+            : # ours since an earlier run (retargeted to TUF Control)
+        else
+            case "$c|$n" in
+                *asus-control*|*Armoury*) ;;
+                *) say "shortcut: XF86Launch1 is used by \"$n\" ($c), left alone"; continue ;;
+            esac
+        fi
         if [ ! -e "$tsv" ] || ! grep -q "^$p	" "$tsv"; then
             act mkdir -p "$BACKUP_DIR"
             if [ "$DRY" = 1 ]; then
@@ -228,10 +259,168 @@ takeover_launch1() {
                 printf '%s\t%s\t%s\tXF86Launch1\n' "$p" "$n" "$c" >>"$tsv"
             fi
         fi
+        if [ "$mode" = remove ]; then
+            MIGRATE+=("$p")
+            continue
+        fi
         say "shortcut XF86Launch1: retargeting \"$n\" -> \"TUF Control\" ($BIN_DIR/tuf-control-gui)"
         act gsettings set "$KB_ITEM:$p" name 'TUF Control'
         act gsettings set "$KB_ITEM:$p" command "$BIN_DIR/tuf-control-gui"
     done
+}
+
+# -- Focus Keys extension ---------------------------------------------------------------
+MIGRATE=()
+
+focus_gs() { GSETTINGS_SCHEMA_DIR="$FOCUS_SCHEMAS${GSETTINGS_SCHEMA_DIR:+:$GSETTINGS_SCHEMA_DIR}" gsettings "$@"; }
+focus_schema() {
+    [ -f "$FOCUS_SCHEMAS/gschemas.compiled" ] &&
+        focus_gs list-keys "$FOCUS_SCHEMA" 2>/dev/null | grep -qx bindings
+}
+
+# True when the extension is installed for this user (with its schema) and enabled.
+focus_available() {
+    [ "$WITH_FOCUS" = 1 ] && focus_schema || return 1
+    case $(gsettings get org.gnome.shell enabled-extensions 2>/dev/null) in
+        *"'$FOCUS_UUID'"*) return 0 ;;
+    esac
+    say "shortcuts: Focus Keys is installed but not enabled, using custom shortcuts (enable it, then run this again)"
+    return 1
+}
+
+claude_installed() {
+    [ -e "$DATA_HOME/applications/$CLAUDE_ID.desktop" ] || [ -e "/usr/share/applications/$CLAUDE_ID.desktop" ]
+}
+
+# focus_merge CURRENT IGNORED ENTRY...: CURRENT is the bindings value (GVariant text), IGNORED
+# the custom-shortcut paths (one per line) that are being removed. Prints the merged list, then
+# "add|have|skip<TAB>entry[<TAB>why]" per entry. A key that already has an entry (the user's own
+# choice) or is used by another GNOME custom shortcut is skipped.
+focus_merge() {
+    python3 - "$@" <<'PY'
+import re
+import sys
+
+from gi.repository import Gio, GLib
+
+ALIAS = {"ctrl": "control", "ctl": "control", "primary": "control", "mod1": "alt", "mod4": "super"}
+
+
+def norm(a):
+    mods, rest = set(), a.strip()
+    while (m := re.match(r"<([^>]+)>", rest)):
+        n = m.group(1).lower()
+        mods.add(ALIAS.get(n, n))
+        rest = rest[m.end():]
+    k = rest.strip().lower()
+    return "".join(f"<{x}>" for x in sorted(mods)) + (k[4:] if k.startswith("xf86") else k)
+
+
+def custom(ignored):
+    mk = "org.gnome.settings-daemon.plugins.media-keys"
+    if not Gio.SettingsSchemaSource.get_default().lookup(mk, True):
+        return {}
+    out = {}
+    for p in Gio.Settings.new(mk).get_strv("custom-keybindings"):
+        if p in ignored:
+            continue
+        c = Gio.Settings.new_with_path(mk + ".custom-keybinding", p)
+        if c.get_string("binding"):
+            out[norm(c.get_string("binding"))] = c.get_string("name")
+    return out
+
+
+cur = list(GLib.Variant.parse(GLib.VariantType("as"), sys.argv[1]).unpack())
+have = {norm(e.rpartition("=")[0]) for e in cur if "=" in e}
+taken = custom(set(sys.argv[2].split("\n")))
+lines = []
+for e in sys.argv[3:]:
+    k = norm(e.rpartition("=")[0])
+    if e in cur:
+        lines.append(f"have\t{e}")
+    elif k in have:
+        lines.append(f"skip\t{e}\tthat key already has a Focus Keys shortcut")
+    elif k in taken:
+        lines.append(f"skip\t{e}\tthe GNOME custom shortcut \"{taken[k]}\" uses that key")
+    else:
+        cur.append(e)
+        have.add(k)
+        lines.append(f"add\t{e}")
+print(GLib.Variant("as", cur).print_(False))
+print("\n".join(lines))
+PY
+}
+
+# Our earlier custom shortcuts for the app keys; Focus Keys replaces them.
+collect_migrate() {
+    local p
+    for p in "${KB_CUR[@]}"; do
+        case $p in "$KB_BASE/tuf-control/" | "$KB_BASE/tuf-control-claude/") MIGRATE+=("$p") ;; esac
+    done
+    if [ "$HOTKEY" = XF86Launch3 ]; then takeover_launch1 remove; fi
+}
+
+install_focus_bindings() {
+    local entries=("$HOTKEY=$APP_ID.desktop") cur merged new verb entry why added=$BACKUP_DIR/focus-keys.added
+    if [ "$HOTKEY" = XF86Launch3 ]; then entries+=("XF86Launch1=$APP_ID.desktop"); fi
+    if [ "$WITH_COPILOT" = 1 ]; then
+        if claude_installed; then
+            entries+=("$COPILOT_KEY=$CLAUDE_ID.desktop")
+        else
+            say "shortcut: Claude desktop entry not found, skipping the Copilot key"
+        fi
+    fi
+    cur=$(focus_gs get "$FOCUS_SCHEMA" bindings)
+    if [ ! -e "$BACKUP_DIR/focus-keys.orig" ]; then
+        act mkdir -p "$BACKUP_DIR"
+        if [ "$DRY" = 1 ]; then
+            say "+ save the Focus Keys bindings to $BACKUP_DIR/focus-keys.orig"
+        else
+            printf '%s\n' "$cur" >"$BACKUP_DIR/focus-keys.orig"
+        fi
+    fi
+    merged=$(focus_merge "$cur" "$(printf '%s\n' "${MIGRATE[@]}")" "${entries[@]}")
+    new=$(head -1 <<<"$merged")
+    while IFS=$'\t' read -r verb entry why; do
+        case $verb in
+            add | have)
+                [ "$verb" = have ] || say "Focus Keys: ${entry%=*} -> ${entry##*=} (brings the open window to the front)"
+                if [ "$DRY" = 0 ] && ! grep -qxF "$entry" "$added" 2>/dev/null; then
+                    printf '%s\n' "$entry" >>"$added"
+                fi ;;
+            skip) say "Focus Keys: not adding $entry: $why" ;;
+        esac
+    done < <(sed 1d <<<"$merged")
+    if [ "$new" != "$cur" ]; then
+        if [ "$DRY" = 1 ]; then say "+ gsettings set $FOCUS_SCHEMA bindings $new"; else focus_gs set "$FOCUS_SCHEMA" bindings "$new"; fi
+    fi
+}
+
+uninstall_focus_bindings() {
+    local added=$BACKUP_DIR/focus-keys.added left
+    [ -e "$added" ] || return 0
+    if focus_schema; then
+        left=$(python3 - "$(focus_gs get "$FOCUS_SCHEMA" bindings)" "$added" <<'PY'
+import sys
+
+from gi.repository import GLib
+
+cur = GLib.Variant.parse(GLib.VariantType("as"), sys.argv[1]).unpack()
+ours = set(open(sys.argv[2]).read().splitlines())
+left = [e for e in cur if e not in ours]
+print(GLib.Variant("as", left).print_(False) if left else "RESET")
+PY
+)
+        say "removing our Focus Keys shortcuts (yours are kept)"
+        if [ "$DRY" = 1 ]; then
+            say "+ gsettings $([ "$left" = RESET ] && echo "reset $FOCUS_SCHEMA bindings" || echo "set $FOCUS_SCHEMA bindings $left")"
+        elif [ "$left" = RESET ]; then
+            focus_gs reset "$FOCUS_SCHEMA" bindings
+        else
+            focus_gs set "$FOCUS_SCHEMA" bindings "$left"
+        fi
+    fi
+    act rm -f "$added" "$BACKUP_DIR/focus-keys.orig"
 }
 
 # Stop GNOME from toggling the microphone on the mic key so it can pause/resume music instead.
@@ -256,7 +445,7 @@ claim_mic_key() {
 }
 
 install_hotkey() {
-    local raw p keep=()
+    local raw p k keep=()
     if ! kb_available; then
         say "shortcuts: gsettings or the GNOME media-keys schema is missing, skipping"
         return 0
@@ -274,14 +463,24 @@ install_hotkey() {
             printf '%s\n' "${KB_CUR[@]}" >"$BACKUP_DIR/custom-keybindings.list"
         fi
     fi
-    add_shortcut tuf-control "TUF Control" "$BIN_DIR/tuf-control-gui" "$HOTKEY"
-    if [ "$HOTKEY" = XF86Launch3 ]; then takeover_launch1; fi
-    if [ "$WITH_COPILOT" = 1 ]; then
-        if [ -e "$DATA_HOME/applications/com.anthropic.Claude.desktop" ] ||
-           [ -e /usr/share/applications/com.anthropic.Claude.desktop ]; then
-            add_shortcut tuf-control-claude "Claude" "gtk-launch com.anthropic.Claude" "$COPILOT_KEY"
-        else
-            say "shortcut: Claude desktop entry not found, skipping the Copilot key"
+    if focus_available; then
+        # Focus Keys raises the open window; our app custom shortcuts would only launch
+        # (and clash with its grabs), so they go.
+        collect_migrate
+        for p in "${MIGRATE[@]}"; do
+            say "shortcut: removing \"$(kb_get "$p" name)\" on $(kb_get "$p" binding) ($p), Focus Keys takes that key"
+            for k in name command binding; do act gsettings reset "$KB_ITEM:$p" "$k"; done
+        done
+        install_focus_bindings
+    else
+        add_shortcut tuf-control "TUF Control" "$BIN_DIR/tuf-control-gui" "$HOTKEY"
+        if [ "$HOTKEY" = XF86Launch3 ]; then takeover_launch1; fi
+        if [ "$WITH_COPILOT" = 1 ]; then
+            if claude_installed; then
+                add_shortcut tuf-control-claude "Claude" "gtk-launch $CLAUDE_ID" "$COPILOT_KEY"
+            else
+                say "shortcut: Claude desktop entry not found, skipping the Copilot key"
+            fi
         fi
     fi
     if [ "$WITH_MIC" = 1 ]; then
@@ -295,9 +494,10 @@ install_hotkey() {
     for p in "${KB_CUR[@]}" "${KB_NEW[@]}"; do
         [ -n "$p" ] || continue
         case " ${keep[*]:-} " in *" $p "*) continue ;; esac
+        case " ${MIGRATE[*]:-} " in *" $p "*) continue ;; esac
         keep+=("$p")
     done
-    if [ "${#KB_NEW[@]}" -gt 0 ]; then kb_write "${keep[@]}"; fi
+    if [ "${#KB_NEW[@]}" -gt 0 ] || [ "${#MIGRATE[@]}" -gt 0 ]; then kb_write "${keep[@]}"; fi
 }
 
 uninstall_hotkey() {
@@ -316,7 +516,6 @@ uninstall_hotkey() {
     done
     if [ "$found" = 1 ]; then
         say "removing our GNOME shortcuts (other custom shortcuts are untouched)"
-        kb_write "${keep[@]}"
     fi
     if [ -e "$BACKUP_DIR/takeover.tsv" ]; then
         while IFS=$'\t' read -r p n c b; do
@@ -325,9 +524,13 @@ uninstall_hotkey() {
             act gsettings set "$KB_ITEM:$p" name "$n"
             act gsettings set "$KB_ITEM:$p" command "$c"
             act gsettings set "$KB_ITEM:$p" binding "$b"
+            # A Focus Keys install took it out of the list; put it back.
+            case " ${keep[*]:-} " in *" $p "*) ;; *) keep+=("$p"); found=1 ;; esac
         done <"$BACKUP_DIR/takeover.tsv"
         act rm -f "$BACKUP_DIR/takeover.tsv"
     fi
+    if [ "$found" = 1 ]; then kb_write "${keep[@]}"; fi
+    uninstall_focus_bindings
     if [ -e "$BACKUP_DIR/media-keys.tsv" ]; then
         while IFS=$'\t' read -r k v; do
             [ -n "$k" ] || continue
