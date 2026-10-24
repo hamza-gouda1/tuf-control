@@ -174,12 +174,15 @@ class Controller:
                           detail=f"set keyboard effect mode {effect.mode}")
         if verify and res.applied:
             got = (self.get_kbd_rgb()[0] or {}).get("mode_data") or {}
-            want = {"mode": effect.mode, "colour1": list(effect.colour1)}
-            have = {"mode": got.get("mode"), "colour1": list(got.get("colour1") or [])}
+            want = {"mode": effect.mode, "colour1": list(effect.colour1),
+                    "colour2": list(effect.colour2)}
+            have = {"mode": got.get("mode"), "colour1": list(got.get("colour1") or []),
+                    "colour2": list(got.get("colour2") or effect.colour2)}
             if have != want:
                 raise BackendError(f"{res.backend} accepted the keyboard effect but reports "
-                                   f"mode {have['mode']} colour {have['colour1']} instead of "
-                                   f"mode {want['mode']} colour {want['colour1']}")
+                                   f"mode {have['mode']} colour {have['colour1']} / "
+                                   f"{have['colour2']} instead of mode {want['mode']} colour "
+                                   f"{want['colour1']} / {want['colour2']}")
         return res
 
     # -- fans -------------------------------------------------------------------

@@ -109,7 +109,11 @@ def build_fake_tree(root: str | Path, *, ppt_readable: bool = True,
                                       "pending_action": None}))
     _w(fake / "aura.json", json.dumps({"mode": 0, "zone": 0, "colour1": [142, 42, 68],
                                        "colour2": [201, 174, 134], "speed": 1, "direction": 0,
-                                       "supported_modes": FAKE_AURA_MODES}))
+                                       "supported_modes": FAKE_AURA_MODES, "device_type": 2,
+                                       "builtins": {"1": {
+                                           "mode": 1, "zone": 0, "colour1": [142, 42, 68],
+                                           "colour2": [201, 174, 134], "speed": 1,
+                                           "direction": 0}}}))
     return root
 
 
@@ -182,9 +186,15 @@ class FakeBackend(SysfsBackend):
 
     def get_kbd_rgb(self) -> dict:
         a = self._load("aura.json")
-        data = {k: a[k] for k in ("mode", "zone", "colour1", "colour2", "speed", "direction")}
+        keys = ("mode", "zone", "colour1", "colour2", "speed", "direction")
+        data = {k: a[k] for k in keys}
         cur, mx = self.get_kbd_brightness()
+        # like asusd: per-mode settings (AllModeData) and the TUF device type (colour2 is
+        # stored but a TUF keyboard only shows colour1)
+        builtins = {int(m): v for m, v in (a.get("builtins") or {}).items()}
+        builtins[data["mode"]] = data
         return {"path": "fake", "led_mode": a["mode"], "mode_data": data, "brightness": cur,
+                "device_type": a.get("device_type", 2), "builtins": builtins,
                 "supported_modes": a.get("supported_modes", FAKE_AURA_MODES),
                 "supported_brightness": list(range(mx + 1))}
 
@@ -193,6 +203,8 @@ class FakeBackend(SysfsBackend):
         a = self._load("aura.json")
         a.update(mode=effect.mode, zone=effect.zone, colour1=list(effect.colour1),
                  colour2=list(effect.colour2), speed=effect.speed, direction=effect.direction)
+        a.setdefault("builtins", {})[str(effect.mode)] = {
+            k: a[k] for k in ("mode", "zone", "colour1", "colour2", "speed", "direction")}
         self._save("aura.json", a)
 
     def reset_fan_curves(self, profile: Profile) -> None:

@@ -339,6 +339,24 @@ def popover_shots(win, out: Path, scheme: str, suffix: str, render, render_over)
     yield 300
 
 
+def keyboard_shots(win, out: Path, scheme: str, suffix: str, render):
+    """Hardware Breathe on the single-colour (TUF) fake keyboard: firmware Colour 1 <-> off,
+    then the Two colours switch (Colour 2, palettes, a fading swatch)."""
+    kb = win.pages["keyboard"]
+    win.show_page("keyboard")
+    kb.preview.fixed_t = kb.swatch.fixed_t = 1.3
+    yield 900
+    kb.mode_row.set_selected(kb.form.modes.index(1))
+    yield 400
+    render(win.get_content(), out / f"keyboard-breathe-{scheme}{suffix}.png")
+    kb.blend_row.set_active(True)
+    kb.preview.fixed_t = kb.swatch.fixed_t = 2.0  # half a cycle: all Colour 2
+    yield 500
+    render(win.get_content(), out / f"keyboard-breathe-two-{scheme}{suffix}.png")
+    kb.mode_row.set_selected(kb.form.modes.index(0))
+    yield 300
+
+
 def inner(args) -> int:
     import gi
     gi.require_version("Gtk", "4.0")
@@ -469,6 +487,8 @@ def inner(args) -> int:
             win.last_dialog.force_close()
             page.refresh()
             yield 300
+        if args.keyboard:
+            yield from keyboard_shots(win, out, scheme, suffix, render)
         if args.popovers:
             yield from popover_shots(win, out, scheme, suffix, render, render_over)
         if args.automation:
@@ -531,6 +551,8 @@ def main() -> int:
     p.add_argument("--exercise", action="store_true",
                    help="drive profile/fan/GPU/keyboard/battery writes against the fake tree")
     p.add_argument("--user-theme", action="store_true", help="keep ~/.config/gtk-4.0 styles")
+    p.add_argument("--keyboard", action="store_true",
+                   help="keyboard page: hardware Breathe, and with its Two colours switch on")
     p.add_argument("--popovers", action="store_true",
                    help="keyboard page with its dropdowns open, and the colour chooser")
     p.add_argument("--agent", action="store_true",

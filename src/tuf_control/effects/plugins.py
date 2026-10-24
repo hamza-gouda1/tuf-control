@@ -200,6 +200,33 @@ class SpectrumEffect(Effect):
         return scale(mix, floor + (1 - floor) * loud)
 
 
+def two_colour_breathe(a, b, t: float, period: float, dip: float = 0.0) -> RGB:
+    """Colour A at t=0, colour B at half a period, back to A: a cosine ease, so each colour
+    lingers a moment. `dip` darkens the crossing (0 = a pure gradient, 1 = through black
+    like a classic breathe). Shared with the in-app preview of the hardware Breathe."""
+    k = 0.5 - 0.5 * math.cos(2 * math.pi * ((t / max(period, 1e-6)) % 1.0))
+    return scale(lerp_rgb(a, b, k), 1.0 - max(0.0, min(1.0, dip)) * math.sin(math.pi * k))
+
+
+class GradientBreatheEffect(Effect):
+    name, title = "gradient", "Gradient breathing"
+    description = "Fades smoothly Colour 1 ↔ Colour 2 and back, on any keyboard."
+    note = ("Runs through asusd like the other software effects, so it also gives a "
+            "single-colour keyboard (TUF) a real two-colour breathe.")
+    max_fps = 20
+    params = (
+        Param("colour1", "colour", BORDEAUX, "Colour 1"),
+        Param("colour2", "colour", "#c9ae86", "Colour 2"),
+        Param("period", "float", 4.0, "Cycle length (s)", 1.5, 30.0, step=0.5),
+        Param("dip", "float", 0.3, "Dim between colours", 0.0, 1.0, step=0.05),
+    )
+
+    def tick(self, dt: float) -> RGB | None:
+        self.t += dt
+        return two_colour_breathe(self.colour("colour1"), self.colour("colour2"), self.t,
+                                  self.p["period"], self.p["dip"])
+
+
 class RainbowEffect(Effect):
     name, title = "rainbow", "Rainbow"
     description = "A slow walk round the colour wheel."
@@ -277,6 +304,6 @@ class NightEffect(Effect):
                      1 - (1 - self.p["level"]) * k)
 
 
-ALL = (AudioEffect, SpectrumEffect, AmbientEffect, RainbowEffect, TemperatureEffect,
-       CpuLoadEffect, ProfileEffect, NightEffect, AccentEffect)
+ALL = (AudioEffect, SpectrumEffect, AmbientEffect, GradientBreatheEffect, RainbowEffect,
+       TemperatureEffect, CpuLoadEffect, ProfileEffect, NightEffect, AccentEffect)
 OVERLAYS = (NotificationFlash,)

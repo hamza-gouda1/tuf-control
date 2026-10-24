@@ -365,16 +365,22 @@ class DBusBackend(Backend):
         except (BackendError, BackendUnavailable, TypeError, IndexError, AttributeError):
             builtins = {}
         modes = props.get("SupportedBasicModes")
+        dev = props.get("DeviceType")
+        # DeviceType 2 (LaptopKeyboardTuf): asusd writes kbd_rgb_mode with colour1 only,
+        # colour2 is kept for D-Bus but the keys never show it
         return {"path": path, "led_mode": props.get("LedMode"), "mode_data": data,
+                "device_type": int(dev) if dev is not None else None,
                 "builtins": builtins, "brightness": props.get("Brightness"),
                 "supported_modes": [aura_mode_from_dbus(m) for m in modes]
                 if modes is not None else None,
                 "supported_brightness": props.get("SupportedBrightness")}
 
     def set_kbd_effect(self, effect: KbdEffect) -> None:
-        """Exactly what `asusctl aura effect static -c ff0000` sends (captured with strace
-        against asusd 6.3.5): Properties.Set(xyz.ljones.Aura, LedModeData,
-        <(uu(yyy)(yyy)ss) mode zone c1 c2 "Med" "Right">) on /xyz/ljones/aura/<dev>."""
+        """Exactly what `asusctl aura effect static -c ff0000` and `asusctl aura effect
+        breathe --colour ff0000 --colour2 0000ff` send (captured with strace against asusd
+        6.3.5): Properties.Set(xyz.ljones.Aura, LedModeData,
+        <(uu(yyy)(yyy)ss) mode zone c1 c2 "Med" "Right">) on /xyz/ljones/aura/<dev>.
+        (asusctl's breathe drops --speed and always sends "Med"; this sends the speed.)"""
         effect.validate()
         value = (effect.mode, effect.zone, tuple(effect.colour1), tuple(effect.colour2),
                  speed_to_name(effect.speed), direction_to_name(effect.direction))

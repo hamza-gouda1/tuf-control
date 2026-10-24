@@ -353,6 +353,7 @@ class KeyboardPreview(Gtk.DrawingArea):
         super().__init__()
         self.effect = KbdEffect(0)
         self.brightness = 3
+        self.breathe = "alternate"  # how Breathe looks on this keyboard (preview_colour)
         self.add_css_class("kbd-preview")
         self.set_content_height(132)
         self.set_hexpand(True)
@@ -416,10 +417,10 @@ class KeyboardPreview(Gtk.DrawingArea):
             return False
         return True
 
-    def set_effect(self, effect: KbdEffect, brightness: int) -> None:
-        if effect == self.effect and brightness == self.brightness:
+    def set_effect(self, effect: KbdEffect, brightness: int, breathe: str = "alternate") -> None:
+        if effect == self.effect and brightness == self.brightness and breathe == self.breathe:
             return  # dirty flag: same colours, same frame
-        self.effect, self.brightness = effect, brightness
+        self.effect, self.brightness, self.breathe = effect, brightness, breathe
         self.gate.wake()
         self.queue_draw()
         self._sync()
@@ -453,7 +454,7 @@ class KeyboardPreview(Gtk.DrawingArea):
         wave = eff.mode == 3  # only the rainbow wave depends on the key position
         vertical = eff.direction in (2, 3)
         cache: dict[float, tuple] = {}
-        flat = None if wave else preview_colour(eff, t, 0.0, bri)
+        flat = None if wave else preview_colour(eff, t, 0.0, bri, self.breathe)
         cr.set_line_width(1)
         for x, y, ww, kh, px, py in self._layout(w, h):
             if wave:
@@ -469,3 +470,69 @@ class KeyboardPreview(Gtk.DrawingArea):
             cr.set_source_rgba(1, 1, 1, 0.06)
             cr.stroke()
         self.gate.add_cost(time.perf_counter() - start)
+
+
+class EffectSwatch(KeyboardPreview):
+    """A small rounded swatch showing the hardware effect's colour over time (Breathe fades
+    between both colours here). Same timer rules as the keyboard preview: it only runs
+    while mapped, visible and animated."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.remove_css_class("kbd-preview")
+        self.set_content_height(28)
+        self.set_content_width(56)
+        self.set_hexpand(False)
+        self.set_valign(Gtk.Align.CENTER)
+
+    def _draw(self, _a, cr, w, h):
+        start = time.perf_counter()
+        t = self.fixed_t if self.fixed_t is not None else time.monotonic() - self.t0
+        col = preview_colour(self.effect, t, 0.0, max(1, self.brightness), self.breathe)
+        _round_rect(cr, 0.5, 0.5, w - 1, h - 1, 8)
+        cr.set_source_rgb(*col)
+        cr.fill_preserve()
+        cr.set_source_rgba(0.5, 0.5, 0.5, 0.35)
+        cr.set_line_width(1)
+        cr.stroke()
+        self.gate.add_cost(time.perf_counter() - start)
+
+
+class PaletteSwatch(Gtk.DrawingArea):
+    """Two colours split on the diagonal: the face of a palette button."""
+
+    def __init__(self, a, b) -> None:
+        super().__init__(content_width=30, content_height=20)
+        self.a, self.b = a, b
+        self.set_draw_func(self._draw)
+
+    def _draw(self, _a, cr, w, h):
+        _round_rect(cr, 0.5, 0.5, w - 1, h - 1, 5)
+        cr.save()
+        cr.clip_preserve()
+        cr.set_source_rgb(*(c / 255 for c in self.a))
+        cr.fill()
+        cr.move_to(w, 0)
+        cr.line_to(w, h)
+        cr.line_to(0, h)
+        cr.close_path()
+        cr.set_source_rgb(*(c / 255 for c in self.b))
+        cr.fill()
+        cr.restore()
+        _round_rect(cr, 0.5, 0.5, w - 1, h - 1, 5)
+        cr.set_source_rgba(0.5, 0.5, 0.5, 0.35)
+        cr.set_line_width(1)
+        cr.stroke()
+
+
+def palette_buttons(palettes, on_pick) -> Gtk.Box:
+    """A row of flat two-colour buttons; on_pick(index) when one is pressed."""
+    box = Gtk.Box(spacing=2, valign=Gtk.Align.CENTER)
+    for i, (name, a, b) in enumerate(palettes):
+        btn = Gtk.Button(child=PaletteSwatch(a, b), tooltip_text=name)
+        btn.add_css_class("flat")
+        btn.add_css_class("palette-button")
+        btn.update_property([Gtk.AccessibleProperty.LABEL], [f"{name} palette"])
+        btn.connect("clicked", lambda _b, i=i: on_pick(i))
+        box.append(btn)
+    return box

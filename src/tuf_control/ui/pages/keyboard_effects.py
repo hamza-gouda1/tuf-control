@@ -14,8 +14,10 @@ from ...effects.preview import EffectPreview
 from ...effects.registry import EFFECTS
 from ...effects.theme import theme_accent
 from ..tasks import run_bg
-from ..viewmodels import FrameGate
-from ..widgets import _round_rect, label
+from ..viewmodels import PALETTES, FrameGate
+
+HW_NOTE = "Runs on the keyboard itself, no CPU cost."
+from ..widgets import _round_rect, label, palette_buttons
 from .base import button, info_row, pill
 
 NAMES = list(EFFECTS)
@@ -150,6 +152,7 @@ class EffectsSection(Adw.PreferencesGroup):
         self._quiet = False
         self._picked()
         self.apply_btn.set_sensitive(False)
+        self.page.soft_config_loaded(fx)
 
     def _got_status(self, st) -> None:
         self.status = st
@@ -178,10 +181,14 @@ class EffectsSection(Adw.PreferencesGroup):
         else:
             sub = "Running · keyboard in hardware mode"
         self.svc_row.set_subtitle(GLib.markup_escape_text(sub))
-        hw = "Runs on the keyboard itself, no CPU cost."
-        if run and fx.get("running"):
+        hw = HW_NOTE
+        if run and fx.get("running") and fx.get("effect") == "gradient" and self.page.form.blend:
+            hw = ("Breathe with Two colours: tuf-controld fades Colour 1 ↔ Colour 2; "
+                  "the firmware Breathe returns when effects are Off.")
+        elif run and fx.get("running"):
             hw = "Paused while a software effect runs; it returns when effects are Off."
-        self.page.fx.set_description(hw)
+        self.page.hw_note = hw
+        self.page.describe()
 
     def on_telemetry(self, t) -> None:
         self.telemetry = t
@@ -204,8 +211,9 @@ class EffectsSection(Adw.PreferencesGroup):
             # rows go between the picker and the note: re-add the fixed rows after them
             for w in (self.note, self.flash, self.prev_row, self.svc_row):
                 self.remove(w)
-            for p in cls.params:
-                row = self._param_row(name, p)
+            rows = [self._palette_row(name)] if name == "gradient" else []
+            rows += [self._param_row(name, p) for p in cls.params]
+            for row in rows:
                 self.add(row)
                 self.param_rows.append(row)
             for w in (self.note, self.flash, self.prev_row, self.svc_row):
@@ -220,6 +228,16 @@ class EffectsSection(Adw.PreferencesGroup):
         self.flash.set_sensitive(name is not None)
         self.prev_row.set_visible(name is not None)
         self._edited()
+
+    def _palette_row(self, name: str) -> Gtk.Widget:
+        row = Adw.ActionRow(title="Palette", subtitle="Sets Colour 1 and Colour 2")
+
+        def pick(i):
+            _n, a, b = PALETTES[i]
+            self.values[name].update(colour1=rgb_to_hex(a), colour2=rgb_to_hex(b))
+            self._picked()  # rebuild the colour buttons from the new values
+        row.add_suffix(palette_buttons(PALETTES, pick))
+        return row
 
     def _param_row(self, name: str, p) -> Gtk.Widget:
         vals = self.values[name]
@@ -365,12 +383,7 @@ class EffectsSection(Adw.PreferencesGroup):
             fx["notifications"]["enabled"] = want["notifications"]
 
         def work():
-            cfg = update_config(edit)
-            started = None
-            if want["active"] and not self.client.status()["running"]:
-                started = self.client.start()
-                self.client.wait_running()  # raises with the daemon's own error output
-            return cfg, started
+            return self.write_config(edit, start=bool(want["active"]))
 
         def done(res):
             cfg, started = res
@@ -379,6 +392,24 @@ class EffectsSection(Adw.PreferencesGroup):
             self.win.toast(f"{title} on" + (" · service started" if started else ""))
             GLib.timeout_add(800, lambda: (self.poll_status(), False)[1])
         run_bg(work, done=done, error=self.win.toast_error)
+
+    def write_config(self, edit, start: bool) -> tuple[dict, object]:
+        """Worker thread. Edit the effects config; start tuf-controld when an effect is on."""
+        cfg = update_config(edit)
+        started = None
+        if start and not self.client.status()["running"]:
+            started = self.client.start()
+            self.client.wait_running()  # raises with the daemon's own error output
+        return cfg, started
+
+    def enable(self, name: str, params: dict) -> tuple[dict, object]:
+        """Worker thread. Turn the software effect `name` on with `params` merged over its
+        saved parameters (the hardware Breathe's Two colours switch uses this)."""
+        def edit(cfg):
+            fx = cfg["effects"]
+            fx["active"] = name
+            fx["params"][name] = {**fx["params"].get(name, {}), **params}
+        return self.write_config(edit, start=True)
 
     def release_for_hardware(self, timeout_s: float = 6.0) -> bool:
         """Worker thread. Turn the configured software effect off and wait until the
