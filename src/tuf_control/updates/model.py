@@ -44,9 +44,19 @@ class UpdateItem:
         return cls(**known)
 
     @property
+    def blocker(self) -> dict | None:
+        return self.extra.get("blocker") or None
+
+    @property
+    def waiting(self) -> bool:
+        """Held by the owner or in a phased rollout: shown, not counted, never applied."""
+        from .blockers import WAITING
+        return bool(self.blocker and self.blocker.get("blocker") in WAITING)
+
+    @property
     def counts(self) -> bool:
-        """Pure hints (reboot pending) are shown but are not 'updates'."""
-        return self.apply_method != "reboot"
+        """Pure hints (reboot pending) and waiting items are shown but are not 'updates'."""
+        return self.apply_method != "reboot" and not self.waiting
 
 
 @dataclass
@@ -92,6 +102,9 @@ class Report:
     def updates(self) -> list[UpdateItem]:
         return [i for i in self.items() if i.counts]
 
+    def waiting(self) -> list[UpdateItem]:
+        return [i for i in self.items() if i.waiting]
+
     def by_source(self) -> dict[str, list[UpdateItem]]:
         out: dict[str, list[UpdateItem]] = {}
         for i in self.updates():
@@ -117,10 +130,12 @@ class Report:
     def summary(self) -> str:
         """'14 updates available (apt 12, firmware 1, snap 1)' or 'Everything is up to date'."""
         n = self.total
+        held = len(self.waiting())
+        tail = f" · {held} held back" if held else ""
         if not n:
-            return "Everything is up to date"
+            return "Everything is up to date" + tail
         parts = ", ".join(f"{k} {v}" for k, v in self.counts().items())
-        return f"{n} update{'s' if n != 1 else ''} available ({parts})"
+        return f"{n} update{'s' if n != 1 else ''} available ({parts})" + tail
 
     def signature(self) -> str:
         """Stable digest of what is offered: (id, available version) pairs."""
@@ -138,6 +153,7 @@ class Report:
                 "reboot_reasons": self.reboot_reasons, "fake": self.fake,
                 "summary": self.summary(), "total": self.total,
                 "security": self.security_count, "counts": self.counts(),
+                "waiting": len(self.waiting()),
                 "signature": self.signature(),
                 "sources": [s.to_dict() for s in self.sources]}
 

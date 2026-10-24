@@ -15,6 +15,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from . import blockers
 from .model import SourceResult, UpdateItem
 
 TIMEOUT_S = 60
@@ -36,13 +37,19 @@ def classify(name: str) -> tuple[str, bool]:
 
 
 def _item(name, arch, current, available, *, security=False, size=None, description="",
-          held=False, origin="") -> UpdateItem:
+          held=False, origin="", facts: dict | None = None) -> UpdateItem:
     kind, reboot = classify(name)
     extra = {"arch": arch}
     if origin:
         extra["origin"] = origin
     if held:
         extra["held"] = True
+    if facts is not None:
+        facts = {**facts, "kept_back": bool(facts.get("kept_back", held))}
+        extra["facts"] = facts
+        bl = blockers.classify(name, facts)
+        if bl:
+            extra["blocker"] = bl
     return UpdateItem(id=f"apt:{name}:{arch}", source="apt", name=name, current=current,
                       available=available, size=size, security=security,
                       description=description, needs_reboot=reboot,
@@ -66,6 +73,7 @@ def check_python_apt() -> list[UpdateItem]:
     except SystemError:
         pass
     records = apt_pkg.PackageRecords(cache)
+    holds = {p.name for p in cache.packages if p.selected_state == apt_pkg.SELSTATE_HOLD}
     out = []
     for pkg in cache.packages:
         cur = pkg.current_ver
@@ -79,14 +87,64 @@ def check_python_apt() -> list[UpdateItem]:
             archives.append(pf.archive or "")
             if pf.archive and pf.archive != "now":
                 origins.append(f"{pf.origin or pf.label or ''}/{pf.archive}".strip("/"))
-        desc = ""
+        desc, phased = "", None
         if cand.file_list and records.lookup(cand.file_list[0]):
             desc = records.short_desc or ""
+            m = re.search(r"^Phased-Update-Percentage:\s*(\d+)", records.record or "", re.M)
+            phased = int(m.group(1)) if m else None
         held = not (dep.marked_upgrade(pkg) or dep.marked_install(pkg))
-        out.append(_item(pkg.name, cand.arch, cur.ver_str, cand.ver_str,
-                         security=_is_security(archives), size=cand.size or None,
-                         description=desc, held=held, origin=", ".join(origins)))
-    return sorted(out, key=lambda i: i.name)
+        facts = {"kept_back": held, "dpkg_hold": pkg.name in holds, "phased_pct": phased}
+        out.append((pkg, dict(name=pkg.name, arch=cand.arch, current=cur.ver_str,
+                              available=cand.ver_str, security=_is_security(archives),
+                              size=cand.size or None, description=desc, held=held,
+                              origin=", ".join(origins), facts=facts)))
+    # after the scan: the simulations reset the (shared) dependency cache
+    for pkg, kw in out:
+        if kw["held"]:
+            kw["facts"].update(simulate_install(apt_pkg, cache, pkg, holds))
+    items = [_item(kw.pop("name"), kw.pop("arch"), kw.pop("current"), kw.pop("available"),
+                   **kw) for _p, kw in out]
+    return sorted(items, key=lambda i: i.name)
+
+
+def simulate_install(apt_pkg, cache, pkg, holds: set[str]) -> dict:
+    """What installing the candidate of a kept-back package would change, on a scratch
+    DepCache (nothing is written): new packages, other upgrades, removals, held ones."""
+    dep = apt_pkg.DepCache(cache)
+    dep.init()  # one dependency cache per apt cache: start from nothing marked
+    try:
+        dep.mark_install(pkg, True)
+    except SystemError:
+        return {"broken": True}
+    new, upg, rem = [], [], []
+    for q in cache.packages:
+        if q.name == pkg.name:
+            continue
+        if dep.marked_delete(q):
+            rem.append(q.name)
+        elif dep.marked_install(q) and q.current_ver is None:
+            new.append(q.name)
+        elif dep.marked_upgrade(q) and q.current_ver is not None:
+            upg.append(q.name)
+    return {"new_packages": sorted(new), "upgrades": sorted(upg), "removals": sorted(rem),
+            "held_involved": sorted(n for n in set(upg) | set(rem) if n in holds),
+            "broken": dep.broken_count > 0}
+
+
+def dpkg_holds(root: Path = Path("/")) -> set[str]:
+    try:
+        return blockers.parse_dpkg_holds((root / "var/lib/dpkg/status").read_text())
+    except OSError:
+        return set()
+
+
+def apply_holds(items: list[UpdateItem], holds: set[str]) -> None:
+    """Text fallbacks know only holds: mark those items as held by the owner."""
+    for i in items:
+        if i.name in holds:
+            i.extra["held"] = True
+            i.extra["facts"] = {"kept_back": True, "dpkg_hold": True}
+            i.extra["blocker"] = blockers.classify(i.name, i.extra["facts"])
 
 
 # -- text fallbacks ------------------------------------------------------------------------------
@@ -186,6 +244,7 @@ def check(root: Path = Path("/"), *, use_python_apt: bool = True) -> SourceResul
                                             "dist-upgrade"]))
             res.items = [i for i in items if i.current]  # upgrades; new installs follow them
             res.info["method"] = "apt-get -s"
+            apply_holds(res.items, dpkg_holds(root))
             return res
         except (RuntimeError, OSError, subprocess.SubprocessError) as exc:
             errors.append(f"apt-get -s: {exc}")
@@ -193,6 +252,7 @@ def check(root: Path = Path("/"), *, use_python_apt: bool = True) -> SourceResul
         try:
             res.items = parse_apt_list(_run(["apt", "list", "--upgradable"]))
             res.info["method"] = "apt list"
+            apply_holds(res.items, dpkg_holds(root))
             return res
         except (RuntimeError, OSError, subprocess.SubprocessError) as exc:
             errors.append(f"apt list: {exc}")
