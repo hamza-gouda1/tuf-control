@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Intel integrated GPU (i915 or xe): frequency, RC6 residency and engine busy time.
 
 Utilisation comes from the DRM client statistics every driver publishes in

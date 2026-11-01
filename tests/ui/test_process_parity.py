@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Process page parity helpers: VmSwap parsing, app identity keys, stop refusals, totals."""
 import unittest
 

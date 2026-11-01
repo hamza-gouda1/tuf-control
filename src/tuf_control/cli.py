@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """tuf-control command line. Reads are always safe; writes validate and honour --dry-run."""
 from __future__ import annotations
 

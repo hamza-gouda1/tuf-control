@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Processes and apps: a virtualised Gtk.ColumnView over a reusable row model.
 
 The walk runs only while this page is visible (every 2 s, on the sampler's tick).

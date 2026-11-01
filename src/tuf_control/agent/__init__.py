@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Agent access: a door into TUF Control for MCP clients and scripts.
 
 policy    - access levels, the owner's grants (agent.json), the kill switch

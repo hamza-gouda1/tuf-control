@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Display-free chart maths: visible window, downsampling, gaps, monotone curves, ticks.
 
 The curve is a monotone cubic (Fritsch-Carlson): it passes through every sample and

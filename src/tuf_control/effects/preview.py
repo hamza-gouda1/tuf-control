@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """In-app preview of a software effect: the real effect class fed with simulated inputs
 (live telemetry and profile where the app has them, a synthetic beat for audio, a slow
 colour drift for the screen). No capture, no portal, no keyboard writes."""

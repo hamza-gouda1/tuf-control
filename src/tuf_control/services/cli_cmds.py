@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """`tuf-control services ...`: list systemd units; start/stop/... the safe ones."""
 from __future__ import annotations
 

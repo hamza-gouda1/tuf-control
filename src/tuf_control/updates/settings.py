@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """The "updates" section of ~/.config/tuf-control/config.json."""
 from __future__ import annotations
 

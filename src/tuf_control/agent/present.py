@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Display-free text for the Agent access page (unit-tested without a display)."""
 from __future__ import annotations
 

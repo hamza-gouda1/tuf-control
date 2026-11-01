@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """D-Bus write names and signatures, checked against asusd 6.3 / supergfxd introspection."""
 import unittest
 

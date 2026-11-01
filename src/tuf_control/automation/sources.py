@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Inputs for the rule engine, all cheap to sample every couple of seconds.
 
 - Power: /sys/class/power_supply (Mains `online`, Battery `capacity`/`status`). The daemon

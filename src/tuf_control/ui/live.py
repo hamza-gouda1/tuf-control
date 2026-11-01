@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """The GUI's single telemetry timer.
 
 One GLib timer drives the shared Sampler: 1 Hz normally, 2 Hz while a monitor detail

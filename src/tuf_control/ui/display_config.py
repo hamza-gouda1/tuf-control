@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Refresh-rate switching through org.gnome.Mutter.DisplayConfig (session bus, async).
 
 `FakeDisplayConfig` is used whenever TUF_CONTROL_FAKE_ROOT is set (and in tests), so

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Audio-reactive input: capture the default sink's monitor, measure bass/mid/treble.
 
 Capture: `parec --device=@DEFAULT_MONITOR@` (PulseAudio or pipewire-pulse), else

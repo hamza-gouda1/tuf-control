@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Display-free geometry of custom-drawn widgets: the fan-curve editor's drag handles and
 readout bubble, number formatting that must not wrap in the middle of a reading."""
 import unittest

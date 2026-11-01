@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Software keyboard effects for single-zone RGB keyboards, run by `tuf-controld`.
 
 base     - Effect / Param / Inputs / EffectStack (the plugin interface)

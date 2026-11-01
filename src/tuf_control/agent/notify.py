@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Desktop notification for a pending agent request, with Approve once / Deny buttons.
 
 Optional: used only when PyGObject and a notification server on the session bus are

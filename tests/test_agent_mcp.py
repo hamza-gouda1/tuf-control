@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """MCP server conformance (JSON-RPC 2.0 over stdio) and the real process over pipes."""
 import io
 import json

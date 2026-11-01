@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Bordeaux GNOME theme accent, read-only.
 
 Order: ~/.config/bordeaux-gnome/variant, ~/.local/state/bordeaux-gnome/variant (written by

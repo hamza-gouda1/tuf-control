@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Text that comes from the system is untrusted data.
 
 Process names, application ids, mount points, battery and GPU model strings are chosen

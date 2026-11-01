@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """hwmon temperatures and fans, and CPU package power from RAPL when readable."""
 from __future__ import annotations
 

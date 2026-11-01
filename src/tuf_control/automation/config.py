@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """~/.config/tuf-control/config.json: defaults, validation, atomic writes, hot reload.
 
 The file is shared by the daemon, the GUI and the CLI. Writers take an flock on a sibling

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Action sink: the only place automation touches settings. Every write goes through the
 Controller (which validates bounds and honours dry-run); power-profiles-daemon has no
 Controller capability of its own, so `PpdClient` talks to it directly with a fixed,

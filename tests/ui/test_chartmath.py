@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Chart maths without a display: ticks, windowing, gaps, no-overshoot curves."""
 import math
 import unittest

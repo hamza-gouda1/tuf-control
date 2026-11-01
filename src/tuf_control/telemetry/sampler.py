@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """One sampler for every source: collect() off the main thread, commit() on it.
 
 collect() reads all cheap sources once and returns flat values plus per-source info;

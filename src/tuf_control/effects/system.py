@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """CPU load from /proc/stat (read-only), for the CPU-load effect."""
 from __future__ import annotations
 

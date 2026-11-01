@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """systemd units: listing (no root), filtering, and the safety rules for actions."""
 from __future__ import annotations
 

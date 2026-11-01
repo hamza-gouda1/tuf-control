@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Everything on this laptop that needs an update: system packages (apt), snaps, flatpaks,
 firmware (fwupd: BIOS, EC, devices), a newer kernel or NVIDIA driver waiting for a restart,
 and optionally the owner's own git checkouts.

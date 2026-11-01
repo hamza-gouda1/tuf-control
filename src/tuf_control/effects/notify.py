@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Notification events from the session bus without a notification server of our own.
 
 A second, private connection to the session bus calls

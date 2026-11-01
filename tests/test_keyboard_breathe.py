@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Two-colour Breathe: the exact asusd call, read-back of both colours, and the software
 Gradient breathing that gives a single-colour (TUF) keyboard a real Colour 1 <-> Colour 2.
 

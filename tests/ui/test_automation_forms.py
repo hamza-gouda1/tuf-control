@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Display-free logic behind the Automation page and the Effects section."""
 import unittest
 from types import SimpleNamespace

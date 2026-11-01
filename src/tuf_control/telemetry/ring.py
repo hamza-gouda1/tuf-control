@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Fixed-size history: one shared time ring plus one float32 ring per series.
 
 All series are sampled on the same tick, so they share the time axis. Storage is

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Small, allocation-light file helpers for /proc and /sys.
 
 Every reader takes a `root` so the same code runs against the live system ("/") or a

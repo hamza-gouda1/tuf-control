@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Keyboard: the exact asusd Aura calls, read-back verification, the new software effects,
 CPU load, error surfacing and restoring the hardware mode (fake transport / fake tree)."""
 import json

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Services: safety rules, filters, the systemd backend against recorded D-Bus replies, the
 cgroup reader, the fake backend and the CLI. No unit on the machine is started or stopped."""
 import contextlib

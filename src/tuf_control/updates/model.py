@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Normalised update items, per-source results and the report the UI, CLI and daemon share."""
 from __future__ import annotations
 

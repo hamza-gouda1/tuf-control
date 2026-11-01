@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Model Context Protocol server for TUF Control: JSON-RPC 2.0 over stdio, stdlib only.
 
     tuf-control mcp            (or tuf-control-mcp, or python -m tuf_control mcp)

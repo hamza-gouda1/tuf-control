@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Fake sysfs tree mimicking the real layout, for tests and CI."""
 from __future__ import annotations
 

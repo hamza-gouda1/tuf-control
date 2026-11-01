@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Optional (off by default): is a local checkout of TUF Control / Bordeaux GNOME behind its
 upstream branch? Compares HEAD with the remote-tracking branch as of the last fetch; it does
 not fetch (no network, no credentials)."""

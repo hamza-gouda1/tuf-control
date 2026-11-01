@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """PCI helpers: device names from pci.ids and runtime power state (never wakes a device)."""
 from __future__ import annotations
 

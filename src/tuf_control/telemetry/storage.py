@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Block devices: /proc/diskstats rates and busy time; mounted filesystems via statvfs."""
 from __future__ import annotations
 

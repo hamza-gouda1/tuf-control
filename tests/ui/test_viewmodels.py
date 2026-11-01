@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """UI logic without a display: view-models, validators, curve editing, display config."""
 import tempfile
 import unittest

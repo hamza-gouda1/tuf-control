@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Rule engine: trigger evaluation with debounce and hysteresis, per-setting conflict
 resolution by priority, and restore of the previous value when the last rule lets go.
 

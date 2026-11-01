@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Memory: /proc/meminfo, swap, zswap and pressure stall information."""
 from __future__ import annotations
 

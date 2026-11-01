@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Display formatting for telemetry values (GTK-free, unit-tested)."""
 from __future__ import annotations
 

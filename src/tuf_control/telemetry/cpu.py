@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """CPU: /proc/stat usage deltas, cpufreq, topology (P/E cores), load and uptime."""
 from __future__ import annotations
 

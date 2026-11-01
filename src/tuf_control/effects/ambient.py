@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Ambient screen colour through the xdg-desktop-portal ScreenCast interface.
 
 GNOME on Wayland gives no silent screen access. The portal asks the user once (monitor

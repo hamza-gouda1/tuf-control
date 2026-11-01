@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Display-free helpers for the Automation page and rule dialog (unit-tested, no GTK)."""
 from __future__ import annotations
 

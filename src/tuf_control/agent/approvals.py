@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Per-call approval queue (~/.local/state/tuf-control/agent-approvals.json).
 
 The MCP server records a request (tool, validated parameters, the agent's stated

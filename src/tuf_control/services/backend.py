@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """systemd over D-Bus (org.freedesktop.systemd1), and a fake for tests and screenshots.
 
 Listing: one ListUnits call per refresh, plus ListUnitFiles (enabled state and unit file

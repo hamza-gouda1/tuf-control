@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Rule model: trigger -> actions, with validation, (de)serialisation and descriptions."""
 from __future__ import annotations
 

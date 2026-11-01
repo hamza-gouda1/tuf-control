@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """The UI QA lint's pure logic (no display), plus an opt-in headless run.
 
 Fast subset, always on: WCAG contrast maths, text/background colour extraction, geometry

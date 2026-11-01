@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Palette, CSS loading and colours for Cairo drawing."""
 from __future__ import annotations
 

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Display-free UI logic: formatting, history buffers, editors, validators.
 
 Nothing here imports GTK, so it is unit-tested without a display.

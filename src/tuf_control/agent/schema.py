@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """A small, strict JSON Schema subset for tool arguments.
 
 Supported keywords: type (object, string, integer, number, boolean, array), enum,

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """asusctl wrapper. Strict allow-list of subcommands and argument patterns; no shell."""
 from __future__ import annotations
 

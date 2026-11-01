@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Rule-based automation run by the `tuf-controld` user daemon.
 
 config  - ~/.config/tuf-control/config.json (validated, atomic, hot-reloaded)

@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Cross-check the telemetry layer against independent tools on the real machine.
 
     PYTHONPATH=src python3 tests/hardware/validate_telemetry.py [--seconds 10] [--markdown]

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Effect plugin interface.
 
 An effect is a class with a `name`, a `params` schema and `tick(dt) -> (r, g, b) | None`.

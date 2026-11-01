@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Run every update source once and cache the report in ~/.cache/tuf-control/updates.json.
 
     python3 -m tuf_control.updates.check [--json]

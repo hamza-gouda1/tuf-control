@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Process setup for agent access: an unprivileged Controller and a root refusal."""
 from __future__ import annotations
 

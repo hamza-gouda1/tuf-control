@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Effect registry and the `effects` section of the config."""
 from __future__ import annotations
 

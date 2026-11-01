@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Shared building blocks for the monitor pages (dashboard cards, detail pages)."""
 from __future__ import annotations
 

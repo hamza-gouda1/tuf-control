@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Fans and temperatures: both fans live, linked to the fan-curve editor."""
 from __future__ import annotations
 

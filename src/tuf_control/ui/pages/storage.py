@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Storage: per-disk throughput, busy time, temperature; mounted filesystems."""
 from __future__ import annotations
 

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Controller facade: picks the best backend per capability (D-Bus -> sysfs -> CLI)."""
 from __future__ import annotations
 

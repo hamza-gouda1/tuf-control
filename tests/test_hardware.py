@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Read-only smoke test against the real machine. Skipped unless explicitly enabled."""
 import os
 import unittest

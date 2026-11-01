@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Network: per-interface receive/send rates, totals and link details."""
 from __future__ import annotations
 

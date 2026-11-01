@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Hardware-effect form without a display: mode-dependent controls, per-mode drafts,
 palettes, the Two colours switch for single-colour (TUF) firmware, and what Apply writes."""
 import unittest

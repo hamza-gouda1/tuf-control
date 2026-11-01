@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Small synchronous D-Bus helpers over Gio, for worker threads (updates, services).
 
 Every call has a timeout. `interactive=True` sets ALLOW_INTERACTIVE_AUTHORIZATION so a

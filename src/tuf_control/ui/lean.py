@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Process-wide memory discipline for the GUI.
 
 Renderer: GTK's GL renderers load the whole Mesa stack (libgallium + libLLVM) and, through

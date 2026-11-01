@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Cairo chart widgets drawn straight from the telemetry Store's ring buffers.
 
 Charts redraw only when a sample arrives (1-2 Hz) or the pointer moves over them; they

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 class TufControlError(Exception):
     """Base class for all errors raised by this package."""
 

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Process walk over /proc: CPU %, memory, disk I/O, app grouping by systemd scope.
 
 Runs only while the Processes page is visible (every 2 s). Per process it reads

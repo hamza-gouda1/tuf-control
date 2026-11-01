@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """`tuf-control agent ...` and `tuf-control mcp` (registered from cli.py)."""
 from __future__ import annotations
 

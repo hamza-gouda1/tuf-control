@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Network interfaces: /proc/net/dev byte counters, link type and state."""
 from __future__ import annotations
 

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Run blocking controller calls off the GTK main thread; deliver results on it."""
 from __future__ import annotations
 

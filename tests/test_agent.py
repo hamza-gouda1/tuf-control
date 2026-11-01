@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Agent access: safety gate, approvals, expiry, rate limits, audit, kill switch, sanitising.
 
 Everything runs against a fake sysfs tree in a temporary directory; agent.json, the

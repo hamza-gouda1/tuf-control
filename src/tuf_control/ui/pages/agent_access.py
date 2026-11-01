@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Agent access: who may use the MCP server, approvals waiting for you, and the audit log.
 
 Built on first visit. While the page is visible it stat()s three small files every two

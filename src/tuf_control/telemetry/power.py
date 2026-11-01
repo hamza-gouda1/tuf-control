@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Battery and AC adapter from /sys/class/power_supply."""
 from __future__ import annotations
 
