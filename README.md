@@ -1,5 +1,10 @@
 # TUF Control
 
+[![ci](https://github.com/hamza-gouda1/tuf-control/actions/workflows/ci.yml/badge.svg)](https://github.com/hamza-gouda1/tuf-control/actions/workflows/ci.yml)
+![Python 3.12](https://img.shields.io/badge/python-3.12-3776ab)
+![GTK 4 + Libadwaita](https://img.shields.io/badge/GTK%204-Libadwaita-4a86cf)
+![License](https://img.shields.io/badge/license-GPL--3.0-blue)
+
 A native control app for ASUS TUF and ROG laptops on Linux: performance profile, power
 limits, fan curves, GPU mode, battery charge limit, keyboard lighting and display options,
 in a GTK 4 / Libadwaita interface, a CLI, and a GNOME Quick Settings toggle.
