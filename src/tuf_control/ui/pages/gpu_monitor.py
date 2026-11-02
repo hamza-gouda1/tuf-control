@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Detail pages for the Intel iGPU and the NVIDIA dGPU."""
 from __future__ import annotations
 
@@ -39,6 +41,7 @@ class ProcTable(Gtk.Box):
         if key == self._key:
             return
         self._key = key
+        self._names.clear()  # PIDs may be reused; retain only this small visible set.
         child = self.get_first_child()
         while child:
             nxt = child.get_next_sibling()
@@ -121,7 +124,8 @@ class IntelGpuPage(MonitorPage):
         st = self.hub.store
         ig = self.hub.info.get("igpu") or {}
         if not ig.get("present"):
-            set_text(self.sub, ig.get("reason") or "No Intel GPU found")
+            set_text(self.sub, "The kernel reports no Intel graphics device, so this page "
+                               "has nothing to show.")
             return
         set_text(self.sub, f"{ig.get('driver')} · {ig.get('pdev')} · shares system memory")
         g = self.stats
@@ -200,10 +204,31 @@ class NvidiaGpuPage(MonitorPage):
         st = self.hub.store
         dg = self.hub.info.get("dgpu") or {}
         g = self.stats
-        if not dg.get("present") or not dg.get("backend"):
-            set_text(self.sub, dg.get("reason") or "No NVIDIA GPU found")
-            set_text(self.sleep_note, dg.get("reason") or "")
+        # PCI power errors are meaningful even when NVML could not initialise.
+        # Check them before the missing-backend state so recovery advice stays visible.
+        if dg.get("state") == "lost" or dg.get("runtime") == "error":
+            set_text(self.name, dg.get("name") or "NVIDIA graphics")
+            set_text(self.sub, "NVIDIA graphics are unavailable until the laptop restarts.")
+            set_text(self.state_label, "Unavailable")
+            self.sleep_note.set_visible(True)
+            set_text(self.sleep_note, DGPU_LOST_TEXT)
+            self.sleep_note.set_tooltip_text(dg.get("reason") or None)
+            g.set("runtime", "power error · driver lost the GPU")
+            for k in ("util", "vram", "gr", "mem", "temp", "power", "pstate", "fan", "enc",
+                      "driver", "source"):
+                g.set(k, "–")
+            self.procs.set_rows([])
+            self.redraw()
             return
+        if not dg.get("present") or not dg.get("backend"):
+            set_text(self.sub, "The NVIDIA driver could not provide readings. Check that "
+                               "it is installed and working, then reopen this page.")
+            self.sleep_note.set_visible(False)
+            self.sub.set_tooltip_text(dg.get("reason") or None)
+            set_text(self.state_label, "Unavailable")
+            self.procs.set_rows([])
+            return
+        self.sub.set_tooltip_text(None)
         set_text(self.name, dg.get("name") or "NVIDIA graphics")
         stt = dg.get("state")
         rs, ps = dg.get("runtime"), dg.get("power_state")
@@ -212,16 +237,6 @@ class NvidiaGpuPage(MonitorPage):
         g.set("runtime", f"{rs or 'no runtime PM'} · {ps or '–'}")
         g.set("source", {"nvml": "NVML (libnvidia-ml)", "nvidia-smi": "nvidia-smi (every 5 s)",
                          "fake": "fake tree"}.get(dg.get("backend"), "–"))
-        if stt == "lost":
-            set_text(self.state_label, "Unavailable")
-            self.sleep_note.set_visible(True)
-            set_text(self.sleep_note, DGPU_LOST_TEXT)
-            g.set("runtime", "power error · driver lost the GPU")
-            for k in ("util", "vram", "gr", "mem", "temp", "power", "pstate", "fan", "enc"):
-                g.set(k, "–")
-            self.procs.set_rows([])
-            self.redraw()
-            return
         if stt in ("sleeping", "idle-released"):
             set_text(self.state_label, f"Sleeping ({ps or 'D3'})" if stt == "sleeping"
                      else "Idle, released")

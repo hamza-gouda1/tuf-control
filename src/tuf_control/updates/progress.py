@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Live state of an update run, shared between the worker thread and the page.
 
 The worker calls `update()` / `line()` as the backends report progress; the page takes a
@@ -11,6 +13,47 @@ import time
 from collections import deque
 
 LOG_LINES = 400
+_UNSET = object()
+TICK_MS = 250               # the page snapshots at about 4 fps
+
+
+class SourceWatch:
+    """What one backend reports while it runs, forwarded into the RunState."""
+
+    def __init__(self, state: "RunState", source: str) -> None:
+        self.state, self.source = state, source
+
+    def phase(self, text: str = "", *, percent=_UNSET, package=_UNSET,
+              speed=_UNSET, remaining_s=_UNSET, auth: bool | None = None,
+              cancellable: bool | None = None, done: bool = False,
+              error: str = "") -> None:
+        kw = {}
+        if text:
+            kw.update(phase=text, auth=False if auth is None else bool(auth))
+        elif auth is not None:
+            kw["auth"] = bool(auth)
+        if percent is not _UNSET:
+            kw["percent"] = None if percent is None else max(0.0, min(100.0, float(percent)))
+        if package is not _UNSET:
+            kw["package"] = str(package or "")[:120]
+        if speed is not _UNSET:
+            kw["speed"] = None if speed is None else max(0.0, float(speed))
+        if remaining_s is not _UNSET:
+            kw["remaining_s"] = None if remaining_s is None else max(0.0, float(remaining_s))
+        if cancellable is not None:
+            kw["cancellable"] = bool(cancellable)
+        if done:
+            kw.update(done=True, auth=False, cancellable=False, speed=None, remaining_s=None)
+        if error:
+            kw["error"] = error[:300]
+        self.state.update(self.source, **kw)
+
+    def line(self, text: str) -> None:
+        self.state.line(self.source, text)
+
+    def callback(self):
+        """A `progress(text)` function for simple backends: a log line and the package."""
+        return self.state.callback(self.source)
 
 
 class RunState:
@@ -66,13 +109,17 @@ class RunState:
             self.line(source, text)
         return cb
 
+    def watcher(self, source: str) -> SourceWatch:
+        """A live handle for one backend (see actions); phase/line, thread-safe."""
+        return SourceWatch(self, source)
+
     # -- page side --------------------------------------------------------------------------
     @property
     def running(self) -> bool:
         return self.ended is None
 
     def elapsed(self) -> float:
-        return (self.ended or self.clock()) - self.started
+        return (self.ended if self.ended is not None else self.clock()) - self.started
 
     def snapshot(self) -> dict:
         with self._lock:
@@ -80,7 +127,8 @@ class RunState:
                     "log": list(self.log), "lines": self.lines, "elapsed": self.elapsed(),
                     "running": self.running, "current": self.current,
                     "summary": self.summary, "cancel_requested": self.cancel.is_set(),
-                    "auth": any(s.get("auth") for s in self.sources.values()),
+                    "auth": any(s.get("auth") and not s.get("done")
+                                for s in self.sources.values()),
                     "cancellable": any(s.get("cancellable") and not s.get("done")
                                        for s in self.sources.values())}
 

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Access levels and the owner's grants (~/.config/tuf-control/agent.json).
 
 Levels, lowest first:
@@ -17,6 +19,7 @@ not validate fails closed: no access at all until it is fixed or rewritten.
 from __future__ import annotations
 
 import re
+import math
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -70,7 +73,7 @@ class Access:
     def standing(self, now: float | None = None) -> dict | None:
         g = self.standing_grant
         now = time.time() if now is None else now
-        if g and self.enabled and g["expires_at"] > now:
+        if g and self.enabled and g["granted_at"] <= now < g["expires_at"]:
             return g
         return None
 
@@ -107,6 +110,15 @@ class Access:
         }
 
 
+def _valid_timestamp(value) -> bool:
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
+
+
 def validate_access(data) -> dict:
     if not isinstance(data, dict):
         raise ValidationError("agent.json: expected an object")
@@ -134,14 +146,16 @@ def validate_access(data) -> dict:
             raise ValidationError("agent.json: standing_grant.level must be control-basic or "
                                   "control-all")
         for k in ("granted_at", "expires_at"):
-            if not isinstance(g.get(k), (int, float)) or isinstance(g.get(k), bool):
+            if not _valid_timestamp(g.get(k)):
                 raise ValidationError(f"agent.json: standing_grant.{k} must be a timestamp")
+        if g["expires_at"] < g["granted_at"]:
+            raise ValidationError("agent.json: standing grant expires before it starts")
         if g["expires_at"] - g["granted_at"] > MAX_GRANT_S + 1:
             raise ValidationError("agent.json: standing grants last at most 24 hours")
         out["standing_grant"] = {"level": g["level"], "granted_at": float(g["granted_at"]),
                                  "expires_at": float(g["expires_at"])}
     r = data.get("revoked_at")
-    if r is not None and (not isinstance(r, (int, float)) or isinstance(r, bool)):
+    if r is not None and not _valid_timestamp(r):
         raise ValidationError("agent.json: revoked_at must be a timestamp")
     out["revoked_at"] = r
     return out

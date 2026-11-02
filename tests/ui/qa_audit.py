@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Widget-tree audits of the UI QA lint (needs a display; used inside the harness).
 
 `Auditor.audit(scope, root)` walks the mapped widgets below `root` and reports, through
@@ -408,6 +410,10 @@ class Auditor:
         """`png` is a PIL image of the whole window (1 px = 1 logical px)."""
         W, H = png.size
         for lab, r, vp in labels:
+            if has_toast(lab):
+                continue  # toasts fade in and out: mid-animation the surface is
+                          # translucent and pixel sampling measures the blend, not
+                          # the style; geometry checks already cover toasts
             if vp is not None:  # only text fully inside the visible part of a scrolled area
                 if (r[1] < vp[1] - 1 or r[1] + r[3] > vp[1] + vp[3] + 1
                         or r[0] < vp[0] - 1 or r[0] + r[2] > vp[0] + vp[2] + 1):

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Update sources (parsers on fixtures), the report, change detection and notifications, the
 background scheduler, actions in fake mode, settings and the CLI. Nothing here touches the
 real package managers or firmware: sources are fed fixtures, actions run in fake mode."""
@@ -80,8 +82,8 @@ class AptTests(unittest.TestCase):
         with mock.patch.object(apt, "_run", return_value=fx("apt_get_sim.txt")) as run, \
                 mock.patch.object(apt.shutil, "which", return_value="/usr/bin/apt-get"):
             res = apt.check(root, use_python_apt=False)
-        self.assertIn("Debug::NoLocking=1", run.call_args[0][0])
-        self.assertEqual(res.info["method"], "apt-get -s")
+        self.assertTrue(any("Debug::NoLocking=1" in c.args[0] for c in run.call_args_list))
+        self.assertEqual(res.info["method"], "apt-get simulations + apt list")
         self.assertEqual(len(res.items), 3)  # the new kernel package rides on its meta
         self.assertEqual(res.info["lists_refreshed_ts"], 1_700_000_000)
 
@@ -91,7 +93,7 @@ class AptTests(unittest.TestCase):
         self.assertIn("dpkg", res.reason)
 
     def test_classify(self):
-        self.assertEqual(apt.classify("linux-image-7.0.13-3-liquorix-amd64"), ("kernel", True))
+        self.assertEqual(apt.classify("linux-image-6.12.9-2-xanmod"), ("kernel", True))
         self.assertEqual(apt.classify("nvidia-driver-580-open"), ("driver", True))
         self.assertEqual(apt.classify("libc6"), ("system", True))
         self.assertEqual(apt.classify("vim"), ("package", False))
@@ -202,7 +204,7 @@ class FlatpakTests(unittest.TestCase):
         self.assertEqual(len(res.items), 4)
         self.assertTrue(all("--cached" in c for c in calls if "remote-ls" in c))
         self.assertEqual(flatpak.update_cmd("user", ["a/x/b"]),
-                         ["flatpak", "update", "--user", "-y", "--noninteractive", "a/x/b"])
+                         ["flatpak", "update", "--user", "-y", "--noninteractive", "--", "a/x/b"])
 
 
 class FirmwareTests(unittest.TestCase):
@@ -256,18 +258,18 @@ class SystemTests(unittest.TestCase):
         return r
 
     def test_kernel(self):
-        self.assertEqual(system.parse_kernel("7.0.13-3-liquorix-amd64"),
-                         ((7, 0, 13, 3), "liquorix-amd64"))
+        self.assertEqual(system.parse_kernel("6.12.9-2-xanmod"),
+                         ((6, 12, 9, 2), "xanmod"))
         self.assertEqual(system.parse_kernel("6.8.0-147-generic"), ((6, 8, 0, 147), "generic"))
-        inst = ["6.8.0-146-generic", "7.0.0-38-generic", "7.0.13-3-liquorix-amd64",
-                "7.0.14-1-liquorix-amd64"]
-        k = system.kernel_item("7.0.13-3-liquorix-amd64", inst)
-        self.assertEqual(k.available, "7.0.14-1-liquorix-amd64")
+        inst = ["6.8.0-146-generic", "7.0.0-38-generic", "6.12.9-2-xanmod",
+                "6.12.10-1-xanmod"]
+        k = system.kernel_item("6.12.9-2-xanmod", inst)
+        self.assertEqual(k.available, "6.12.10-1-xanmod")
         self.assertEqual(k.apply_method, "reboot")
-        self.assertIsNone(system.kernel_item("7.0.13-3-liquorix-amd64", inst[:3]))
+        self.assertIsNone(system.kernel_item("6.12.9-2-xanmod", inst[:3]))
         # a newer kernel of another flavour is not "pending"
         self.assertIsNone(system.kernel_item("6.8.0-146-generic", ["6.8.0-146-generic",
-                                                                   "7.0.13-3-liquorix-amd64"]))
+                                                                   "6.12.9-2-xanmod"]))
 
     def test_reboot_required_and_nvidia(self):
         r = self.root()
@@ -452,7 +454,8 @@ class CheckTests(FakeEnv):
         self.assertEqual(check.cache_dir(), self.tmp / "root" / "fake-cache")
         rep = check.run_check()
         self.assertTrue(rep.fake)
-        self.assertEqual(rep.total, 9)
+        self.assertEqual(rep.total, 8)
+        self.assertEqual(len(rep.waiting()), 1)   # libnvidia-gl-580 is on a dpkg hold
         self.assertTrue(rep.reboot_required)
         self.assertEqual(check.load_report().signature(), rep.signature())
         os.environ["TUF_CONTROL_FAKE_UPDATES"] = "none"
@@ -461,7 +464,7 @@ class CheckTests(FakeEnv):
 
     def test_child_process(self):
         rep = check.check_in_child(timeout_s=60)
-        self.assertEqual(rep.total, 9)
+        self.assertEqual(rep.total, 8)
 
     def test_lock_waits_for_the_running_check(self):
         with check.check_lock() as mine:
@@ -497,12 +500,12 @@ class ActionTests(FakeEnv):
         self.assertTrue(actions.firmware_url_ok("https://fwupd.org/downloads/x.cab"))
         self.assertFalse(actions.firmware_url_ok("http://fwupd.org/downloads/x.cab"))
         self.assertFalse(actions.firmware_url_ok("https://evil.example/x.cab"))
-        p = self.tmp / "x.cab"
-        p.write_bytes(b"cab")
+        self.assertFalse(actions.firmware_url_ok("https://fwupd.org:8443/x.cab"))
+        self.assertFalse(actions.firmware_url_ok("https://user:pw@fwupd.org/x.cab"))
         import hashlib
-        self.assertTrue(actions._checksum_ok(p, [hashlib.sha256(b"cab").hexdigest()]))
-        self.assertFalse(actions._checksum_ok(p, ["00"]))
-        self.assertFalse(actions._checksum_ok(p, []))
+        self.assertTrue(actions._checksum_ok(b"cab", [hashlib.sha256(b"cab").hexdigest()]))
+        self.assertFalse(actions._checksum_ok(b"cab", ["00"]))
+        self.assertFalse(actions._checksum_ok(b"cab", []))
 
     def test_notification_in_fake_mode_is_logged(self):
         notify.send("3 updates available")
@@ -532,10 +535,10 @@ class CliTests(FakeEnv):
         code, out = self.run_cli("updates")
         self.assertIn("No update check yet", out)
         code, out = self.run_cli("updates", "check")
-        self.assertIn("9 updates available", out)
+        self.assertIn("8 updates available", out)
         self.assertIn("System Firmware", out)
         code, out = self.run_cli("updates", "list", "--json")
-        self.assertEqual(json.loads(out)["total"], 9)
+        self.assertEqual(json.loads(out)["total"], 8)
         code, out = self.run_cli("updates", "apply", "--source", "snap")
         self.assertIn("Re-run with --yes", out)
         self.assertFalse((check.cache_dir() / "actions.log").exists())
@@ -595,6 +598,6 @@ class DaemonIntegrationTests(unittest.TestCase):
         st = d.status()["updates"]
         self.assertEqual(ran, [1])
         self.assertFalse(st["checking"])
-        self.assertEqual(sched.status(refresh=True)["total"], 9)
+        self.assertEqual(sched.status(refresh=True)["total"], 8)
         self.assertFalse(sched.tick())  # just checked: not due for 12 hours
         d.engine.shutdown()

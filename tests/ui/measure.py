@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Measure the GUI's memory and idle CPU on this machine (read-only, headless).
 
     python3 tests/ui/measure.py [--idle 60] [--renderer gl|cairo|default] [--fake]
@@ -47,6 +49,13 @@ def cpu_s() -> float:
 
 
 def outer(args) -> int:
+    if not os.environ.get("TUF_MEASURE_SCOPE"):
+        env = {**os.environ, "TUF_MEASURE_SCOPE": "1"}
+        timeout = str(int(args.idle * 4 + 600))
+        return subprocess.call(
+            ["systemd-run", "--user", "--scope", "-q", "-p", "MemoryMax=1500M",
+             "-p", "MemorySwapMax=0", "--", "timeout", "-k", "5", timeout,
+             sys.executable, __file__, *sys.argv[1:]], env=env)
     if not os.environ.get("TUF_MEASURE_BUS"):
         env = {**os.environ, "TUF_MEASURE_BUS": "1"}
         return subprocess.call(["dbus-run-session", "--", sys.executable, __file__,
@@ -58,6 +67,8 @@ def outer(args) -> int:
          "--virtual-monitor", "1380x1000"],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         env={**os.environ, "GTK_A11Y": "none", "GDK_DEBUG": "no-portals"})
+    private_home = tempfile.TemporaryDirectory(prefix="tuf-measure-home-")
+    fake_tree = None
     try:
         for _ in range(100):
             if (runtime / sock).exists():
@@ -70,13 +81,18 @@ def outer(args) -> int:
                "TUF_MEASURE_CHILD": "1", "PYTHONPATH": str(SRC), "ADW_DISABLE_PORTAL": "1",
                "GDK_DEBUG": "no-portals", "GTK_A11Y": "none"}
         env.pop("DISPLAY", None)
+        home = Path(private_home.name)
+        env.update({"HOME": str(home), "XDG_CONFIG_HOME": str(home / ".config"),
+                    "XDG_DATA_HOME": str(home / ".local/share"),
+                    "XDG_STATE_HOME": str(home / ".local/state"),
+                    "GSETTINGS_BACKEND": "keyfile"})
         if args.renderer != "default":
             env["GSK_RENDERER"] = {"gl": "ngl"}.get(args.renderer, args.renderer)
         else:
             env.pop("GSK_RENDERER", None)
         if args.fake:
-            from_tree = tempfile.mkdtemp(prefix="tuf-measure-")
-            env["TUF_MEASURE_FAKE"] = from_tree
+            fake_tree = tempfile.TemporaryDirectory(prefix="tuf-measure-")
+            env["TUF_MEASURE_FAKE"] = fake_tree.name
         return subprocess.call([sys.executable, __file__, *sys.argv[1:]], env=env,
                                timeout=args.idle * 3 + 300)
     finally:
@@ -85,6 +101,10 @@ def outer(args) -> int:
             mutter.wait(5)
         except subprocess.TimeoutExpired:
             mutter.kill()
+            mutter.wait()
+        private_home.cleanup()
+        if fake_tree is not None:
+            fake_tree.cleanup()
 
 
 def inner(args) -> int:

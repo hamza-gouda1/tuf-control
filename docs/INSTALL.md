@@ -14,7 +14,10 @@ Nothing is downloaded by the installer.
 Files: `~/.local/share/tuf-control/`, `~/.local/bin/tuf-control{,-gui}`, desktop entry, icon,
 metainfo, and the extension in `~/.local/share/gnome-shell/extensions/`. Files that already exist
 and are not ours are backed up to `~/.local/state/tuf-control/backup/` and restored by
-`./uninstall.sh` (or `./install.sh --uninstall`). Skip the extension with `--no-extension`.
+`./uninstall.sh` (or `./install.sh --uninstall`). Skip the extension with `--no-extension`. The per-user `tuf-controld` service is installed
+and started by default (`--no-daemon` skips it). Its original unit and enabled/active state
+are restored on uninstall. `TUF_CONTROL_NO_SYSTEMD=1` installs files without contacting the
+manager, for isolated tests. `XDG_CONFIG_HOME` is respected for the user unit.
 
 ## Quick Settings extension
 

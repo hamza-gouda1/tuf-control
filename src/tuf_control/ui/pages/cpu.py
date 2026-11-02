@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Processor detail: utilisation, per-core grid, frequency, temperatures, policy."""
 from __future__ import annotations
 
@@ -70,11 +72,12 @@ class CpuPage(MonitorPage):
         f = st.last("cpu.freq.avg")
         g.set("freq", fmt.mhz(f))
         g.set("temp", fmt.temp(st.last("temp.cpu")))
-        sens = info.get("sensors") or {}
         w = st.last("power.cpu")
         g.set("power", fmt.watts(w) if w is not None else "needs root")
         set_text(self.rapl_note, "" if w is not None else
-                 "Package power: " + (sens.get("rapl_reason") or "not available") + ".")
+                 "Package power is not measured: the kernel only lets root read the CPU's "
+                 "energy counter, or this CPU does not expose one "
+                 "(/sys/class/powercap/intel-rapl).")
         self.rapl_note.set_visible(w is None)
         load = cpu.get("load")
         g.set("load", f"{load[0]:.2f} · {load[1]:.2f} · {load[2]:.2f}" if load else "–")

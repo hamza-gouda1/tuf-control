@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 from __future__ import annotations
 
 from gi.repository import Adw, Gdk, Gtk
@@ -120,7 +122,10 @@ class KeyboardPage(Page):
     def refresh(self) -> None:
         run_bg(lambda: self.ctl.get_kbd_brightness()[0], done=self._got_bri,
                error=lambda e: (self.bri_row.set_sensitive(False),
-                                self.bri_row.set_subtitle(str(e))))
+                                self.bri_row.set_subtitle(
+                                    "Not available right now: the keyboard brightness "
+                                    "could not be read. Check that the asusd service is "
+                                    "running, then restart TUF Control.")))
         run_bg(lambda: self.ctl.get_kbd_rgb()[0], done=self._got_rgb, error=self._rgb_failed)
         self.soft.refresh()
 
@@ -147,8 +152,11 @@ class KeyboardPage(Page):
     def _rgb_failed(self, exc) -> None:
         for r in self.fx_rows:
             r.set_sensitive(False)
-        self.fx_err.set_subtitle(str(exc))
+        self.fx_err.set_subtitle(
+            "Not available right now: the asusd service is not running, so the keyboard "
+            "effects cannot be read. Start it, then restart TUF Control.")
         self.fx_err.set_visible(True)
+        self.fx_err.set_tooltip_text(str(exc))
         self.preview.set_opacity(0.4)  # nothing to show: not a lit keyboard
         self._show()
 

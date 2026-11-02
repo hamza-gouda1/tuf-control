@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 from __future__ import annotations
 
 from gi.repository import Adw, Gtk
@@ -127,8 +129,11 @@ class FansPage(Page):
             msg = "Switch to this profile in the header to edit its curve."
         else:
             title = "Fan curves unavailable"
+            msg = ("Not available right now: the fan curves could not be read. Check that "
+                   "the asusd service is running, then restart TUF Control.")
         self.status.set_title(title)
         self.status.set_subtitle(msg)
+        self.status.set_tooltip_text(str(exc))
         self.status.set_visible(True)
         self.readout.set_label("")
 

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """A fake /proc + /sys for the telemetry layer (development and screenshots only).
 
 `ensure(root)` adds the files the readers need to a tree made by
@@ -133,7 +135,7 @@ def ensure(root: str | Path) -> None:
     _w(blk / "queue/rotational", 0)
     _w(blk / "removable", 0)
     (root / "sys/block/loop0").mkdir(parents=True, exist_ok=True)
-    for name, wifi, state in (("wlp108s0", True, "up"), ("enp109s0", False, "down"),
+    for name, wifi, state in (("wlp0s20f3", True, "up"), ("enp0s31f6", False, "down"),
                               ("docker0", None, "down")):
         d = root / "sys/class/net" / name
         _w(d / "type", 1)
@@ -189,7 +191,8 @@ class FakeWorld:
         self.cpu = [[0] * 8 for _ in range(NCPU)]  # user nice system idle iowait irq soft st
         self.ctxt = self.intr = 0
         self.disk = [0, 0, 0, 0, 0]
-        self.net = {"wlp108s0": [0, 0, 0, 0], "enp109s0": [0, 0, 0, 0], "docker0": [0, 0, 0, 0]}
+        self.net = {"wlp0s20f3": [0, 0, 0, 0], "enp0s31f6": [0, 0, 0, 0],
+                    "docker0": [0, 0, 0, 0]}
         self.proc_ticks = {p[0]: 0 for p in PROCS}
         self.proc_io = {p[0]: [0, 0] for p in PROCS}
         self.render_ns = {p[0]: 0 for p in PROCS}
@@ -261,7 +264,7 @@ class FakeWorld:
             f" 259 0 nvme0n1 {d[0]} 0 {d[1]} 0 {d[2]} 0 {d[3]} 0 0 {d[4]} {d[4]} 0 0 0 0 0 0\n"
             f" 259 3 nvme0n1p5 {d[0]} 0 {d[1]} 0 {d[2]} 0 {d[3]} 0 0 {d[4]} {d[4]} 0 0 0 0\n"
             "   7 0 loop0 3 0 24 0 0 0 0 0 0 1 0 0 0 0 0 0 0\n")
-        w = self.net["wlp108s0"]
+        w = self.net["wlp0s20f3"]
         w[0] += int(dt * (40e3 + 4.2e6 * L * (0.5 + 0.5 * math.sin(now / 4))))
         w[1] += int(dt * 900)
         w[2] += int(dt * (12e3 + 0.6e6 * L))
@@ -273,7 +276,7 @@ class FakeWorld:
             "Inter-|   Receive\n face |bytes    packets\n" + "\n".join(rows) + "\n")
         (r / "proc/net/wireless").write_text(
             "Inter-| sta-|   Quality\n face | tus | link level noise\n"
-            " wlp108s0: 0000   58.  -52.  -256        0      0      0      0      0        0\n")
+            " wlp0s20f3: 0000   58.  -52.  -256        0      0      0      0      0        0\n")
         # iGPU
         card = r / "sys/class/drm/card1"
         busy = 0.10 + 0.35 * L

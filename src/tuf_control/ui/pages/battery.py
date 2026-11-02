@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 from __future__ import annotations
 
 from gi.repository import Adw, GLib, Gtk
@@ -90,8 +92,11 @@ class BatteryPage(Page):
                error=lambda e: self.h_val.set_label("Unavailable"))
 
     def _limit_failed(self, exc) -> None:
-        self.limit_err.set_subtitle(str(exc))
+        self.limit_err.set_subtitle(
+            "Not available right now: the charge limit could not be read. Check that the "
+            "asusd service is running, then restart TUF Control.")
         self.limit_err.set_visible(True)
+        self.limit_err.set_tooltip_text(str(exc))
         self.scale.set_sensitive(False)
         self.presets.set_sensitive(False)
 

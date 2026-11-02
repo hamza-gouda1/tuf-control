@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """D-Bus backend: asusd, supergfxd and power-profiles-daemon through Gio.
 
 PyGObject is imported lazily, only by GioTransport. All calls carry a timeout.
@@ -201,6 +203,14 @@ class DBusBackend(Backend):
 
     def _children(self, dest: str, path: str) -> list[str]:
         xml = self.t.introspect(dest, path)
+        if len(xml) > (1 << 20):
+            raise BackendUnavailable(f"{dest} returned a huge introspection reply")
+        # strip the standard DTD line before parsing: with no document type there is
+        # nothing for an entity to be defined in, and the node list needs none; a reply
+        # that still carries a DOCTYPE or an ENTITY declaration is refused
+        xml = re.sub(r"<!DOCTYPE[^>\[]*>", "", xml, count=1)
+        if "<!DOCTYPE" in xml or "<!ENTITY" in xml:
+            raise BackendUnavailable(f"{dest} returned unusable introspection data")
         return sorted(n.get("name") for n in ET.fromstring(xml).findall("node") if n.get("name"))
 
     def probe(self):

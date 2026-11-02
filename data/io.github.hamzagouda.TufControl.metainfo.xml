@@ -1,7 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!-- Copyright (C) Hamza Gouda; SPDX-License-Identifier: GPL-3.0-or-later -->
 <component type="desktop-application">
   <id>io.github.hamzagouda.TufControl</id>
   <metadata_license>CC0-1.0</metadata_license>
+  <url type="homepage">https://github.com/hamza-gouda1/tuf-control</url>
   <project_license>GPL-3.0-or-later</project_license>
   <name>TUF Control</name>
   <summary>Fans, power, graphics and lighting for ASUS laptops</summary>

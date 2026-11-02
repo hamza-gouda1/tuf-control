@@ -16,13 +16,21 @@ in a GTK 4 / Libadwaita interface, a CLI, and a GNOME Quick Settings toggle.
 - **Fans**: 8-point curve per fan and profile (drag or arrow keys), apply / revert / factory reset.
 - **Graphics**: Integrated / Hybrid / Ultimate through supergfxd, with the pending-restart state.
 - **Battery**: charge limit 20-100 %, one-shot full charge, health.
-- **Keyboard**: brightness and hardware effects with a live preview.
+- **Keyboard**: brightness, hardware effects and daemon-driven software effects with a live preview.
 - **Display**: refresh rate (with Undo), panel overdrive.
+- **Touchpad & gestures**: touchpad switches, speed and click method; swipe and pinch
+  bindings that run through the Quick Settings extension ([GESTURES.md](docs/GESTURES.md)).
 - **Monitor**: a dashboard of live cards and detail pages for processes/apps (with End task),
-  per-core CPU, memory, both GPUs, both fans and temperatures, storage and network. About half
-  of Mission Center's memory (107 MB vs ~210 MB), checked against `top`, `free`, `sensors`,
+  per-core CPU, memory, both GPUs, both fans and temperatures, storage and network. An earlier single-machine run measured
+  107 MB RSS on the dashboard; the ~210 MB Mission Center figure is an approximate reference,
+  not a controlled comparison. Telemetry is checked against `top`, `free`, `sensors`,
   `nvidia-smi` and `upower` ([PERFORMANCE.md](docs/PERFORMANCE.md)). The dGPU is never woken
   to read sensors.
+- **Updates**: checks apt, snap, Flatpak and firmware (plus a pending kernel, reboot-required and
+  NVIDIA module match), applies them and verifies each item by comparing installed versions before
+  and after.
+- **Services**: start/stop/restart and enable/disable user and system services, with core units
+  protected and systemd's own polkit prompt for system ones.
 - **CLI**: `tuf-control status | profile | limit | battery ...`, `--json`, `--dry-run` on every write.
 - **Agent access**: an MCP server (`tuf-control mcp`) and JSON CLI for agents and scripts.
   Read-only by default; every change is a dry run until you approve it. See below.
@@ -49,24 +57,41 @@ drop-in replacement. "Partial" means present but narrower than the original.
 | Fan curves | yes | yes | yes |
 | GPU mode (Eco / Standard / Ultimate) | yes | yes | yes, via supergfxd |
 | Charge limit | yes | yes | yes |
-| Keyboard RGB effects | yes (Aura Sync) | yes | partial: hardware effects only |
-| Per-app / AC-battery automation | yes | yes | in progress |
-| Resource use | heavy background services | light | light, no background service |
+| Keyboard RGB effects | yes (Aura Sync) | yes | partial: single-zone hardware effects plus software effects run by tuf-controld; no per-key RGB |
+| Automation | Scenario profiles (model dependent) | AC/battery profile, GPU and display rules | Rules for AC/battery, app launches, time windows and profile changes (run by the optional tuf-controld daemon) |
+| Background operation | ASUS services; footprint not compared here | Single executable; footprint not compared here | Optional tuf-controld user service for rules, software effects and update checks; installed by default, skip with --no-daemon |
 | Open source | no | yes | yes (GPL-3.0-or-later) |
 | Runs on Linux | no | no | yes |
 
-## Limitations (honest)
+Comparison sources checked 2026-11-01: [G-Helper README](https://github.com/seerge/g-helper) and
+[ASUS Armoury Crate documentation](https://www.asus.com/support/faq/1043747/).
+Features and firmware support vary by model; this is not a full parity claim.
 
-- **PPT group unavailable on some firmware.** With `asusd`'s `EnablePptGroup` off, or on models whose
-  firmware does not report PPT values (they read as -1), the power-limit sliders are hidden and the
-  app says why. It never invents limits. Enabling `EnablePptGroup` is your call and model dependent.
+## Limitations
+
+- **Power limits require support for the model in the kernel driver.** On the tested FX608JHR,
+  PPT attributes read ENODEV and asusd reports -1, consistent with a missing power-limit table
+  entry. Sliders remain hidden when real bounds are unavailable. `EnablePptGroup` is a separate
+  per-profile tuning switch; enabling it cannot supply missing kernel bounds.
+  The draft upstream request for the FX608JHR is in
+  [docs/upstream/FX608JHR-power-limits.md](docs/upstream/FX608JHR-power-limits.md).
 - Fan curves exist only for fans the firmware lists; through plain sysfs only the active profile's
   curve can be edited.
-- Keyboard: hardware effects only; software effects are a placeholder. Per-key RGB is not supported.
+- Keyboard: per-key RGB is not supported. Hardware effects are single-zone, and the software effects
+  work by writing one colour to the whole keyboard a few times a second (tuf-controld).
+- Keyboard (TUF): hardware Breathe shows only one colour (asusd keeps Colour 2, but it never reaches
+  the keys), so the app's "Two colours" switch drives the software two-colour gradient
+  (Gradient breathing) instead.
 - GPU mode changes need a log-out or reboot; supergfxd decides, the app only shows the required action.
 - The D-Bus names and signatures were checked read-only against asusd 6.3.5 and supergfxd; the write
   paths have been tested with a recording transport and a fake sysfs tree, not exercised on every
   model. Daemons were introspected on one TUF laptop only.
+- Tested on one machine only: ASUS TUF F16 FX608JHR on Ubuntu 24.04, GNOME Wayland; other models and
+  X11 sessions are untested.
+- Real PackageKit, snap, Flatpak and fwupd installations have not been exercised in this
+  development audit; tests simulate transactions and verify installed-version results. Firmware
+  pending a restart is reported separately from a confirmed installed version.
+- The GUI and Shell integration target Wayland; X11 is untested.
 - GNOME Shell 46 is the only version the Quick Settings extension declares.
 
 ## Install
@@ -78,8 +103,10 @@ drop-in replacement. "Partial" means present but narrower than the original.
 See [docs/INSTALL.md](docs/INSTALL.md). User-level, no root, no downloads. The optional polkit
 helper is printed with `./install.sh --system` and never run for you.
 
-The installer also binds the Armoury Crate keys (XF86Launch3, XF86Launch1) to TUF Control and the
-Copilot key to Claude. With the Focus Keys extension from bordeaux-gnome installed and enabled,
+The installer also binds the Armoury Crate key (XF86Launch3) to TUF Control, takes over an existing
+XF86Launch1 shortcut only when it still opens the retired asus-control app, and binds the Copilot
+key to Claude when that app is installed. With the Focus Keys extension from bordeaux-gnome
+installed and enabled,
 those go into its shortcut list, so a press brings the open window to the front instead of a
 "TUF Control is ready" notification, and earlier custom shortcuts for them are migrated away;
 without it they are GNOME custom shortcuts. Skip them with `--no-hotkey`, pick another key with
@@ -152,6 +179,7 @@ Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/UI.md](docs/UI.md).
     PYTHONPATH=src python3 -m unittest discover -s tests
     shellcheck install.sh uninstall.sh tests/test_install.sh && bash tests/test_install.sh
     gjs -m tests/test_quick_profiles.js
+    gjs -m tests/test_gestures.js
 
 ## Credits and license
 

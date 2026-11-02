@@ -1,7 +1,12 @@
+# Copyright (C) Hamza Gouda
+# SPDX-License-Identifier: GPL-3.0-or-later
 name: ci
 on:
   push:
   pull_request:
+
+permissions:
+  contents: read
 
 jobs:
   python:
@@ -36,6 +41,10 @@ jobs:
             node --input-type=module --check < "$f"
           done
       - name: Extension logic tests
-        run: gjs -m tests/test_quick_profiles.js
+        run: |
+          gjs -m tests/test_quick_profiles.js
+          gjs -m tests/test_gestures.js
+      - name: Validate settings schema
+        run: glib-compile-schemas --strict --dry-run extension/tuf-control-quick@hamza-gouda/schemas
       - name: metadata.json
         run: python3 -c "import json; json.load(open('extension/tuf-control-quick@hamza-gouda/metadata.json'))"

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 import os
 import tempfile
 import unittest
@@ -146,6 +148,26 @@ class ControllerTests(TreeCase):
         self.assertTrue(caps[Capability.PROFILE].available)
         self.assertFalse(caps[Capability.POWER_LIMITS].available)
         self.assertIs(be.get_profile(), Profile.QUIET)
+
+    def test_children_parses_standard_introspection_xml(self):
+        """asusd's replies carry the standard D-Bus DOCTYPE; _children must read them
+        (a past hardening rejected the DOCTYPE outright and broke every introspected
+        capability) while still refusing entity declarations."""
+        STANDARD = ('<!DOCTYPE node PUBLIC "-//freedesktop//DTD D-BUS Object Introspection '
+                    '1.0//EN" "http://www.freedesktop.org/standards/dbus-1.0/'
+                    'introspect.dtd">\n<node><node name="attributes"/><node name="leds"/>'
+                    '</node>')
+        class T:
+            def name_has_owner(self, n): return True
+            def get_property(self, d, p, i, prop): return ""
+            def introspect(self, d, p): return STANDARD
+        be = DBusBackend(T())
+        self.assertEqual(be._children("xyz.ljones.Asusd", "/"), ["attributes", "leds"])
+
+        class Evil(T):
+            def introspect(self, d, p):
+                return '<!DOCTYPE node [<!ENTITY x "y">]><node>&x;</node>'
+        self.assertRaises(Exception, DBusBackend(Evil())._children, "d", "/")
 
     def test_fake_root_never_uses_real_backends(self):
         old = os.environ.get(FAKE_ROOT_ENV)

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Services: systemd units like Mission Center's Services tab (name, state, enabled, PID,
 memory), for system or user units, with a filter, details and safe actions.
 
@@ -75,6 +77,12 @@ class ServicesPage(Page):
 
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, margin_top=16,
                         margin_start=16, margin_end=16, margin_bottom=12)
+        # the search box on its own line: seg + both filters together are wider than the
+        # 360 px minimum window
+        self.search = Gtk.SearchEntry(placeholder_text="Filter by name, description or PID")
+        self.search.set_hexpand(True)
+        self.search.connect("search-changed", lambda *_: self._rebuild())
+        outer.append(self.search)
         bar = Gtk.Box(spacing=8)
         seg = Gtk.Box()
         seg.add_css_class("linked")
@@ -89,17 +97,15 @@ class ServicesPage(Page):
             seg.append(b)
             self.scope_btn[key] = b
         bar.append(seg)
-        self.search = Gtk.SearchEntry(placeholder_text="Filter by name, description or PID",
-                                      hexpand=True)
-        self.search.connect("search-changed", lambda *_: self._rebuild())
-        bar.append(self.search)
         self.kind = Gtk.DropDown(model=Gtk.StringList.new([t for _k, t in KINDS]),
-                                 valign=Gtk.Align.CENTER)
+                                 valign=Gtk.Align.CENTER, hexpand=True)
+        self.kind.set_focusable(True)   # GtkDropDown ships with focusable unset
         a11y_name(self.kind, "Unit type")
         self.kind.connect("notify::selected", lambda *_: self._rebuild())
         bar.append(self.kind)
         self.state = Gtk.DropDown(model=Gtk.StringList.new([t for _k, t in STATES]),
-                                  valign=Gtk.Align.CENTER)
+                                  valign=Gtk.Align.CENTER, hexpand=True)
+        self.state.set_focusable(True)
         a11y_name(self.state, "State filter")
         self.state.connect("notify::selected", lambda *_: self._rebuild())
         bar.append(self.state)
@@ -218,7 +224,9 @@ class ServicesPage(Page):
 
         def fail(exc):
             self._busy = False
-            self.summary.set_label(f"Could not list {scope} units: {exc}")
+            self.summary.set_label(f"The {scope} unit list could not be read from systemd. "
+                                   "Try again by switching the scope or reopening this "
+                                   "page.")
 
         run_bg(be.list_units, force_files, done=done, error=fail)
 

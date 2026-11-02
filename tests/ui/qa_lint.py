@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Headless UI QA lint: every page x size x theme, plus dialogs, toasts and stress modes.
 
     python3 tests/ui/qa_lint.py                      # full matrix (about 15 minutes)
@@ -40,7 +42,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
+import site
 import subprocess
 import sys
 import tempfile
@@ -58,7 +62,7 @@ from qa_core import (PAGES, SIZES, VARIANTS, Collected, Finding, log_failures,  
 
 MEM_MAX = "1500M"
 CHILD_TIMEOUT = 420
-MODES = ("rtl", "scale", "long", "empty", "ppt")
+MODES = ("rtl", "scale", "long", "empty", "ppt", "gpu-lost")
 MODE_SIZES = ("1280x720", "640x700")
 THEME_PAIR_PAGES = ("dashboard", "performance", "fans", "battery", "processes")  # not the keyboard: live colour
 
@@ -124,15 +128,19 @@ def start_mutter(size: str):
 
 def run_child(job: dict, sock: str, workdir: Path) -> tuple:
     env = {**os.environ, "GDK_BACKEND": "wayland", "WAYLAND_DISPLAY": sock,
-           "TUF_QA_JOB": json.dumps(job), "PYTHONPATH": f"{SRC}:{HERE}",
+           "TUF_QA_JOB": json.dumps(job),
+           "PYTHONPATH": f"{SRC}:{HERE}:{site.getusersitepackages()}:"
+                         + os.environ.get("PYTHONPATH", ""),
            "TUF_CONTROL_COLOR_SCHEME": "light" if job["variant"] == "light" else "dark",
            "GSK_RENDERER": "cairo", "ADW_DISABLE_PORTAL": "1", "GDK_DEBUG": "no-portals",
-           "GTK_A11Y": "none", "G_MESSAGES_DEBUG": "all", "GSETTINGS_BACKEND": "memory",
+           "GTK_A11Y": "none", "G_MESSAGES_DEBUG": "all", "GSETTINGS_BACKEND": "keyfile",
            "NO_AT_BRIDGE": "1", "PYTHONWARNINGS": "default", "PYTHONUNBUFFERED": "1"}
     env.pop("DISPLAY", None)
-    if job["variant"] != "usertheme":
-        env["XDG_CONFIG_HOME"] = tempfile.mkdtemp(prefix="tuf-qa-cfg-", dir=workdir)
-    log = workdir / f"{job['name']}.log"
+    import screenshots as sh
+    isolated_home = Path(tempfile.mkdtemp(prefix="tuf-qa-home-", dir=workdir))
+    env.update(sh.isolated_env(isolated_home, job["variant"] == "usertheme"))
+    safe_name = re.sub(r"[^A-Za-z0-9_.-]", "_", job["name"])   # job names are ours; be sure
+    log = workdir / f"{safe_name}.log"
     cmd = ["timeout", "-k", "5", str(CHILD_TIMEOUT), sys.executable, __file__, "--child"]
     with open(log, "w") as fh:
         rc = subprocess.call(cmd, env=env, stdout=fh, stderr=subprocess.STDOUT)
@@ -301,6 +309,17 @@ def child(job: dict) -> int:
         fake.ensure = ensure_stripped
         fake.FakeWorld.advance = lambda self, now: None
         strip_hardware(root)
+    if mode == "gpu-lost":
+        from tuf_control.telemetry.gpu_nvidia import NvidiaGpu
+        original_sample = NvidiaGpu.sample
+
+        def lost_sample(gpu, now):
+            gpu.backend = None  # also exercise failed NVML initialization.
+            (root / "sys/bus/pci/devices/0000:01:00.0/power/runtime_status").write_text(
+                "error\n")
+            return original_sample(gpu, now)
+
+        NvidiaGpu.sample = lost_sample
     if not real:
         sh.seed_agent_demo()
     if long_mode:
@@ -464,6 +483,13 @@ def child(job: dict) -> int:
                 t0 = time.monotonic()
                 yield 800
                 page = win.pages[key]
+                if mode == "gpu-lost" and key in ("dashboard", "dgpu", "gpu"):
+                    text = (page.dgpu.foot.get_text() if key == "dashboard" else
+                            page.sleep_note.get_text() if key == "dgpu" else
+                            page.power_row.get_subtitle())
+                    if "restart" not in text.lower() or "lost" not in text.lower():
+                        emit(Finding("gpu-lost", "fail", key, "recovery message",
+                                     "lost GPU recovery guidance missing without NVML"))
                 if key == "processes":
                     pp = win.pages["processes"]
                     row = pp.tree.get_row(0)
@@ -493,6 +519,8 @@ def child(job: dict) -> int:
                     yield from focus_ring(win, aud, key, page, frame, expected)
                 if key == "agent":
                     info["agent_page_ms"] = int((time.monotonic() - t0) * 1000)
+                if key == "updates" and not real and mode != "empty":
+                    yield from updates_states(win, aud, frame)
             except Exception:
                 emit(Finding("harness-exception", "fail", key, "page",
                              traceback.format_exc()[-600:]))
@@ -553,6 +581,14 @@ def child(job: dict) -> int:
             wdg.grab_focus()
             win.set_focus_visible(True)
             yield 180
+            if win.get_focus() is not wdg:
+                # the headless compositor never gives the window real keyboard focus and
+                # a GtkListBox row then keeps the grab (a documented harness limit): the
+                # widget never took focus here, so there is nothing to compare
+                emit(Finding("focus-ring", "info", key, qa.desc(wdg),
+                             "the grab did not land on this widget in the headless "
+                             "compositor; ring not verifiable here"))
+                continue
             b = frame()
             box = (max(0, int(r[0]) - 6), max(0, int(r[1]) - 6),
                    min(a.size[0], int(r[0] + r[2]) + 6), min(a.size[1], int(r[1] + r[3]) + 6))
@@ -563,6 +599,64 @@ def child(job: dict) -> int:
                              "no visible change when this widget takes keyboard focus"))
         win.set_focus(None)
         yield 100
+
+    def updates_states(win, aud, frame):
+        """Exercise real UI state transitions against the fake transaction backend."""
+        from tuf_control.updates.fake import FAKE_PENDING_ENV
+        up = win.pages["updates"]
+        for _ in range(40):
+            if up.report is not None and not up.busy:
+                break
+            yield 100
+        if up.report is None or up.busy:
+            emit(Finding("updates-state", "fail", "updates", "report",
+                         "fake update check did not finish"))
+            return
+        os.environ[FAKE_PENDING_ENV] = "apt:linux-image-generic:amd64"
+        item = next(i for i in up.report.items() if i.name == "openssl")
+        # Include the kept-back kernel to exercise the false-success regression.
+        kernel = next(i for i in up.report.items() if i.name == "linux-image-generic")
+        up._apply([item, kernel])
+        yield 200
+        up._tick()
+        sh._scroll_to(up.prefs, up.progress_g)
+        yield 150
+        aud.audit("updates:progress", up.progress_g, png=frame())
+        qa.check_min_width(emit, win, "updates:progress", w, h, up)
+        for _ in range(80):
+            if not up.busy:
+                break
+            yield 100
+        if up.busy:
+            emit(Finding("updates-state", "fail", "updates", "apply",
+                         "fake update apply did not finish"))
+            return
+        yield 300
+        if not up.last_run or not any(i.get("result") == "pending"
+                                      for i in up.last_run.get("items", [])):
+            emit(Finding("updates-state", "fail", "updates", "verified result",
+                         "unchanged kernel did not appear as still pending"))
+        hist = next((x for x in up.dynamic if x.get_title() == "History"), None)
+        if hist is not None:
+            sh._scroll_to(up.prefs, hist)
+            yield 150
+            aud.audit("updates:history", hist, png=frame())
+        # A service failure is not proof that there are no updates.
+        from tuf_control.updates.model import Report, SourceResult
+        saved = up.report
+        up.report = Report(checked_ts=time.time(), sources=[SourceResult(
+            "apt", error="PackageKit did not return its package list")], fake=True)
+        up.render()
+        up._scroll_to_top()
+        yield 150
+        if up.hero_title.get_text() != "Update check incomplete":
+            emit(Finding("updates-state", "fail", "updates", "failed source",
+                         "failed check was presented as up to date"))
+        aud.audit("updates:error", up, png=frame())
+        up.report = saved
+        up.render()
+        up._scroll_to_top()
+        yield 150
 
     def shell_states(win, aud, frame, tick):
         # toast: bottom of the window, not over the profile chip

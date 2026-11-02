@@ -1,14 +1,18 @@
+// Copyright (C) Hamza Gouda
 // SPDX-License-Identifier: GPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 Hamza Gouda
 //
 // TUF Control Quick Settings: a "Performance" menu toggle with a Quiet /
-// Balanced / Performance submenu, and an OSD naming the new profile whenever
-// it changes outside the menu too (Fn+F5 cycles it in asusd). The look is the
-// shell theme's own; nothing here sets colours.
+// Balanced / Performance submenu, an OSD naming the new profile whenever
+// it changes outside the menu too (Fn+F5 cycles it in asusd), and optional
+// touchpad gestures bound in the settings. The look is the shell theme's own;
+// nothing here sets colours.
 
 import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
 import Gio from 'gi://Gio';
+import Clutter from 'gi://Clutter';
+import Meta from 'gi://Meta';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
@@ -16,11 +20,91 @@ import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import {QuickMenuToggle, SystemIndicator} from 'resource:///org/gnome/shell/ui/quickSettings.js';
 
 import {AsusdProfileSource, GpuModeSource, PpdProfileSource} from './dbus.js';
+import {GestureWatcher, shellActions} from './gestures.js';
 import {
     ICONS, LABELS, PROFILES, ProfileAnnouncer, ProfileModel, chargeLabel, gpuModeName, subtitleFor,
 } from './profiles.js';
 
 const APP_DESKTOP_ID = 'io.github.hamzagouda.TufControl.desktop';
+// GNOME 46's built-in Power Mode tile is PowerProfilesToggle (status/powerProfiles.js);
+// PowerModeToggle covers older/newer namings. Matched by GObject class name, not by any
+// private QuickSettings attribute, and restored on disable().
+const POWER_MODE_TOGGLES = ['PowerProfilesToggle', 'PowerModeToggle'];
+
+
+/**
+ * Hide GNOME's built-in Power Mode tile while ours runs: the two switch the same
+ * platform profile, so the shell's one is redundant. Cosmetic only — the profile
+ * itself keeps working everywhere else. Matched by GObject class name rather than
+ * any private QuickSettings attribute, and restored on disable().
+ */
+class PowerModeHider {
+    constructor(settings) {
+        this._settings = settings;
+        this._original = new Map();
+        this._id = settings.connect('changed::hide-power-mode', () => this._apply());
+    }
+
+    enable() {
+        this._apply();
+        if (this._settings.get_boolean('hide-power-mode') && this._find().length === 0) {
+            // the panel is built before extensions load, so one deferred pass is
+            // enough; it costs nothing when the first pass already found it
+            this._retry = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1000, () => {
+                this._apply();
+                this._retry = null;
+                return GLib.SOURCE_REMOVE;
+            });
+            GLib.Source.set_name_by_id(this._retry, '[tuf-control-quick] power-mode hide');
+        }
+    }
+
+    _apply() {
+        const want = this._settings.get_boolean('hide-power-mode');
+        for (const toggle of this._find()) {
+            if (want) {
+                if (!this._original.has(toggle))
+                    this._original.set(toggle, toggle.visible);
+                toggle.visible = false;
+            } else if (this._original.has(toggle)) {
+                toggle.visible = this._original.get(toggle);
+                this._original.delete(toggle);
+            }
+        }
+    }
+
+    _find() {
+        // a fresh walk each time: actors can be replaced or destroyed between calls,
+        // and the panel is small enough that walking it is cheaper than caching.
+        // first_child/next_sibling rather than get_children(): the latter is the
+        // deprecated Clutter API and is gone in newer shells
+        const out = [];
+        const walk = actor => {
+            for (let child = actor.get_first_child(); child !== null;
+                 child = child.get_next_sibling()) {
+                if (POWER_MODE_TOGGLES.includes(child.constructor?.name))
+                    out.push(child);
+                walk(child);
+            }
+        };
+        walk(Main.panel.statusArea.quickSettings);
+        return out;
+    }
+
+    destroy() {
+        if (this._retry) {
+            GLib.source_remove(this._retry);
+            this._retry = null;
+        }
+        const live = new Set(this._find());
+        for (const [toggle, visible] of this._original) {
+            if (live.has(toggle))
+                toggle.visible = visible;
+        }
+        this._original.clear();
+        this._settings.disconnect(this._id);
+    }
+}
 
 const ProfileToggle = GObject.registerClass(
 class TufProfileToggle extends QuickMenuToggle {
@@ -163,9 +247,31 @@ export default class TufControlQuickExtension extends Extension {
             show: profile => Main.osdWindowManager.show(-1,
                 Gio.ThemedIcon.new(ICONS[profile] ?? ICONS.balanced), LABELS[profile] ?? profile, null),
         });
+        // Touchpad gestures, off until 'gesture-enabled' says otherwise. The
+        // settings are read per gesture, so changed bindings need no restart.
+        // The schema id is passed explicitly: a session that cached the extension's
+        // pre-gestures metadata (without "settings-schema") would otherwise hand
+        // getSettings() an undefined id here.
+        const settings = this.getSettings('org.gnome.shell.extensions.tuf-control-quick');
+        this._gestures = new GestureWatcher({
+            settings,
+            stage: global.stage,
+            actions: shellActions(Main, Meta, settings),
+            clutter: Clutter,
+        });
+        this._gestures.enable();
+        // one Power Mode selector is enough: ours (asusd, ppd fallback) replaces the
+        // shell's own tile while this extension runs; a switch on the Touchpad &
+        // gestures page brings the system one back
+        this._hider = new PowerModeHider(settings);
+        this._hider.enable();
     }
 
     disable() {
+        this._hider?.destroy();
+        this._hider = null;
+        this._gestures?.disable();
+        this._gestures = null;
         this._announcer?.destroy();
         this._announcer = null;
         // Destroying the indicator removes its quick settings items from the grid.

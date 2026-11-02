@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 # Exercise install.sh in a throwaway HOME; the real one is never touched.
 set -euo pipefail
 
@@ -8,6 +9,8 @@ T=$(mktemp -d)
 trap 'rm -rf "$T"' EXIT
 export HOME=$T/home XDG_DATA_HOME=$T/home/.local/share XDG_STATE_HOME=$T/home/.local/state
 unset TUF_CONTROL_BIN_DIR DBUS_SESSION_BUS_ADDRESS
+# never talk to the real systemd user manager from the tests
+export TUF_CONTROL_NO_SYSTEMD=1
 mkdir -p "$HOME/.local/bin"
 # GNOME shortcuts go to a keyfile settings backend inside the temp HOME, never the real dconf
 export GSETTINGS_BACKEND=keyfile XDG_CONFIG_HOME=$T/home/.config
@@ -40,10 +43,17 @@ grep -q "sudo install -Dm0755" "$T/out.txt" || fail "--system did not print sudo
 [ -f "$XDG_DATA_HOME/tuf-control/tuf_control/__init__.py" ] || fail "package missing"
 [ -f "$XDG_DATA_HOME/tuf-control/tuf_control/helper.py" ] || fail "helper missing from package"
 [ -x "$HOME/.local/bin/tuf-control-gui" ] || fail "gui launcher missing"
+[ -x "$HOME/.local/bin/tuf-controld" ] || fail "daemon launcher missing"
+[ -f "$HOME/.config/systemd/user/tuf-controld.service" ] || fail "daemon unit missing"
 [ -f "$XDG_DATA_HOME/gnome-shell/extensions/tuf-control-quick@hamza-gouda/extension.js" ] || fail "extension missing"
-grep -q "^Exec=$HOME/.local/bin/tuf-control-gui$" \
+grep -Fqx "Exec=\"$HOME/.local/bin/tuf-control-gui\"" \
     "$XDG_DATA_HOME/applications/io.github.hamzagouda.TufControl.desktop" || fail "Exec not rewritten"
-grep -q "my own" "$XDG_STATE_HOME/tuf-control/backup/"* || fail "launcher not backed up"
+grep -Fqx "Exec=\"$HOME/.local/bin/tuf-control-gui\" --page updates" \
+    "$XDG_DATA_HOME/applications/io.github.hamzagouda.TufControl.desktop" || fail "Updates action lost its page"
+if command -v desktop-file-validate >/dev/null 2>&1; then
+    desktop-file-validate "$XDG_DATA_HOME/applications/io.github.hamzagouda.TufControl.desktop"
+fi
+grep -q "my own" "$XDG_STATE_HOME/tuf-control/backup/${HOME//\//_}_.local_bin_tuf-control" || fail "launcher not backed up"
 "$HOME/.local/bin/tuf-control" --help >/dev/null || fail "installed CLI does not start"
 TUF_CONTROL_FAKE_ROOT=$T/none "$HOME/.local/bin/tuf-control" --help >/dev/null || fail "CLI start with fake root"
 
@@ -204,6 +214,52 @@ assert Gio.Settings.new_full(s, None, None).get_user_value('bindings') is None" 
 fi
 [ ! -e "$XDG_DATA_HOME/tuf-control" ] || fail "app dir remains"
 [ ! -e "$XDG_DATA_HOME/gnome-shell/extensions/tuf-control-quick@hamza-gouda" ] || fail "extension remains"
+[ ! -e "$HOME/.config/systemd/user/tuf-controld.service" ] || fail "daemon unit remains"
+[ ! -e "$HOME/.local/bin/tuf-controld" ] || fail "daemon launcher remains"
 grep -q "my own" "$HOME/.local/bin/tuf-control" || fail "original launcher not restored"
 [ ! -e "$HOME/.local/bin/tuf-control-gui" ] || fail "gui launcher remains"
 echo "install tests passed"
+
+# Preserve pre-existing files/directories even after repeated installs. No real
+# manager is contacted; a custom XDG config directory is deliberately used.
+export XDG_CONFIG_HOME=$T/custom-config
+unit=$XDG_CONFIG_HOME/systemd/user/tuf-controld.service
+ext=$XDG_DATA_HOME/gnome-shell/extensions/tuf-control-quick@hamza-gouda
+mkdir -p "$(dirname "$unit")" "$ext" "$XDG_DATA_HOME/tuf-control"
+printf 'original unit\n' >"$unit"
+printf 'original extension\n' >"$ext/original.txt"
+printf 'original package\n' >"$XDG_DATA_HOME/tuf-control/original.txt"
+"$ROOT/uninstall.sh" >/dev/null
+[ "$(cat "$unit")" = 'original unit' ] || fail "no-state uninstall removed foreign service"
+[ -f "$ext/original.txt" ] || fail "no-state uninstall removed foreign extension"
+"$ROOT/install.sh" --no-hotkey >/dev/null
+"$ROOT/install.sh" --no-hotkey >/dev/null
+"$ROOT/uninstall.sh" >/dev/null
+[ "$(cat "$unit")" = 'original unit' ] || fail "original daemon unit not restored"
+[ "$(cat "$ext/original.txt")" = 'original extension' ] || fail "original extension not restored"
+[ -f "$XDG_DATA_HOME/tuf-control/original.txt" ] || fail "original package not restored"
+# Manager interactions are recorded by a stub, with no connection to live systemd.
+mkdir -p "$T/manager-bin"
+cat >"$T/manager-bin/systemctl" <<'STUB'
+#!/bin/sh
+printf '%s\n' "$*" >>"$TUF_TEST_MANAGER_LOG"
+case "$*" in
+    *is-enabled*) printf 'disabled\n'; exit 1 ;;
+    *is-active*) printf 'active\n' ;;
+esac
+STUB
+chmod +x "$T/manager-bin/systemctl"
+export TUF_TEST_MANAGER_LOG=$T/manager.log
+TUF_CONTROL_NO_SYSTEMD='' PATH="$T/manager-bin:$PATH" "$ROOT/install.sh" --no-hotkey >/dev/null
+TUF_CONTROL_NO_SYSTEMD='' PATH="$T/manager-bin:$PATH" "$ROOT/uninstall.sh" >/dev/null
+grep -qx -- '--user start tuf-controld.service' "$TUF_TEST_MANAGER_LOG" || fail "previous active state not restored"
+[ "$(cat "$unit")" = 'original unit' ] || fail "service restore with manager lost original"
+echo "asset and service restoration tests passed"
+
+# Launcher code must quote literal installation paths, including shell syntax.
+export HOME="$T/home with 'quotes' and \$literal"
+export XDG_DATA_HOME=$HOME/.local/share XDG_STATE_HOME=$HOME/.local/state XDG_CONFIG_HOME=$HOME/.config
+"$ROOT/install.sh" --no-hotkey --no-daemon >/dev/null
+"$HOME/.local/bin/tuf-control" --help >/dev/null || fail "literal-path CLI launcher failed"
+"$ROOT/uninstall.sh" >/dev/null
+echo "literal installation path test passed"

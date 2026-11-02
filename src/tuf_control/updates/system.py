@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Things that are installed but not in use until a restart: a newer kernel of the running
 flavour, /run/reboot-required, and an NVIDIA kernel module that no longer matches the
 installed driver. All local file reads; nothing needs root."""
@@ -14,7 +16,7 @@ _KVER = re.compile(r"^(\d+(?:\.\d+)+)-(\d+(?:\.\d+)*)(?:-(.+))?$")
 
 
 def parse_kernel(release: str) -> tuple[tuple[int, ...], str] | None:
-    """'7.0.13-3-liquorix-amd64' -> ((7, 0, 13, 3), 'liquorix-amd64');
+    """'6.12.9-2-xanmod' -> ((6, 12, 9, 2), 'xanmod');
     '6.8.0-147-generic' -> ((6, 8, 0, 147), 'generic')."""
     m = _KVER.match(release.strip())
     if not m:

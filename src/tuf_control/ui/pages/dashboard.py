@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Overview: one live card per subsystem; a card opens its detail page."""
 from __future__ import annotations
 
@@ -41,7 +43,7 @@ class MetricCard(Gtk.Box):
         self.unit.set_valign(Gtk.Align.END)
         row.append(self.value)
         row.append(self.unit)
-        self.extra = Gtk.Box(spacing=16, halign=Gtk.Align.END, hexpand=True,
+        self.extra = Gtk.Box(spacing=12, halign=Gtk.Align.END, hexpand=True,
                              valign=Gtk.Align.END)
         row.append(self.extra)
         self.append(row)
@@ -50,6 +52,9 @@ class MetricCard(Gtk.Box):
         self.append(self.chart)
         self.foot = label("", ("stat-sub", "numeric"), wrap=True,
                           wrap_mode=Pango.WrapMode.WORD_CHAR)
+        # a wrapping label still requests its single-line width as the minimum unless
+        # capped, which pushed the card past the 360 px window
+        self.foot.set_max_width_chars(30)
         self.foot.set_margin_top(4)
         self.append(self.foot)
 
@@ -57,7 +62,13 @@ class MetricCard(Gtk.Box):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         val = label("–", ("mini-value", "numeric"), xalign=1.0)
         box.append(val)
-        box.append(label(caption, ("mini-label",), xalign=1.0))
+        cap = label(caption, ("mini-label",), xalign=1.0)
+        # keep the cell's requested width small: two caption labels side by side would
+        # otherwise push the card past the 360 px window
+        cap.set_max_width_chars(12)
+        cap.set_ellipsize(Pango.EllipsizeMode.END)
+        cap.set_tooltip_text(caption)
+        box.append(cap)
         self.extra.append(box)
         return val
 
@@ -233,7 +244,7 @@ class DashboardPage(MonitorPage):
             self.igpu.title.set_tooltip_text(ig.get("name") or "Intel graphics")
         else:
             self.igpu.set_value("–")
-            set_text(self.igpu.foot, ig.get("reason") or "No Intel GPU")
+            set_text(self.igpu.foot, "No Intel graphics detected on this laptop.")
         # dGPU
         dg = info.get("dgpu") or {}
         self._dgpu(dg, last)
@@ -292,22 +303,27 @@ class DashboardPage(MonitorPage):
 
     def _dgpu(self, dg: dict, last) -> None:
         c = self.dgpu
-        if not dg.get("present") or not dg.get("backend"):
-            c.set_value("–")
-            set_text(c.foot, dg.get("reason") or "No NVIDIA GPU")
-            c.set_badge(None)
-            return
         name = dg.get("name") or "NVIDIA graphics"
         set_text(c.title, name.replace("NVIDIA GeForce ", "GeForce ").replace(" Laptop GPU", ""))
         c.title.set_tooltip_text(name)
         state = dg.get("state")
-        if state == "lost":
+        if state == "lost" or dg.get("runtime") == "error":
             c.set_value("Unavailable")
             set_text(c.foot, "driver lost the GPU · restart usually recovers it")
             c.set_badge("Error", "gold")
             set_text(self.dgpu_temp, "–")
             set_text(self.dgpu_power, "–")
             return
+        if not dg.get("present") or not dg.get("backend"):
+            c.set_value("–")
+            set_text(c.foot, "The NVIDIA driver could not provide readings. Check the "
+                             "driver, then reopen this page.")
+            c.foot.set_tooltip_text(dg.get("reason") or None)
+            c.set_badge(None)
+            set_text(self.dgpu_temp, "–")
+            set_text(self.dgpu_power, "–")
+            return
+        c.foot.set_tooltip_text(None)
         if state in ("sleeping", "idle-released"):
             sleeping = state == "sleeping"
             c.set_value("Sleeping" if sleeping else "Idle")
@@ -327,4 +343,5 @@ class DashboardPage(MonitorPage):
         c.set_badge(f"P{ps}" if ps is not None else "Awake", "gold")
         used, total = q.get("vram_used"), q.get("vram_total")
         set_text(c.foot, f"VRAM {fmt.bytes_(used)} of {fmt.bytes_(total, 0)}"
-                 if used is not None else (dg.get("reason") or "awake"))
+                 if used is not None else "Awake, but the VRAM reading did not come "
+                                          "through.")

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 from __future__ import annotations
 
 import importlib
@@ -38,6 +40,7 @@ CONTROL = [
     ("fans", "Fan curves", "document-edit-symbolic", "fans", "FansPage"),
     ("gpu", "GPU mode", "application-x-firmware-symbolic", "gpu", "GpuPage"),
     ("display", "Display", "preferences-desktop-display-symbolic", "display", "DisplayPage"),
+    ("gestures", "Touchpad & gestures", "input-touchpad-symbolic", "gestures", "GesturesPage"),
     ("battery", "Battery", "battery-level-80-symbolic", "battery", "BatteryPage"),
     ("keyboard", "Keyboard", "input-keyboard-symbolic", "keyboard", "KeyboardPage"),
     ("automation", "Automation", "media-playlist-repeat-symbolic", "automation",
@@ -476,8 +479,16 @@ class MainWindow(Adw.ApplicationWindow):
         run_bg(self.ctl.set_profile, prof, done=done, error=fail)
 
     # -- feedback ---------------------------------------------------------------------------------
+    def _toast_text(self, text: str, narrow_chars: int = 34, wide_chars: int = 90) -> str:
+        """Toasts never wrap: a title wider than the window makes the overlay stick out,
+        so long ones are cut (the full result is always in the page). An unallocated
+        window counts as narrow."""
+        w = self.get_width()
+        limit = wide_chars if w >= 520 else narrow_chars
+        return text if len(text) <= limit else text[:limit - 1].rstrip() + "…"
+
     def toast(self, text: str, undo=None) -> None:
-        t = Adw.Toast(title=GLib.markup_escape_text(text), timeout=3)
+        t = Adw.Toast(title=GLib.markup_escape_text(self._toast_text(text)), timeout=3)
         if undo:
             t.set_button_label("Undo")
             t.connect("button-clicked", lambda *_: undo())
@@ -487,7 +498,8 @@ class MainWindow(Adw.ApplicationWindow):
         if os.environ.get("TUF_CONTROL_DEBUG"):
             import traceback
             traceback.print_exception(exc)
-        t = Adw.Toast(title=GLib.markup_escape_text(humanize_error(exc)), timeout=6)
+        t = Adw.Toast(title=GLib.markup_escape_text(
+            self._toast_text(humanize_error(exc))), timeout=6)
         self.toasts.add_toast(t)
 
     def run_write(self, fn, ok_text: str, after=None, on_error=None) -> None:

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """TUF Control GTK application."""
 from __future__ import annotations
 
@@ -11,7 +13,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("PangoCairo", "1.0")
 
-from gi.repository import Adw, Gdk, Gio, Gtk  # noqa: E402
+from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 
 from ..controller import Controller  # noqa: E402
 
@@ -32,6 +34,9 @@ class TufControlApp(Adw.Application):
         self.controller = controller
         self.window = None
         self.styles = None
+        self.start_page: str | None = None
+        self.add_main_option("page", ord("p"), GLib.OptionFlags.NONE,
+                             GLib.OptionArg.STRING, "open this page on start", "KEY")
 
     def do_startup(self) -> None:
         Adw.Application.do_startup(self)
@@ -51,10 +56,18 @@ class TufControlApp(Adw.Application):
         self.set_accels_for_action("app.quit", ["<Control>q"])
         self.set_accels_for_action("window.close", ["<Control>w"])
 
+    def do_handle_local_options(self, options: GLib.VariantDict) -> int:
+        page = options.lookup_value("page", GLib.VariantType("s"))
+        if page is not None and page.get_string():
+            self.start_page = page.get_string()
+        return -1  # continue startup
+
     def do_activate(self) -> None:
         if self.window is None:
             from .window import MainWindow
             self.window = MainWindow(self, self.controller or Controller())
+        if self.start_page and self.start_page in self.window.pages:
+            self.window.show_page(self.start_page)
         self.window.present()
 
 

@@ -158,6 +158,12 @@ def validate(path: str, value: str, root: str | Path = "/") -> Path:
 
 def write(path: str, value: str, root: str | Path = "/") -> None:
     real = validate(path, value, root)
+    # defence in depth, right at the sink: validate() already resolved and allow-listed
+    # the path; this second containment check on the resolved value makes the guarantee
+    # local to the open() call
+    base = Path(os.path.realpath(root))
+    if not real.is_relative_to(base / "sys"):
+        raise Rejected("path is not under /sys")
     fd = os.open(real, os.O_WRONLY | os.O_NOFOLLOW)
     try:
         os.write(fd, value.encode())

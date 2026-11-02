@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Audit log: one JSON object per line, ~/.local/state/tuf-control/agent-audit.log.
 
 Every tool call, resource read and prompt request is recorded with the time, the client
@@ -10,6 +12,7 @@ from __future__ import annotations
 import fcntl
 import json
 import os
+import stat
 import time
 from datetime import datetime
 from pathlib import Path
@@ -45,7 +48,7 @@ class AuditLog:
     def _rotate(self) -> None:
         p = self.path
         try:
-            if p.stat().st_size < self.max_bytes:
+            if p.lstat().st_size < self.max_bytes:
                 return
         except OSError:
             return
@@ -71,13 +74,27 @@ class AuditLog:
         p = self.path
         try:
             p.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-            fd = os.open(p.with_name(p.name + ".lock"), os.O_RDWR | os.O_CREAT, 0o600)
+            fd = os.open(p.with_name(p.name + ".lock"), os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
             try:
+                if not stat.S_ISREG(os.fstat(fd).st_mode):
+                    raise OSError("audit lock is not a regular file")
+                os.fchmod(fd, 0o600)
                 fcntl.flock(fd, fcntl.LOCK_EX)
+                if p.is_symlink():
+                    raise OSError("audit log must not be a symbolic link")
                 self._rotate()
-                out = os.open(p, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+                out = os.open(p, os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW |
+                              os.O_CLOEXEC | os.O_NONBLOCK, 0o600)
                 try:
-                    os.write(out, line)
+                    if not stat.S_ISREG(os.fstat(out).st_mode):
+                        raise OSError("audit log is not a regular file")
+                    os.fchmod(out, 0o600)
+                    remaining = memoryview(line)
+                    while remaining:
+                        n = os.write(out, remaining)
+                        if n <= 0:
+                            raise OSError("audit append failed")
+                        remaining = remaining[n:]
                 finally:
                     os.close(out)
             finally:
@@ -101,7 +118,10 @@ class AuditLog:
         if n == 0:
             return []
         try:
-            with open(self.path, "rb") as fh:
+            fd = os.open(self.path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
+            with os.fdopen(fd, "rb") as fh:
+                if not stat.S_ISREG(os.fstat(fh.fileno()).st_mode):
+                    return []
                 fh.seek(0, os.SEEK_END)
                 size = fh.tell()
                 fh.seek(max(0, size - 256 * 1024))

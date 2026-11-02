@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Firmware (BIOS/UEFI capsules, EC, Thunderbolt, webcams, SSDs...) through fwupd's D-Bus API.
 
 Reads only: GetDevices, GetUpgrades(device) for updatable devices, GetRemotes for the age of
@@ -99,6 +101,9 @@ class FwupdClient:
 
     def devices(self) -> list[dict]:
         return list(self.call("GetDevices")[0])
+
+    def history(self) -> list[dict]:
+        return list(self.call("GetHistory")[0])
 
     def remotes(self) -> list[dict]:
         return list(self.call("GetRemotes")[0])

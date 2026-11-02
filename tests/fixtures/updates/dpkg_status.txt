@@ -1,0 +1,18 @@
+Package: libc6
+Status: install ok installed
+Architecture: amd64
+
+Package: libnvidia-gl-580
+Status: hold ok installed
+Architecture: amd64
+
+Package: libnvidia-compute-580
+Status: hold ok installed
+Architecture: i386
+
+Package: linux-image-generic
+Status: install ok installed
+Architecture: amd64
+
+Package: half-written
+Status: install ok half-configured

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """System packages (apt), read without root.
 
 Preferred: python-apt (apt_pkg) over the local package cache: an installed package whose
@@ -69,7 +71,7 @@ def check_python_apt() -> list[UpdateItem]:
     cache = apt_pkg.Cache(None)  # None: no progress output
     dep = apt_pkg.DepCache(cache)
     try:
-        dep.upgrade(True)  # what a dist-upgrade would do; the rest is "held back"
+        dep.upgrade(False)  # safe upgrade: no new dependencies or package removals
     except SystemError:
         pass
     records = apt_pkg.PackageRecords(cache)
@@ -92,7 +94,7 @@ def check_python_apt() -> list[UpdateItem]:
             desc = records.short_desc or ""
             m = re.search(r"^Phased-Update-Percentage:\s*(\d+)", records.record or "", re.M)
             phased = int(m.group(1)) if m else None
-        held = not (dep.marked_upgrade(pkg) or dep.marked_install(pkg))
+        held = pkg.name in holds or not (dep.marked_upgrade(pkg) or dep.marked_install(pkg))
         facts = {"kept_back": held, "dpkg_hold": pkg.name in holds, "phased_pct": phased}
         out.append((pkg, dict(name=pkg.name, arch=cand.arch, current=cur.ver_str,
                               available=cand.ver_str, security=_is_security(archives),
@@ -136,6 +138,56 @@ def dpkg_holds(root: Path = Path("/")) -> set[str]:
         return blockers.parse_dpkg_holds((root / "var/lib/dpkg/status").read_text())
     except OSError:
         return set()
+
+
+def selection_holds(text: str) -> set[str]:
+    return {parts[0].split(":")[0] for line in text.splitlines()
+            if len(parts := line.split()) == 2 and parts[1] == "hold"}
+
+
+def simulation_facts(text: str, name: str, holds: set[str]) -> dict:
+    items = parse_apt_get_sim(text)
+    removals = re.findall(r"^Remv (\S+)", text, re.M)
+    new = sorted({i.name for i in items if not i.current and i.name != name})
+    upgraded = sorted({i.name for i in items if i.current and i.name != name})
+    changed = set(removals) | set(upgraded)
+    return {"new_packages": new, "upgrades": upgraded, "removals": removals,
+            "held_involved": sorted(changed & holds), "dpkg_hold": name in holds,
+            "broken": bool(re.search(r"unmet dependencies|Unable to correct problems|"
+                                     r"held broken packages", text, re.I))}
+
+
+def text_blockers(items: list[UpdateItem], holds: set[str], safe: str,
+                  full: str, debug: str = "") -> None:
+    safe_names = {i.name for i in parse_apt_get_sim(safe)}
+    for item in items:
+        kept = item.name in holds or item.name not in safe_names
+        if not kept:
+            continue
+        facts = {"kept_back": True, "dpkg_hold": item.name in holds}
+        # Whole-upgrade diagnostics are useful evidence, but are never a safe
+        # per-item installation plan. A targeted simulation supplies that list.
+        facts["dist_upgrade"] = full[-20000:]
+        facts["resolver"] = debug[-20000:]
+        try:
+            if not re.fullmatch(r"[a-z0-9][a-z0-9+.-]*", item.name):
+                raise ValueError("invalid package name")
+            targeted = _run(["apt-get", "-s", "-o", "Debug::NoLocking=1", "install", "--",
+                             item.name + "=" + item.available])
+            facts.update(simulation_facts(targeted, item.name, holds))
+        except (RuntimeError, OSError, subprocess.SubprocessError, ValueError):
+            facts["broken"] = True
+            involved = {n for n in holds if re.search(r"(?<![\w+.-])" + re.escape(n) +
+                                                       r"(?![\w+.-])", debug)}
+            facts["held_involved"] = sorted(involved)
+        try:
+            policy = _run(["apt-cache", "policy", "--", item.name])
+            match = re.search(r"\(phased (\d+)%\)", policy)
+            if match:
+                facts["phased_pct"] = int(match.group(1))
+        except (RuntimeError, OSError, subprocess.SubprocessError):
+            pass
+        item.extra.update(held=True, facts=facts, blocker=blockers.classify(item.name, facts))
 
 
 def apply_holds(items: list[UpdateItem], holds: set[str]) -> None:
@@ -240,11 +292,32 @@ def check(root: Path = Path("/"), *, use_python_apt: bool = True) -> SourceResul
             errors.append(f"python-apt: {exc}")
     if shutil.which("apt-get"):
         try:
-            items = parse_apt_get_sim(_run(["apt-get", "-s", "-q", "-o", "Debug::NoLocking=1",
-                                            "dist-upgrade"]))
-            res.items = [i for i in items if i.current]  # upgrades; new installs follow them
-            res.info["method"] = "apt-get -s"
-            apply_holds(res.items, dpkg_holds(root))
+            full = _run(["apt-get", "-s", "-q", "-o", "Debug::NoLocking=1", "dist-upgrade"])
+            try:
+                safe = _run(["apt-get", "-s", "-q", "-o", "Debug::NoLocking=1", "upgrade"])
+            except (RuntimeError, OSError, subprocess.SubprocessError):
+                safe = ""
+            try:
+                debug = _run(["apt-get", "-s", "-o", "Debug::NoLocking=1", "-o",
+                              "Debug::pkgProblemResolver=yes", "dist-upgrade"])
+            except (RuntimeError, OSError, subprocess.SubprocessError):
+                debug = ""
+            # apt list retains held/phased candidates omitted by dist-upgrade.
+            items = {i.id: i for i in parse_apt_get_sim(full) if i.current}
+            if shutil.which("apt"):
+                try:
+                    items.update({i.id: i for i in parse_apt_list(_run(["apt", "list", "--upgradable"]))})
+                except (RuntimeError, OSError, subprocess.SubprocessError):
+                    pass
+            holds = dpkg_holds(root)
+            if root == Path("/") and shutil.which("dpkg"):
+                try:
+                    holds |= selection_holds(_run(["dpkg", "--get-selections"]))
+                except (RuntimeError, OSError, subprocess.SubprocessError):
+                    pass
+            res.items = list(items.values())
+            text_blockers(res.items, holds, safe, full, debug)
+            res.info["method"] = "apt-get simulations + apt list"
             return res
         except (RuntimeError, OSError, subprocess.SubprocessError) as exc:
             errors.append(f"apt-get -s: {exc}")

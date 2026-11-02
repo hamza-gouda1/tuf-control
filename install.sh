@@ -17,6 +17,8 @@ BACKUP_DIR=$STATE_HOME/tuf-control/backup
 APP_ID=io.github.hamzagouda.TufControl
 EXT_UUID=tuf-control-quick@hamza-gouda
 EXT_DIR=$DATA_HOME/gnome-shell/extensions/$EXT_UUID
+CONFIG_HOME=${XDG_CONFIG_HOME:-$HOME/.config}
+DAEMON_UNIT=$CONFIG_HOME/systemd/user/tuf-controld.service
 MARK="managed by tuf-control install.sh"
 
 # GNOME custom keybinding for the dedicated Armoury Crate key (asus-nb-wmi code 0x38 ->
@@ -36,14 +38,15 @@ FOCUS_SCHEMA=org.gnome.shell.extensions.focus-keys
 FOCUS_SCHEMAS=$DATA_HOME/gnome-shell/extensions/$FOCUS_UUID/schemas
 CLAUDE_ID=com.anthropic.Claude
 
-DRY=0 UNINSTALL=0 SYSTEM=0 WITH_EXT=1 WITH_HOTKEY=1 WITH_COPILOT=1 WITH_MIC=1 WITH_FOCUS=1
+DRY=0 UNINSTALL=0 SYSTEM=0 WITH_EXT=1 WITH_HOTKEY=1 WITH_COPILOT=1 WITH_MIC=1 WITH_FOCUS=1 \
+WITH_DAEMON=1
 
 usage() {
     cat <<USAGE
 Usage: ./install.sh [--dry-run] [--uninstall] [--system] [--no-extension]
                   [--no-hotkey] [--hotkey=KEYSYM]
                   [--no-copilot-key] [--copilot-key=ACCEL] [--no-mic-key] [--mic-key=KEYSYM]
-                  [--no-focus-keys]
+                  [--no-focus-keys] [--no-daemon]
 
   (default)       install for the current user under ~/.local (no root, no downloads)
   --dry-run       show what would happen, change nothing
@@ -68,6 +71,10 @@ Usage: ./install.sh [--dry-run] [--uninstall] [--system] [--no-extension]
                   (XF86Launch3 and XF86Launch1) and the Copilot key go into its shortcut
                   list instead, so a second press brings the open window to the front;
                   our earlier custom shortcuts for them are removed
+  --no-daemon     do not install or start tuf-controld (the per-user automation and
+                  keyboard-effects service). Without it, software keyboard effects and
+                  rules run only while you start the daemon yourself, and they do not
+                  come back after a restart
 USAGE
 }
 
@@ -84,6 +91,7 @@ for arg in "$@"; do
         --no-mic-key) WITH_MIC=0 ;;
         --mic-key=*) MIC_KEY=${arg#--mic-key=} ;;
         --no-focus-keys) WITH_FOCUS=0 ;;
+        --no-daemon) WITH_DAEMON=0 ;;
         -h | --help) usage; exit 0 ;;
         *) echo "unknown option: $arg" >&2; usage >&2; exit 2 ;;
     esac
@@ -124,6 +132,32 @@ restore() {
     fi
 }
 
+# Snapshot each replaced asset once, including an absent destination. Reinstalling
+# must not overwrite the original; uninstall without a record must leave it alone.
+snapshot_asset() {
+    local path=$2 slot=$BACKUP_DIR/assets/$1
+    [ ! -e "$slot/managed" ] || return 0
+    say "saving original $path"
+    [ "$DRY" = 0 ] || return 0
+    mkdir -p "$slot"
+    chmod 0700 "$BACKUP_DIR" "$BACKUP_DIR/assets" "$slot"
+    if [ -e "$path" ] || [ -L "$path" ]; then cp -a "$path" "$slot/original"; fi
+    touch "$slot/managed"
+}
+
+restore_asset() {
+    local path=$2 slot=$BACKUP_DIR/assets/$1
+    [ -e "$slot/managed" ] || return 0
+    say "restoring original $path"
+    [ "$DRY" = 0 ] || return 0
+    rm -rf -- "$path"
+    if [ -e "$slot/original" ] || [ -L "$slot/original" ]; then
+        mkdir -p "$(dirname "$path")"
+        cp -a "$slot/original" "$path"
+    fi
+    rm -rf -- "$slot"
+}
+
 write_launcher() {
     local path=$1 body=$2
     backup "$path"
@@ -135,20 +169,26 @@ write_launcher() {
 }
 
 write_desktop() {
-    local src=$ROOT/data/$APP_ID.desktop dst=$DATA_HOME/applications/$APP_ID.desktop line
+    local src=$ROOT/data/$APP_ID.desktop dst=$DATA_HOME/applications/$APP_ID.desktop
     backup "$dst"
     say "desktop entry $dst"
-    if [ "$DRY" = 1 ]; then return 0; fi
+    [ "$DRY" = 0 ] || return 0
     mkdir -p "$(dirname "$dst")"
-    {
-        printf '# %s\n' "$MARK"
-        while IFS= read -r line; do
-            case $line in
-                Exec=*) printf 'Exec=%s\n' "$BIN_DIR/tuf-control-gui" ;;
-                *) printf '%s\n' "$line" ;;
-            esac
-        done <"$src"
-    } >"$dst"
+    python3 - "$src" "$dst" "$BIN_DIR/tuf-control-gui" "$MARK" <<'PYTHON'
+from pathlib import Path
+import sys
+src, dst, launcher, marker = sys.argv[1:]
+# Desktop Entry string escaping precedes Exec quoting. Percent is a field code.
+quoted = launcher.replace('\\', '\\\\').replace('"', '\\"')
+quoted = quoted.replace('`', '\\`').replace('$', '\\$').replace('%', '%%')
+quoted = ('"' + quoted + '"').replace('\\', '\\\\')
+lines = []
+for line in Path(src).read_text().splitlines():
+    if line.startswith('Exec=tuf-control-gui'):
+        line = 'Exec=' + quoted + line[len('Exec=tuf-control-gui'):]
+    lines.append(line)
+Path(dst).write_text('# ' + marker + '\n' + '\n'.join(lines) + '\n')
+PYTHON
 }
 
 refresh_caches() {
@@ -163,6 +203,7 @@ refresh_caches() {
 install_extension() {
     local src=$ROOT/extension/$EXT_UUID
     say "extension $EXT_DIR"
+    snapshot_asset extension "$EXT_DIR"
     act rm -rf "$EXT_DIR"
     act mkdir -p "$EXT_DIR"
     act cp -r "$src/." "$EXT_DIR/"
@@ -558,30 +599,79 @@ Remove again with:
 SYS
 }
 
+install_daemon() {
+    local state=$BACKUP_DIR/daemon-state enabled active
+    snapshot_asset daemon "$DAEMON_UNIT"
+    say "daemon $DAEMON_UNIT"
+    if [ "$DRY" = 0 ]; then
+        mkdir -p "$(dirname "$DAEMON_UNIT")"
+        { printf '# %s\n' "$MARK"; cat "$ROOT/data/systemd/tuf-controld.service"; } >"$DAEMON_UNIT"
+    fi
+    if command -v systemctl >/dev/null 2>&1 && [ "$DRY" = 0 ] \
+            && [ -z "${TUF_CONTROL_NO_SYSTEMD:-}" ]; then
+        if [ ! -f "$state" ]; then
+            enabled=$(systemctl --user is-enabled tuf-controld.service 2>/dev/null) || true
+            active=$(systemctl --user is-active tuf-controld.service 2>/dev/null) || true
+            printf '%s\n%s\n' "$enabled" "$active" >"$state"
+            chmod 0600 "$state"
+        fi
+        act systemctl --user daemon-reload
+        act systemctl --user enable --now tuf-controld.service
+    fi
+}
+
+restore_daemon_state() {
+    local state=$BACKUP_DIR/daemon-state enabled active
+    [ -f "$state" ] && [ "$DRY" = 0 ] || return 0
+    [ -z "${TUF_CONTROL_NO_SYSTEMD:-}" ] || return 0
+    command -v systemctl >/dev/null 2>&1 || return 0
+    enabled=$(sed -n '1p' "$state")
+    active=$(sed -n '2p' "$state")
+    systemctl --user daemon-reload
+    case $enabled in
+        enabled) systemctl --user enable tuf-controld.service ;;
+        enabled-runtime) systemctl --user enable --runtime tuf-controld.service ;;
+    esac
+    if [ "$active" = active ]; then systemctl --user start tuf-controld.service; fi
+    rm -f "$state"
+}
+
 do_install() {
+    local app_literal
     command -v python3 >/dev/null 2>&1 || { echo "python3 is required" >&2; exit 1; }
     say "installing tuf-control for $USER ($([ "$DRY" = 1 ] && echo dry run || echo for real))"
+    snapshot_asset package "$APP_DIR"
     act rm -rf "$APP_DIR/tuf_control"
     act mkdir -p "$APP_DIR"
     act cp -r "$ROOT/src/tuf_control" "$APP_DIR/tuf_control"
     if [ "$DRY" = 0 ]; then
         find "$APP_DIR" -name __pycache__ -type d -prune -exec rm -rf {} +
     fi
+    app_literal=$(python3 -c 'import shlex,sys; print(shlex.quote(sys.argv[1]))' "$APP_DIR")
     write_launcher "$BIN_DIR/tuf-control" \
-        "PYTHONPATH=\"$APP_DIR\${PYTHONPATH:+:\$PYTHONPATH}\" exec python3 -m tuf_control \"\$@\""
+        "PYTHONPATH=$app_literal\"\${PYTHONPATH:+:\$PYTHONPATH}\" exec python3 -m tuf_control \"\$@\""
     write_launcher "$BIN_DIR/tuf-control-mcp" \
-        "PYTHONPATH=\"$APP_DIR\${PYTHONPATH:+:\$PYTHONPATH}\" exec python3 -m tuf_control mcp \"\$@\""
+        "PYTHONPATH=$app_literal\"\${PYTHONPATH:+:\$PYTHONPATH}\" exec python3 -m tuf_control mcp \"\$@\""
     write_launcher "$BIN_DIR/tuf-control-gui" \
-        "PYTHONPATH=\"$APP_DIR\${PYTHONPATH:+:\$PYTHONPATH}\" exec python3 -c 'from tuf_control.ui.app import main; raise SystemExit(main())' \"\$@\""
+        "PYTHONPATH=$app_literal\"\${PYTHONPATH:+:\$PYTHONPATH}\" exec python3 -c 'from tuf_control.ui.app import main; raise SystemExit(main())' \"\$@\""
+    write_launcher "$BIN_DIR/tuf-controld" \
+        "PYTHONPATH=$app_literal\"\${PYTHONPATH:+:\$PYTHONPATH}\" exec python3 -m tuf_control.daemon \"\$@\""
     write_desktop
+    snapshot_asset icon "$DATA_HOME/icons/hicolor/scalable/apps/$APP_ID.svg"
+    snapshot_asset metainfo "$DATA_HOME/metainfo/$APP_ID.metainfo.xml"
     act install -Dm0644 "$ROOT/data/icons/hicolor/scalable/apps/$APP_ID.svg" \
         "$DATA_HOME/icons/hicolor/scalable/apps/$APP_ID.svg"
     act install -Dm0644 "$ROOT/data/$APP_ID.metainfo.xml" "$DATA_HOME/metainfo/$APP_ID.metainfo.xml"
     if [ "$WITH_EXT" = 1 ]; then install_extension; fi
+    if [ "$WITH_DAEMON" = 1 ]; then install_daemon; fi
     refresh_caches
     if [ "$WITH_HOTKEY" = 1 ]; then install_hotkey; fi
     say
     say "done. Run: $BIN_DIR/tuf-control status   (make sure $BIN_DIR is on your PATH)"
+    if [ "$WITH_DAEMON" = 1 ] && command -v systemctl >/dev/null 2>&1; then
+        say "daemon: tuf-controld unit installed (automation, keyboard effects and update"
+        say "  checks run at login; systemctl --user status tuf-controld shows it)"
+    fi
     if [ "$WITH_EXT" = 1 ]; then
         say "Quick Settings extension copied; enable it yourself with:"
         say "  gnome-extensions enable $EXT_UUID   (log out and in if GNOME does not list it yet)"
@@ -591,17 +681,32 @@ do_install() {
 do_uninstall() {
     say "removing tuf-control for $USER"
     local f
+    # the unit file goes no matter what; the manager is only told when we may talk to it
+    if [ -e "$BACKUP_DIR/assets/daemon/managed" ]; then
+        if command -v systemctl >/dev/null 2>&1 && [ "$DRY" = 0 ] \
+                && [ -z "${TUF_CONTROL_NO_SYSTEMD:-}" ]; then
+            act systemctl --user disable --now tuf-controld.service
+        fi
+        restore_asset daemon "$DAEMON_UNIT"
+        if command -v systemctl >/dev/null 2>&1 && [ "$DRY" = 0 ] \
+                && [ -z "${TUF_CONTROL_NO_SYSTEMD:-}" ]; then
+            act systemctl --user daemon-reload
+        fi
+    fi
     for f in "$BIN_DIR/tuf-control" "$BIN_DIR/tuf-control-gui" "$BIN_DIR/tuf-control-mcp" \
+             "$BIN_DIR/tuf-controld" \
              "$DATA_HOME/applications/$APP_ID.desktop"; do
         if is_ours "$f"; then act rm -f "$f"; elif [ -e "$f" ]; then say "keeping $f (not ours)"; fi
         restore "$f"
     done
-    act rm -f "$DATA_HOME/icons/hicolor/scalable/apps/$APP_ID.svg" \
-        "$DATA_HOME/metainfo/$APP_ID.metainfo.xml"
-    act rm -rf "$APP_DIR" "$EXT_DIR"
+    restore_asset icon "$DATA_HOME/icons/hicolor/scalable/apps/$APP_ID.svg"
+    restore_asset metainfo "$DATA_HOME/metainfo/$APP_ID.metainfo.xml"
+    restore_asset package "$APP_DIR"
+    restore_asset extension "$EXT_DIR"
+    restore_daemon_state
     refresh_caches
     uninstall_hotkey
-    say "done. User settings (if any) were left alone."
+    say "done. Original files and managed shortcuts were restored; app configuration was retained."
 }
 
 if [ "$UNINSTALL" = 1 ]; then do_uninstall; else do_install; fi

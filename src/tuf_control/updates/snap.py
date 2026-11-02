@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Snaps via the snapd REST API on /run/snapd.socket.
 
 Reading needs no privileges: GET /v2/snaps (installed) and GET /v2/find?select=refresh
@@ -27,7 +29,11 @@ class _UnixHTTP(http.client.HTTPConnection):
     def connect(self) -> None:
         s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         s.settimeout(self.timeout)
-        s.connect(self._path)
+        try:
+            s.connect(self._path)
+        except BaseException:
+            s.close()
+            raise
         self.sock = s
 
 
@@ -133,8 +139,9 @@ def check(sock: Path = SOCKET) -> SourceResult:
 
 
 def refresh(names: list[str] | None, *, sock: Path = SOCKET, timeout_s: float = 1800,
-            progress=None) -> str:
-    """Refresh the named snaps (all when None). snapd shows the polkit prompt."""
+            progress=None, watch=None, cancel=None) -> str:
+    """Refresh the named snaps (all when None). snapd shows the polkit prompt; the change
+    it starts is polled for live progress (per-task done/total) and can be aborted."""
     body = {"action": "refresh"}
     if names:
         body["snaps"] = list(names)
@@ -142,15 +149,43 @@ def refresh(names: list[str] | None, *, sock: Path = SOCKET, timeout_s: float = 
     if _err(doc):
         raise RuntimeError(_err(doc))
     change = doc.get("change")
+    if watch:
+        watch.phase("Starting", package=", ".join(names or [])[:120] or "all snaps",
+                    cancellable=True)
+        watch.line(f"snapd change {change} started")
+    last_task = ""
     deadline = time.monotonic() + timeout_s
+    aborted = False
     while change and time.monotonic() < deadline:
+        if cancel is not None and cancel.is_set() and not aborted:
+            snapd("POST", f"/v2/changes/{change}", {"action": "abort"}, sock=sock)
+            aborted = True
         st = snapd("GET", f"/v2/changes/{change}", sock=sock)
+        if _err(st):
+            raise RuntimeError(_err(st))
         r = st.get("result") or {}
-        if progress:
+        tasks = r.get("tasks") or []
+        if tasks and (watch or progress):
+            done = sum(int((t.get("progress") or {}).get("done") or 0) for t in tasks)
+            total = sum(int((t.get("progress") or {}).get("total") or 0) for t in tasks)
+            run = next((str(t["summary"]) for t in tasks if t.get("status") == "Do"
+                        and t.get("summary")), "")
+            if run and run != last_task:
+                last_task = run
+                if watch:
+                    watch.line(run)
+                if progress:
+                    progress(run)
+            if watch and total:
+                watch.phase("Installing" if not aborted else "Cancelling",
+                            percent=100.0 * done / total, package=run[:120])
+        if progress and not watch:
             progress(r.get("summary") or "")
         if r.get("ready"):
-            if r.get("err"):
-                raise RuntimeError(r["err"])
+            if r.get("err") or aborted:
+                raise RuntimeError("cancelled" if aborted else r["err"])
             return r.get("summary") or "done"
         time.sleep(1.0)
-    return "started" if change else "nothing to do"
+    if change:
+        raise TimeoutError("snapd did not finish before the timeout; check its change log")
+    return "nothing to do"

@@ -51,6 +51,9 @@ without an entry gets no limits structure, so the show handlers return ENODEV.
 `FX608JPR`, was proposed in a June 2026 series; the match is exact so it does
 not cover this model).
 
+Rechecked 2026-11-01 against the upstream [asus-armoury model table](https://github.com/torvalds/linux/blob/master/drivers/platform/x86/asus-armoury.h):
+no `FX608JHR` match was present. This is a dated observation; retest after a kernel update.
+
 **Request**
 
 Please add a power-limit entry for board `FX608JHR`, or tell me which

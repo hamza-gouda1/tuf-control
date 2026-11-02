@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Telemetry and process snapshots for the agent read tools.
 
 Uses the same GTK-free readers as the GUI (`telemetry.Sampler`, `ProcessWalker`). Rates
@@ -142,7 +144,12 @@ class Observer:
         q = dg.get("q") or {}
         discrete = {"present": bool(dg.get("present")), "name": dname or None,
                     "state": dg.get("state"), "runtime_pm": dg.get("runtime"),
-                    "note": None if awake else "not queried while suspended (never woken)"}
+                    "note": ("The NVIDIA driver lost access to this GPU. Restart the "
+                             "laptop to recover it; monitoring is paused."
+                             if dg.get("state") == "lost" else
+                             None if awake else
+                             "not queried while suspended (never woken)"
+                             if dg.get("state") == "sleeping" else dg.get("reason"))}
         if awake:
             discrete.update({
                 "util_pct": _r(v.get("dgpu.util")), "temp_c": _r(v.get("dgpu.temp")),

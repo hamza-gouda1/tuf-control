@@ -25,8 +25,8 @@ Dashboard. RSS is what `ps -o rss` shows; PSS splits shared library pages betwee
 | … GL, NVIDIA EGL vendor library excluded | 186 MB | 93 MB | 0.9 % |
 | Previous TUF Control build (installed copy, GL, all pages eager) | 265 MB | 156 MB | |
 
-So the monitor is about half of Mission Center's resident memory while also being the
-laptop control app. The sampler itself costs 4–6 ms per tick (all sources, one thread).
+These historical measurements used different sampling windows and are not a controlled
+benchmark against Mission Center. The sampler itself costs 4–6 ms per tick (all sources, one thread).
 
 ### What dominates, and what was done
 
@@ -37,8 +37,8 @@ laptop control app. The sampler itself costs 4–6 ms per tick (all sources, one
   renderer unless `GSK_RENDERER` or `TUF_CONTROL_RENDERER=gl` says otherwise
   (`ui/lean.py`). Idle CPU is within 0.2 % of GL; page switches cost a few % more for a
   moment. On a HiDPI panel software rendering costs more; switch back if it matters.
-- **The Python + GTK baseline (~67 MB RSS, half of it shared libraries) cannot be beaten**
-  from inside the app. Everything the app adds is about 40 MB: controller, D-Bus proxies,
+- **The Python + GTK baseline (~67 MB RSS, half shared libraries) is outside the app-owned
+  data structures.** Everything the app adds is about 40 MB: controller, D-Bus proxies,
   the nine dashboard cards, the telemetry store, fonts and icons.
 - **Lazy pages.** Pages are imported and built on first visit (`window.LazyPages`).
   Monitor detail pages are destroyed 30 s after you leave them and rebuilt (in tens of ms)
@@ -110,7 +110,7 @@ suspended runtime state and an NVML stub that fails if called.
 `PYTHONPATH=src python3 tests/hardware/validate_telemetry.py --markdown` (read-only; it
 starts two busy loops and an unprivileged disk reader for the first 10 s so the windows
 are not idle). Result on the machine above: **44 checks, 0 failures**. Physical interfaces
-shown; the virtual ones (docker0, virbr0, a bridge, enp109s0 unplugged) also matched.
+shown; the virtual ones (docker0, virbr0, a bridge, enp0s31f6 unplugged) also matched.
 
 | Source | Check | Ours | Reference | Tolerance | Result |
 |---|---|---|---|---|---|
@@ -119,7 +119,7 @@ shown; the virtual ones (docker0, virbr0, a bridge, enp109s0 unplugged) also mat
 | CPU | total % vs `top -bn2` (mean of 3) | diff 0.25 | | 5 pt | OK |
 | CPU | average clock vs /proc/cpuinfo (mean of 10) | 2167 MHz | 2263 MHz | 15 % | OK |
 | Disk | nvme0n1 read rate vs /sys/block/nvme0n1/stat | rel. err 0.02 % | | 5 % | OK |
-| Network | wlp108s0 rx/tx vs /sys/class/net/*/statistics | rel. err 0 % | | 5 % | OK |
+| Network | wlp0s20f3 rx/tx vs /sys/class/net/*/statistics | rel. err 0 % | | 5 % | OK |
 | Memory | total, used, available, free, buff/cache, swap vs `free -b` | identical | | 64 MiB | OK |
 | Sensors | CPU fan / GPU fan vs `sensors -j` | 6200 / 2800 rpm | 6200 / 2800 | 300 rpm | OK |
 | Sensors | CPU package, NVMe composite vs `sensors -j` | 67.0 / 42.85 °C | 67.0 / 42.85 | 3 / 2 °C | OK |

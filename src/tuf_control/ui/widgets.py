@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Custom widgets: sparkline, stat tile, fan-curve canvas, keyboard preview."""
 from __future__ import annotations
 
@@ -368,10 +370,14 @@ class KeyboardPreview(Gtk.DrawingArea):
         self._root_ids: list[int] = []
         self.connect("map", lambda *_: self._on_map())
         self.connect("unmap", lambda *_: self._on_unmap())
-        Adw.StyleManager.get_default().connect("notify::dark", lambda *_: self.queue_draw())
+        self._style_id = None
 
     # -- animation ------------------------------------------------------------------------
     def _on_map(self) -> None:
+        if self._style_id is None:
+            self._style_id = Adw.StyleManager.get_default().connect(
+                "notify::dark", lambda *_: self.queue_draw())
+        self.queue_draw()
         root = self.get_root()
         if root is not None and root is not self._root:
             self._drop_root()
@@ -381,6 +387,9 @@ class KeyboardPreview(Gtk.DrawingArea):
         self._sync()
 
     def _on_unmap(self) -> None:
+        if self._style_id is not None:
+            Adw.StyleManager.get_default().disconnect(self._style_id)
+            self._style_id = None
         self._drop_root()
         self._sync()
 

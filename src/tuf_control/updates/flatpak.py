@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Flatpak apps and runtimes, system and per-user installations.
 
 Check: `flatpak remote-ls --updates --cached` (the remotes' cached summaries; no network,
@@ -8,6 +10,7 @@ so it is safe offline and as fresh as the last flatpak operation) per installati
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 
@@ -110,4 +113,10 @@ def check() -> SourceResult:
 
 
 def update_cmd(installation: str, refs: list[str] | None = None) -> list[str]:
-    return ["flatpak", "update", f"--{installation}", "-y", "--noninteractive", *(refs or [])]
+    if installation not in ("user", "system"):
+        raise ValueError("unknown Flatpak installation")
+    for ref in refs or []:
+        if (not isinstance(ref, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]*", ref)
+                or any(part in ("", ".", "..") for part in ref.split("/"))):
+            raise ValueError("invalid Flatpak reference")
+    return ["flatpak", "update", f"--{installation}", "-y", "--noninteractive", "--", *(refs or [])]

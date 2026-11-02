@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Start, stop and query `tuf-controld` from the GUI and CLI.
 
 With the systemd user unit installed (and no fake tree) start/stop go through
@@ -6,11 +8,14 @@ stopped with SIGTERM via its pid. Status comes from the daemon's status file."""
 from __future__ import annotations
 
 import json
+import math
 import os
 import signal
 import subprocess
 import sys
 import time
+import threading
+import stat
 from pathlib import Path
 
 from ..controller import FAKE_ROOT_ENV
@@ -18,7 +23,51 @@ from ..core import BackendError
 from .config import runtime_dir
 
 UNIT = "tuf-controld.service"
-_SPAWNED: list = []  # detached children; kept so Popen is not reaped (and warned about) by GC
+_SPAWNED: list = []  # active detached children; poll() reaps and removes finished ones
+_SPAWN_LOCK = threading.Lock()
+MAX_LOG_BYTES = 1 << 20
+
+
+def _prune_children() -> None:
+    with _SPAWN_LOCK:
+        _SPAWNED[:] = [p for p in _SPAWNED if getattr(p, "poll", lambda: None)() is None]
+
+
+def _capture_log(stream, path: Path) -> None:
+    """Drain the child's pipe with bounded memory and a 1 MiB rotating private log."""
+    fd = None
+    try:
+        while True:
+            chunk = getattr(stream, "read1", stream.read)(8192)
+            if not chunk:
+                break
+            if fd is None:
+                fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW |
+                             os.O_CLOEXEC | os.O_NONBLOCK, 0o600)
+                if not stat.S_ISREG(os.fstat(fd).st_mode):
+                    raise OSError("daemon log must be a regular file")
+                os.fchmod(fd, 0o600)
+            if os.fstat(fd).st_size + len(chunk) > MAX_LOG_BYTES:
+                os.replace(path, path.with_name(path.name + ".1"))
+                os.close(fd)
+                fd = None
+                fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW |
+                             os.O_CLOEXEC | os.O_NONBLOCK, 0o600)
+            remaining = memoryview(chunk)
+            while remaining:
+                n = os.write(fd, remaining)
+                if n <= 0:
+                    raise OSError("could not append daemon log")
+                remaining = remaining[n:]
+    except OSError:
+        # Keep draining after a logging failure so the child cannot block on a full pipe.
+        while stream.read(8192):
+            pass
+    finally:
+        if fd is not None:
+            os.close(fd)
+        stream.close()
+        _prune_children()
 STALE_S = 10.0
 
 
@@ -47,12 +96,19 @@ class DaemonClient:
         return self.runtime / "status.json"
 
     def status(self) -> dict:
+        _prune_children()
         try:
             data = json.loads(self.status_file.read_text())
         except (OSError, ValueError):
             return {"running": False}
+        if not isinstance(data, dict):
+            return {"running": False}
         pid = data.get("pid")
-        fresh = time.time() - float(data.get("updated_ts", 0)) < STALE_S
+        try:
+            stamp = float(data.get("updated_ts", 0))
+            fresh = math.isfinite(stamp) and 0 <= time.time() - stamp < STALE_S
+        except (ValueError, TypeError, OverflowError):
+            fresh = False
         data["running"] = bool(data.get("running", True) and isinstance(pid, int)
                                and self.alive(pid) and fresh)
         return data
@@ -75,18 +131,31 @@ class DaemonClient:
             if r.returncode != 0:
                 raise BackendError(f"systemctl --user start {UNIT}: {r.stderr.strip()}")
             return f"started {UNIT}"
-        self.runtime.mkdir(parents=True, exist_ok=True)
+        self.runtime.mkdir(parents=True, exist_ok=True, mode=0o700)
         env = dict(self.env)
         pkg_root = str(Path(__file__).resolve().parents[2])
         env["PYTHONPATH"] = os.pathsep.join(x for x in (pkg_root, env.get("PYTHONPATH")) if x)
         cmd = [sys.executable, "-m", "tuf_control.daemon"] + (["--dry-run"] if dry_run else [])
-        log = open(self.runtime / "daemon.log", "ab")
+        log_path = self.runtime / "daemon.log"
+        fd = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW |
+                     os.O_CLOEXEC | os.O_NONBLOCK, 0o600)
         try:
-            proc = self.popen(cmd, stdin=subprocess.DEVNULL, stdout=log, stderr=log,
-                              start_new_session=True, env=env)
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                raise BackendError("daemon log must be a regular file")
+            os.fchmod(fd, 0o600)
         finally:
-            log.close()
-        _SPAWNED.append(proc)
+            os.close(fd)
+        _prune_children()
+        with _SPAWN_LOCK:
+            if len(_SPAWNED) >= 8:
+                raise BackendError("Too many detached daemon starts are still running")
+            proc = self.popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                              stderr=subprocess.STDOUT, start_new_session=True, env=env)
+            _SPAWNED.append(proc)
+        stream = getattr(proc, "stdout", None)
+        if stream is not None:
+            threading.Thread(target=_capture_log, args=(stream, self.runtime / "daemon.log"),
+                             name="tuf-daemon-log", daemon=True).start()
         return f"started pid {proc.pid}"
 
     def wait_running(self, timeout_s: float = 6.0) -> dict:

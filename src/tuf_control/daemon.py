@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """tuf-controld: the per-user automation and keyboard-effects daemon.
 
     tuf-controld [--dry-run] [--once] [--config PATH]
@@ -97,7 +99,11 @@ class Daemon:
         self.engine.sync_ppd = auto["sync_ppd"]
         self.collector.needs_apps = any(r.trigger.type == "app" for r in rules)
         self.collector.needs_profile = any(r.trigger.type == "profile" for r in rules)
-        self.effects.configure(cfg["effects"])
+        effects_cfg = cfg["effects"]
+        if self.forced_dry_run:
+            effects_cfg = {**effects_cfg, "active": None,
+                           "notifications": {"enabled": False}}
+        self.effects.configure(effects_cfg)
         self.updates.configure(cfg.get("updates") or {})
         return True
 
@@ -167,6 +173,8 @@ class Daemon:
             self.shutdown()
 
     def shutdown(self) -> None:
+        from .updates.notify import close_clicks
+        close_clicks()
         self.effects.shutdown()  # first: hands the keyboard back before rules restore it
         self.engine.shutdown()
         self.write_status(running=False)

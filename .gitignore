@@ -1,8 +1,12 @@
-__pycache__/
-*.py[cod]
+.zcode/
 *.egg-info/
-build/
-dist/
+*.pyc
+.mimosa/
 .pytest_cache/
 .ruff_cache/
 .venv/
+__pycache__/
+build/
+dist/
+schemas/gschemas.compiled
+tests/ui/qa_report.md

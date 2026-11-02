@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Telemetry layer without hardware: parsers, rate maths, ring buffers, power gating."""
 import math
 import os
@@ -96,9 +98,10 @@ class DiskNetTests(unittest.TestCase):
 
     def test_net(self):
         n = parse_net_dev(fx("net_dev"))
-        self.assertEqual(n["wlp108s0"], (2383341107, 2950516, 495606546, 1435522))
-        self.assertIn("CloudflareWARP", n)
-        self.assertEqual(parse_wireless(fx("net_wireless").decode())["wlp108s0"], (51.0, -59.0))
+        self.assertEqual(n["wlp0s20f3"], (2383341107, 2950516, 495606546, 1435522))
+        self.assertIn("wg0", n)
+        self.assertEqual(parse_wireless(fx("net_wireless").decode())["wlp0s20f3"],
+                         (51.0, -59.0))
 
     def test_rate_helpers(self):
         self.assertEqual(rate(150, 100, 2.0), 25.0)
@@ -263,10 +266,10 @@ class SamplerOnFakeTreeTests(unittest.TestCase):
             self.assertTrue(s.cpu.static["hybrid"])
             self.assertEqual(s.cpu.static["p_cores"], 8)
             self.assertGreater(st.last("disk.nvme0n1.read"), 0)
-            self.assertGreater(st.last("net.wlp108s0.rx"), 0)
+            self.assertGreater(st.last("net.wlp0s20f3.rx"), 0)
             self.assertNotIn("net.lo.rx", st.series)
             self.assertIn("docker0", s.info["net"]["ifaces"])
-            self.assertEqual(st.last("net.rx"), st.last("net.wlp108s0.rx"))  # no virtual
+            self.assertEqual(st.last("net.rx"), st.last("net.wlp0s20f3.rx"))  # no virtual
             self.assertGreater(st.last("igpu.util"), 0)
             self.assertEqual(s.info["dgpu"]["state"], "awake")
             self.assertEqual(set(dict(s.info["sensors"]["fans"])), {"cpu", "gpu"})

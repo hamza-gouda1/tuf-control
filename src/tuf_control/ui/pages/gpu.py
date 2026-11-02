@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 from __future__ import annotations
 
 from gi.repository import Adw, Gtk
@@ -55,8 +57,11 @@ class GpuPage(Page):
         run_bg(lambda: self.ctl.get_gpu_status()[0], done=self._show, error=self._failed)
 
     def _failed(self, exc) -> None:
-        self.unavail.set_subtitle(str(exc))
+        self.unavail.set_subtitle(
+            "Not available right now: GPU switching could not be read. Check that the "
+            "supergfxd service is running, then restart TUF Control.")
         self.unavail.set_visible(True)
+        self.unavail.set_tooltip_text(str(exc))
         for r in self.mode_rows:
             r.set_visible(False)
         self.switch_btn.set_sensitive(False)

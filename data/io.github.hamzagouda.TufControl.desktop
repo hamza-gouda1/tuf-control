@@ -1,3 +1,5 @@
+# Copyright (C) Hamza Gouda
+# SPDX-License-Identifier: GPL-3.0-or-later
 [Desktop Entry]
 Type=Application
 Name=TUF Control
@@ -10,3 +12,8 @@ Categories=Settings;HardwareSettings;GTK;
 Keywords=asus;tuf;rog;fan;power;profile;gpu;mux;battery;keyboard;rgb;
 StartupNotify=true
 SingleMainWindow=true
+Actions=updates;
+
+[Desktop Action updates]
+Name=Updates
+Exec=tuf-control-gui --page updates

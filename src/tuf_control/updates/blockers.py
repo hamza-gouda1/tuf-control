@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Why apt keeps a package back, in plain language, with the command that would take it.
 
 `classify(name, facts)` is pure; the facts come from apt itself in the check (apt.py):
@@ -80,17 +82,17 @@ def classify(name: str, facts: dict | None) -> dict | None:
                           "comes; nothing is wrong.",
                 "command": "sudo apt -o APT::Get::Always-Include-Phased-Updates=true "
                            "full-upgrade", "fixable": False}
-    if new:
-        return {"blocker": "needs-new", "title": TITLES["needs-new"],
-                "reason": f"It needs packages that are not installed yet: {_names(new)}. "
-                          "A plain upgrade (apt upgrade, PackageKit's Update) only upgrades "
-                          "installed packages, so it stays behind until those are installed.",
-                "command": "sudo apt full-upgrade", "fixable": True}
     if f.get("broken"):
         return {"blocker": "conflict", "title": TITLES["conflict"],
                 "reason": "apt cannot find a consistent way to install it (a dependency "
                           "conflict).",
                 "command": "sudo apt full-upgrade", "fixable": False}
+    if new:
+        return {"blocker": "needs-new", "title": TITLES["needs-new"],
+                "reason": f"It needs packages that are not installed yet: {_names(new)}. "
+                          "An upgrade without new dependencies (apt-get upgrade or PackageKit's Update) only upgrades "
+                          "installed packages, so it stays behind until those are installed.",
+                "command": "sudo apt full-upgrade", "fixable": True}
     return {"blocker": "unknown", "title": TITLES["unknown"],
             "reason": "apt keeps it back without a reason it reports here.",
             "command": "sudo apt full-upgrade", "fixable": False}

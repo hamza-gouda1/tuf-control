@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Headless screenshots of every page against a fake hardware tree.
 
     python3 tests/ui/screenshots.py [--out docs/screenshots] [--schemes dark,light]
@@ -27,6 +29,12 @@ SRC = REPO / "src"
 
 # -- outer: private bus + headless compositor ---------------------------------------------
 def outer(args) -> int:
+    if not os.environ.get("TUF_SHOT_SCOPE"):
+        env = {**os.environ, "TUF_SHOT_SCOPE": "1"}
+        return subprocess.call(
+            ["systemd-run", "--user", "--scope", "-q", "-p", "MemoryMax=1500M",
+             "-p", "MemorySwapMax=0", "--", "timeout", "-k", "5", "600",
+             sys.executable, __file__, *sys.argv[1:]], env=env)
     if not os.environ.get("TUF_SHOT_BUS"):
         env = {**os.environ, "TUF_SHOT_BUS": "1"}
         return subprocess.call(["dbus-run-session", "--", sys.executable, __file__, *sys.argv[1:]],
@@ -54,11 +62,10 @@ def outer(args) -> int:
                    "TUF_CONTROL_COLOR_SCHEME": scheme, "GSK_RENDERER": "cairo",
                    "ADW_DISABLE_PORTAL": "1", "GDK_DEBUG": "no-portals", "GTK_A11Y": "none"}
             env.pop("DISPLAY", None)
-            if not args.user_theme:  # the app's own look, without ~/.config/gtk-4.0/gtk.css
-                cfg = Path(tempfile.mkdtemp(prefix="tuf-shot-cfg-"))
-                env["XDG_CONFIG_HOME"] = str(cfg)
-            rc |= subprocess.call([sys.executable, __file__, *sys.argv[1:]], env=env,
-                                  timeout=120)
+            with tempfile.TemporaryDirectory(prefix="tuf-shot-home-") as home:
+                env.update(isolated_env(Path(home), args.user_theme))
+                rc |= subprocess.call([sys.executable, __file__, *sys.argv[1:]], env=env,
+                                      timeout=180)
         return rc
     finally:
         mutter.terminate()
@@ -66,6 +73,29 @@ def outer(args) -> int:
             mutter.wait(5)
         except subprocess.TimeoutExpired:
             mutter.kill()
+
+
+def isolated_env(home: Path, user_theme: bool = False) -> dict:
+    """A private HOME and keyfile settings store, with only requested style inputs copied."""
+    env = {"HOME": str(home), "XDG_CONFIG_HOME": str(home / ".config"),
+           "XDG_DATA_HOME": str(home / ".local/share"),
+           "XDG_STATE_HOME": str(home / ".local/state"), "GSETTINGS_BACKEND": "keyfile"}
+    if user_theme:
+        src = Path(os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config"))) / "gtk-4.0"
+        dst = home / ".config/gtk-4.0"
+        dst.mkdir(parents=True, exist_ok=True)
+        for name in ("gtk.css", "settings.ini"):
+            if (src / name).is_file():
+                shutil.copyfile(src / name, dst / name)
+    # Model an installed extension in the private HOME so the gesture controls are
+    # exercised, rather than only its missing-extension state. No live schema is changed.
+    src = REPO / "extension/tuf-control-quick@hamza-gouda/schemas"
+    dst = home / ".local/share/gnome-shell/extensions/tuf-control-quick@hamza-gouda/schemas"
+    dst.mkdir(parents=True, exist_ok=True)
+    for xml in src.glob("*.xml"):
+        shutil.copyfile(xml, dst / xml.name)
+    subprocess.run(["glib-compile-schemas", "--strict", str(dst)], check=True, timeout=10)
+    return env
 
 
 # -- inner: the app, driven page by page --------------------------------------------------
@@ -242,7 +272,7 @@ def seed_agent_demo() -> None:
     from tuf_control.agent import policy
     from tuf_control.agent.tools import AgentService
     svc = AgentService()
-    svc.set_client("desktop-assistant", "2.1")
+    svc.set_client("demo-client", "2.1")
     for name, a in (("get_status", {}), ("get_telemetry", {"sections": ["cpu", "fans"]}),
                     ("list_processes", {"limit": 5})):
         svc.call(name, a)
@@ -300,6 +330,31 @@ def _find(widget, cls):
             return hit
         child = child.get_next_sibling()
     return None
+
+
+def _scroll_to(widget, target) -> None:
+    """Put a particular section near the top, retaining its heading in the screenshot."""
+    from gi.repository import Gtk
+    sw = _find(widget, Gtk.ScrolledWindow)
+    if sw is None:
+        return
+    ok, bounds = target.compute_bounds(sw)
+    if ok:
+        adj = sw.get_vadjustment()
+        adj.set_value(max(0, min(adj.get_upper() - adj.get_page_size(),
+                                 adj.get_value() + bounds.get_y() - 12)))
+
+
+def _find_all(widget, cls) -> list:
+    """Every mapped descendant of `widget` that is a `cls`, in tree order."""
+    out = []
+    child = widget.get_first_child()
+    while child is not None:
+        if isinstance(child, cls) and child.get_mapped():
+            out.append(child)
+        out.extend(_find_all(child, cls))
+        child = child.get_next_sibling()
+    return out
 
 
 def popover_shots(win, out: Path, scheme: str, suffix: str, render, render_over):
@@ -415,11 +470,17 @@ def inner(args) -> int:
         ptx, pty = pop.get_surface_transform()
         wtx, wty = win.get_surface_transform()
         x, y = px + ptx - wtx, py + pty - wty
+        # A Wayland popup is allowed to extend beyond its parent window. Include its
+        # complete bounds instead of cropping the right side of long option lists.
+        left, top = min(0, x), min(0, y)
+        width = max(ww, x + pop.get_width()) - left
+        height = max(hh, y + pop.get_height()) - top
         snap = Gtk.Snapshot()
         bg = win.get_style_context().lookup_color("window_bg_color")[1]
-        snap.append_color(bg, Graphene.Rect().init(0, 0, ww, hh))
-        Gtk.WidgetPaintable(widget=win).snapshot(snap, ww, hh)
+        snap.append_color(bg, Graphene.Rect().init(0, 0, width, height))
         snap.save()
+        snap.translate(Graphene.Point().init(-left, -top))
+        Gtk.WidgetPaintable(widget=win).snapshot(snap, ww, hh)
         snap.translate(Graphene.Point().init(x, y))
         Gtk.WidgetPaintable(widget=pop).snapshot(snap, pop.get_width(), pop.get_height())
         snap.restore()
@@ -427,7 +488,7 @@ def inner(args) -> int:
         renderer.realize_for_display(win.get_display())
         try:
             renderer.render_texture(snap.to_node(),
-                                    Graphene.Rect().init(0, 0, ww, hh)).save_to_png(str(path))
+                                    Graphene.Rect().init(0, 0, width, height)).save_to_png(str(path))
         finally:
             renderer.unrealize()
         print(f"wrote {path} (popover at {x:.0f},{y:.0f} {pop.get_width()}x{pop.get_height()})")

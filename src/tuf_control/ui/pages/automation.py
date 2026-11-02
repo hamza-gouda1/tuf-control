@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Automation: the tuf-controld service, rules (trigger -> actions) and recent activity."""
 from __future__ import annotations
 
@@ -126,7 +128,10 @@ class AutomationPage(Page):
             self.poll_status()
 
     def _config_failed(self, exc) -> None:
-        self.cfg_err.set_subtitle(str(exc))
+        self.cfg_err.set_subtitle(
+            "TUF Control could not read its settings file, so the rules are not shown. "
+            "Fix ~/.config/tuf-control/config.json and restart TUF Control to load it "
+            "again.")
         self.cfg_err.set_visible(True)
 
     def _got_config(self, cfg: dict) -> None:
@@ -164,8 +169,9 @@ class AutomationPage(Page):
             sub = "Stopped. Rules and software effects are paused."
         self.svc_row.set_subtitle(sub)
         if st.get("config_error"):
-            self.cfg_err.set_subtitle(f"The service kept the last good config. "
-                                      f"{st['config_error']}")
+            self.cfg_err.set_subtitle(f"The service kept the last good config. Fix the "
+                                      f"settings file and it loads again on its own "
+                                      f"({st['config_error']})")
             self.cfg_err.set_visible(True)
         self._mark_active()
         self._build_activity()
@@ -557,7 +563,10 @@ class RuleDialog(Adw.Dialog):
     def _test_failed(self, exc) -> None:
         self.test_btn.set_sensitive(True)
         self._clear_test()
-        r = info_row("Test failed", str(exc), "dialog-warning-symbolic")
+        r = info_row("Test failed",
+                     "The test could not run: reading the current state or applying an "
+                     "action failed. Check the rule's settings, then try again.",
+                     "dialog-warning-symbolic")
         self.test_g.add(r)
         self.test_rows.append(r)
 

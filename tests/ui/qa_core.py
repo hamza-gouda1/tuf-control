@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Display-free logic of the UI QA lint (importable without GTK; unit-tested).
 
 Everything here works on numbers, strings and plain colour tuples: WCAG contrast,
@@ -13,8 +15,8 @@ from dataclasses import dataclass, field
 
 # -- configuration shared by the harness and the tests --------------------------------------
 PAGES = ["dashboard", "processes", "services", "cpu", "memory", "dgpu", "igpu", "fanmon",
-         "storage", "network", "performance", "fans", "gpu", "display", "battery", "keyboard",
-         "automation", "agent", "updates", "about"]
+         "storage", "network", "performance", "fans", "gpu", "display", "gestures",
+         "battery", "keyboard", "automation", "agent", "updates", "about"]
 
 SIZES = {  # name -> (width, height, maximised)
     "1920x1080": (1920, 1080, True),

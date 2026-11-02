@@ -89,8 +89,10 @@ from a generous minimum span and only ever widen. The time axis is fixed (-120 s
 Control: Performance (profile cards,
 power limits), Fans (8-point curve per fan and profile; drag or arrow keys; Apply / Revert /
 Factory), Graphics (Integrated / Hybrid / Ultimate via supergfxd; pending-restart banner),
-Display (refresh rate, panel overdrive, VRR note), Battery (charge limit 20–100 with 60/80/100
-presets, one-shot full charge, health), Keyboard (brightness, hardware effect, live preview,
+Display (refresh rate, panel overdrive, VRR note), Touchpad & gestures (touchpad
+send-events, tap to click, natural scrolling, speed, click method; swipe and pinch bindings
+for the Quick Settings extension's gestures, off by default; see [GESTURES.md](GESTURES.md)),
+Battery (charge limit 20–100 with 60/80/100 presets, one-shot full charge, health), Keyboard (brightness, hardware effect, live preview,
 software effects: picker, parameters, simulated preview, service status; see
 [EFFECTS.md](EFFECTS.md)), Automation (tuf-controld service, rules with enable switches and an
 "Active" badge, add/edit dialog with a dry-run Test, suggestions, recent activity; see
@@ -125,7 +127,10 @@ tested against a recording transport.
     PYTHONPATH=src python3 tests/hardware/validate_telemetry.py   # vs top, free, sensors, ...
     python3 tests/ui/screenshots.py --pages keyboard --popovers  # dropdowns open, colour chooser
 
-The script starts a private `dbus-run-session` with `mutter --headless --virtual-monitor`,
+The screenshot and measurement scripts first enter a 1500 MiB systemd scope with swap
+disabled and a hard timeout. They use a private HOME/XDG tree and the keyfile GSettings
+backend; optional user-theme files are copied as read-only inputs. The screenshot script
+starts a private `dbus-run-session` with `mutter --headless --virtual-monitor`,
 runs the app on that Wayland socket against a fresh fake tree (sensor values animated for
 the graphs), and renders each page with `Gtk.WidgetPaintable` -> `Gsk.CairoRenderer` -> PNG.
 `--user-theme` keeps `~/.config/gtk-4.0/gtk.css`; by default it is bypassed so the shots
@@ -144,6 +149,10 @@ each with a timeout, against the fake tree (nothing real is read or written).
     python3 tests/ui/qa_lint.py --quick         # 1280x720 and 360x640, dark and light
     python3 tests/ui/qa_lint.py --sizes 360x640 --variants dark --pages fans,battery
     TUF_QA_SLOW=1 python3 -m unittest tests.ui.test_qa_lint   # the --quick run as a test
+
+The matrix also drives a fake Updates transaction, checking the running progress panel,
+version-verified pending result and expanded history at each normal size. The `gpu-lost`
+stress mode forces a PCI runtime error with no NVML backend to check recovery advice.
 
 Matrix: sizes 1920x1080 (maximised), 1280x720, 900x700, 640x700, 360x640; variants `dark`,
 `light` and `usertheme` (dark with the real `~/.config/gtk-4.0/gtk.css` and `settings.ini`,

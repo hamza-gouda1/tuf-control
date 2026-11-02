@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Tell the owner when something new needs an update, once.
 
 An update is identified by (id, offered version). Every offered key is remembered after it
@@ -10,6 +12,7 @@ from __future__ import annotations
 
 import os
 import time
+import threading
 
 from .model import Report
 
@@ -52,8 +55,97 @@ def body_text(report: Report) -> str:
     return body
 
 
-def send(summary: str, body: str = "", replaces_id: int = 0) -> int:
-    """org.freedesktop.Notifications.Notify; returns the notification id (0 if none)."""
+def _launch_app() -> None:
+    """Open the app on its Updates page (the desktop action runs `--page updates`)."""
+    try:
+        from gi.repository import Gio
+        app = Gio.DesktopAppInfo.new("io.github.hamzagouda.TufControl.desktop")
+        if app is None:
+            return
+        if "updates" in app.list_actions():
+            app.launch_action("updates", None)
+        else:
+            app.launch(None, None)
+    except Exception:
+        pass
+
+
+_click_watch = None
+_click_lock = threading.Lock()
+
+
+class _ClickWatch:
+    """One notification subscription and a private dispatched GLib context.
+
+    Replacing or closing a notification retires the old subscription. The daemon
+    does not run GTK's main loop, so relying on its default context loses clicks.
+    """
+    def __init__(self, conn, nid: int):
+        self.conn, self.nid = conn, nid
+        self.stop = threading.Event()
+        self.ready = threading.Event()
+        self.thread = threading.Thread(target=self._run, name="tuf-update-notification",
+                                       daemon=True)
+        self.thread.start()
+        self.ready.wait(2.0)
+
+    def _signal(self, _c, _s, _p, _i, name, params):
+        value = params.unpack()
+        if not value or int(value[0]) != self.nid:
+            return
+        if name == "ActionInvoked" and len(value) > 1 and value[1] == "default":
+            _launch_app()
+            self.stop.set()
+        elif name == "NotificationClosed":
+            self.stop.set()
+
+    def _run(self):
+        from gi.repository import Gio, GLib
+        context = GLib.MainContext.new()
+        context.push_thread_default()
+        sub = None
+        try:
+            sub = self.conn.signal_subscribe(
+                "org.freedesktop.Notifications", "org.freedesktop.Notifications", None,
+                "/org/freedesktop/Notifications", None, Gio.DBusSignalFlags.NONE,
+                self._signal)
+            self.ready.set()
+            deadline = time.monotonic() + 24 * 3600
+            while not self.stop.is_set() and time.monotonic() < deadline:
+                context.iteration(False)
+                self.stop.wait(0.05)
+        finally:
+            if sub is not None:
+                self.conn.signal_unsubscribe(sub)
+            context.pop_thread_default()
+            self.ready.set()
+
+    def close(self):
+        self.stop.set()
+        if threading.current_thread() is not self.thread:
+            self.thread.join(2.0)
+
+
+def close_clicks() -> None:
+    global _click_watch
+    with _click_lock:
+        if _click_watch is not None:
+            _click_watch.close()
+            _click_watch = None
+
+
+def _watch_clicks(conn, nid: int) -> None:
+    global _click_watch
+    with _click_lock:
+        if _click_watch is not None:
+            _click_watch.close()
+        _click_watch = _ClickWatch(conn, nid)
+
+
+def send(summary: str, body: str = "", replaces_id: int = 0,
+         open_on_click: bool = False) -> int:
+    """org.freedesktop.Notifications.Notify; returns the notification id (0 if none).
+    With `open_on_click`, clicking the notification opens the app."""
     from ..controller import FAKE_ROOT_ENV
     if os.environ.get(NOTIFY_ENV) == "0":
         return 0
@@ -62,20 +154,28 @@ def send(summary: str, body: str = "", replaces_id: int = 0) -> int:
         p = cache_dir() / "notifications.log"
         p.parent.mkdir(parents=True, exist_ok=True)
         with open(p, "a") as f:
-            f.write(summary + "\n")
+            f.write(summary + (" [click opens the app]" if open_on_click else "") + "\n")
         return 0
     try:
-        from gi.repository import GLib
+        from gi.repository import Gio, GLib
 
         from .. import dbusutil
+        actions = ("default", "") if open_on_click else ()
         (nid,) = dbusutil.call(
             "session", "org.freedesktop.Notifications", "/org/freedesktop/Notifications",
             "org.freedesktop.Notifications", "Notify",
             GLib.Variant("(susssasa{sv}i)", (
                 "TUF Control", replaces_id, "software-update-available-symbolic", summary,
-                body, [], {"desktop-entry": GLib.Variant("s", "io.github.hamzagouda.TufControl"),
-                           "urgency": GLib.Variant("y", 1)}, -1)),
+                body, list(actions),
+                {"desktop-entry": GLib.Variant("s", "io.github.hamzagouda.TufControl"),
+                 "urgency": GLib.Variant("y", 1)}, -1)),
             "(u)", 5000)
-        return int(nid)
+        nid = int(nid)
+        if open_on_click and nid:
+            try:
+                _watch_clicks(dbusutil.bus("session"), nid)
+            except Exception:
+                pass
+        return nid
     except Exception:
         return 0

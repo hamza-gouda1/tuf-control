@@ -45,6 +45,8 @@ are a closed object (`additionalProperties: false`) with ranges, enums and patte
 | `get_battery_health` | read | health and wear, capacity, cycles, charge limit, level, draw | read-only |
 | `get_automation_rules` | read | the owner's rules, whether they run, which are active | read-only |
 | `get_keyboard_state` | read | brightness and maximum, hardware effect, supported modes, software effect | read-only |
+| `get_updates` | read | the cached update check: what needs an update per source, what is held back and why; never checks or installs | read-only |
+| `get_update_history` | read | past update runs from the persistent history (installed, pending with the reason, failed, installed outside the app); `since` like `7d` | read-only |
 | `explain_unavailable` | read | `feature`: a capability or a tool; why it is missing or refused, what would change it | read-only |
 | `get_approval_status` | read | `approval_id`: pending, approved, used, denied, expired or cancelled | read-only |
 | `set_platform_profile` | control-basic | `profile`: quiet / balanced / performance | write, idempotent |
@@ -271,3 +273,10 @@ sanitising) and `tests/test_agent_mcp.py` (protocol conformance, JSON CLI shapes
 revoke) headlessly with `python3 tests/ui/screenshots.py --pages none --agent`.
 
 Agent access was written by Hamza Gouda as part of TUF Control (GPL-3.0-or-later).
+
+
+Audit and state files reject symbolic links and non-regular files. Audit logs are repaired
+to mode 0600 on append, writes handle partial I/O, and rotated files stay bounded. Standing
+grants require finite ordered timestamps and cannot become effective before granted_at.
+Lost NVIDIA devices expose a plain-language restart instruction through telemetry and are
+not queried while PCI runtime_status is error.

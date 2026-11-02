@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Background update checks for tuf-controld: at most every `interval_h` hours, one worker,
 skipped on a metered connection, a notification only for updates not announced before."""
 from __future__ import annotations
@@ -6,7 +8,7 @@ import threading
 import time
 
 from . import notify as notify_mod
-from .check import check_in_child, load_cache, update_cache
+from .check import check_in_child, load_cache, load_report, update_cache
 from .model import Report
 
 RETRY_S = 3600.0         # after a failed check
@@ -80,6 +82,10 @@ class UpdateScheduler:
         return True
 
     def _run(self, now: float) -> None:
+        try:  # what was pending before the check; gone afterwards = installed elsewhere
+            old = load_report()
+        except Exception:
+            old = None
         try:
             rep = self.runner()
         except Exception as exc:
@@ -88,12 +94,15 @@ class UpdateScheduler:
             return
         self.last_error = None
         self.last_ts = rep.checked_ts or now
-        self.after_check(rep)
+        self.after_check(rep, old)
         self.status(refresh=True)
 
-    def after_check(self, rep: Report) -> str | None:
-        """Notification decision (shared with checks the GUI started). Returns the text
+    def after_check(self, rep: Report, old: Report | None = None) -> str | None:
+        """Notification decision (shared with checks the GUI started) and the history
+        entry for updates that were installed outside TUF Control (unattended-upgrades,
+        GNOME Software, a terminal) and only noticed by this check. Returns the text
         shown, if any."""
+        self._record_detected(rep, old)
         if not self.settings.get("notify", True):
             # still remember what was offered, so turning notifications on later does
             # not announce a backlog
@@ -112,8 +121,45 @@ class UpdateScheduler:
                 self.notifier(shown["text"], notify_mod.body_text(rep))
         return shown.get("text")
 
+    def _record_detected(self, rep: Report, old: Report | None) -> None:
+        """Only installed-version changes prove an update happened elsewhere.
+
+        A failed source, withdrawn candidate or changed repository must not become a
+        fictitious successful history entry.
+        """
+        if old is None:
+            return
+        from . import history, verify
+        healthy = {s.source for s in rep.sources if s.available and not s.error}
+        offered = {i.id for i in rep.items()}
+        gone = [i for i in old.updates() if i.source in healthy and i.id not in offered]
+        if not gone:
+            return
+        after = verify.installed_versions(gone)
+        items = []
+        for i in gone:
+            new = after.get(i.id)
+            if new is None or i.current is None or new == i.current:
+                continue
+            # Snap revisions and Flatpak commits are included by their verifier; if
+            # old metadata has no identity token, a same human version is not proof.
+            if i.source in ("snap", "flatpak") and new.startswith(i.current + " ("):
+                continue
+            items.append({"id": i.id, "source": i.source, "name": i.name,
+                          "old": i.current, "new": new, "offered": i.available,
+                          "result": "installed", "reason": "Installed outside TUF Control; "
+                          "the installed version was verified during this check."})
+        if not items:
+            return
+        history.append({"start": old.checked_ts or time.time(), "end": rep.checked_ts,
+                        "trigger": "detected", "duration_s": 0.0,
+                        "sources": sorted({i["source"] for i in items}), "cancelled": False,
+                        "reboot": rep.reboot_required,
+                        "summary": f"{len(items)} updated outside TUF Control", "items": items})
+
     def _notify(self, summary: str, body: str) -> None:
-        self._notify_id = notify_mod.send(summary, body, self._notify_id)
+        # clicking the notification opens the app on the Updates page
+        self._notify_id = notify_mod.send(summary, body, self._notify_id, open_on_click=True)
 
     def status(self, refresh: bool = False) -> dict:
         """For the daemon's status file; the cache is re-read only when asked (each tick)."""

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """NVIDIA discrete GPU through NVML (ctypes on libnvidia-ml.so.1), nvidia-smi as fallback.
 
 Power rule: the dGPU is only queried while its runtime PM state is "active". Any NVML
@@ -227,7 +229,7 @@ class NvidiaGpu:
         try:
             self.nvml = Nvml()
             self.backend = "nvml"
-        except OSError:
+        except (OSError, AttributeError):
             import shutil
             if shutil.which("nvidia-smi"):
                 self.backend = "nvidia-smi"
@@ -295,7 +297,7 @@ class NvidiaGpu:
     # -- per tick -----------------------------------------------------------------------
     def sample(self, now: float, vals: dict, info: dict) -> None:
         out: dict = {"present": self.dev is not None, "backend": self.backend}
-        if self.dev is None or self.backend is None:
+        if self.dev is None:
             out["reason"] = self.reason
             info["dgpu"] = out
             return
@@ -307,6 +309,8 @@ class NvidiaGpu:
             self._idle = 0
             self.procs = {}
             out["state"] = "lost"
+            out["reason"] = ("The NVIDIA driver lost access to this GPU. Restart the laptop "
+                             "to recover it. GPU monitoring is paused.")
             info["dgpu"] = out
             return
         if rs is not None and rs != "active":
@@ -314,6 +318,11 @@ class NvidiaGpu:
             self._idle = 0
             self.procs = {}
             out["state"] = "sleeping"
+            info["dgpu"] = out
+            return
+        if self.backend is None:
+            out["reason"] = self.reason
+            out["state"] = "unavailable"
             info["dgpu"] = out
             return
         if now < self._hold_until:

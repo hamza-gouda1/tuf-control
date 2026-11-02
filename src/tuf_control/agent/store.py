@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Paths and locked, atomic JSON files shared by the MCP server, the GUI and the CLI."""
 from __future__ import annotations
 
@@ -5,6 +7,7 @@ import contextlib
 import fcntl
 import json
 import os
+import stat
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -41,8 +44,11 @@ def _mkdir(p: Path) -> None:
 def locked(path: Path) -> Iterator[None]:
     """Exclusive flock on a sibling .lock file for read-modify-write cycles."""
     _mkdir(path.parent)
-    fd = os.open(path.with_name(path.name + ".lock"), os.O_RDWR | os.O_CREAT, 0o600)
+    fd = os.open(path.with_name(path.name + ".lock"), os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
     try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise OSError("state lock is not a regular file")
+        os.fchmod(fd, 0o600)
         fcntl.flock(fd, fcntl.LOCK_EX)
         yield
     finally:
@@ -53,7 +59,10 @@ def locked(path: Path) -> Iterator[None]:
 def read_json(path: Path, limit: int = 1 << 20):
     """Parsed JSON, None when the file is missing. Raises ValueError/OSError otherwise."""
     try:
-        with open(path, "rb") as fh:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
+        with os.fdopen(fd, "rb") as fh:
+            if not stat.S_ISREG(os.fstat(fh.fileno()).st_mode):
+                raise OSError("state must be a regular file")
             data = fh.read(limit + 1)
     except FileNotFoundError:
         return None

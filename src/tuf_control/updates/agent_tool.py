@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Read-only agent tool: what needs an update, from the cached check (no check is run,
 nothing is installed; installing stays with the owner)."""
 from __future__ import annotations
@@ -36,4 +38,32 @@ def get_updates(_svc, a: dict) -> dict:
     }
     if len(items) > MAX_ITEMS:
         out["truncated"] = len(items) - MAX_ITEMS
+    return out
+
+
+def get_update_history(_svc, a: dict) -> dict:
+    """Past update runs from the persistent history. Read-only."""
+    from ..agent.sanitize import clean
+    from . import history
+    try:
+        since = history.parse_since(a.get("since"))
+    except ValueError as exc:
+        return {"error": clean(str(exc), 200)}
+    runs = history.read(since_ts=since, source=a.get("source"),
+                        limit=min(int(a.get("limit") or 20), 100))
+    out = {
+        "runs": [{
+            "start": r.get("start"), "end": r.get("end"), "trigger": r.get("trigger"),
+            "duration_s": r.get("duration_s"), "cancelled": bool(r.get("cancelled")),
+            "reboot": bool(r.get("reboot")), "summary": clean(r.get("summary") or "", 160),
+            "items": [{"source": i.get("source"), "name": clean(i.get("name"), 80),
+                       "old": clean(i.get("old"), 60), "new": clean(i.get("new"), 60),
+                       "result": i.get("result"), "reason": clean(i.get("reason") or "", 300)}
+                      for i in (r.get("items") or [])[:MAX_ITEMS]],
+        } for r in runs],
+        "untrusted_fields": ["runs[].items[].name", "runs[].items[].old",
+                             "runs[].items[].new", "runs[].items[].reason"],
+        "note": "History is recorded by TUF Control itself; installing updates is not "
+                "available to agents.",
+    }
     return out

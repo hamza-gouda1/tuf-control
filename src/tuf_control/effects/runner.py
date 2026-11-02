@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Runs the effect stack: compute at `fps`, smooth, write the keyboard at most
 `max_write_hz` through the Controller, pause while the backlight is off, and put the
 hardware mode back when effects stop."""
@@ -282,7 +284,8 @@ class EffectsRunner:
         last = self.clock()
         while not stop.is_set():
             fps = self.frame_rate()
-            stop.wait(1.0 / fps)
+            if stop.wait(1.0 / fps):
+                break
             now = self.clock()
             self.step(now - last)
             last = now
@@ -303,19 +306,20 @@ class EffectsRunner:
             self._release()
 
     def status(self) -> dict:
-        name, _p, notif_on, _n = self.wanted()
-        out = {"effect": name, "running": self.stack is not None,
-               "colour": rgb_to_hex(self.colour) if self.colour else None,
-               "layer": self.layer, "error": self.error, "writes": self.writer.writes,
-               "backlight_off": self.writer.backlight_off, "notifications": notif_on,
-               "override": self.override != RESTORE_CONFIG}
-        for kind, src in self._live.items():
-            info = {"error": getattr(src, "error", None)}
-            if hasattr(src, "status"):
-                info["status"] = src.status
-            out[f"source_{kind}"] = info
-            if info["error"] and not out["error"] and kind != "notifications":
-                out["error"] = f"{kind} input: {info['error']}"  # shown in the UI, never silent
-            elif info.get("status") == "waiting-permission":
-                out["waiting"] = "waiting for screen-sharing permission"
-        return out
+        with self._lock:
+            name, _p, notif_on, _n = self.wanted()
+            out = {"effect": name, "running": self.stack is not None,
+                   "colour": rgb_to_hex(self.colour) if self.colour else None,
+                   "layer": self.layer, "error": self.error, "writes": self.writer.writes,
+                   "backlight_off": self.writer.backlight_off, "notifications": notif_on,
+                   "override": self.override != RESTORE_CONFIG}
+            for kind, src in self._live.items():
+                info = {"error": getattr(src, "error", None)}
+                if hasattr(src, "status"):
+                    info["status"] = src.status
+                out[f"source_{kind}"] = info
+                if info["error"] and not out["error"] and kind != "notifications":
+                    out["error"] = f"{kind} input: {info['error']}"  # shown in the UI, never silent
+                elif info.get("status") == "waiting-permission":
+                    out["waiting"] = "waiting for screen-sharing permission"
+            return out

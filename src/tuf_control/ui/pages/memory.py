@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Memory detail: in use / reclaimable cache / free over time, composition, swap, pressure."""
 from __future__ import annotations
 
@@ -117,6 +119,7 @@ class MemoryPage(MonitorPage):
         else:
             for k in ("some", "full", "some60"):
                 self.psi_grid.set(k, "–")
-            set_text(self.psi_note, "Memory pressure " + (m.get("psi_reason") or
-                                                          "not available") + ".")
+            set_text(self.psi_note, "Memory pressure is not measured: this kernel has no "
+                                    "/proc/pressure (built without CONFIG_PSI or booted "
+                                    "with psi=0).")
         self.redraw()

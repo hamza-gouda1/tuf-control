@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 from __future__ import annotations
 
 from gi.repository import Adw, GLib, Gtk
@@ -99,7 +101,11 @@ class PerformancePage(Page):
         view = power_limits_view(self.cap("power_limits"), lims)
         if not view.available:
             self.limits.set_description(None)
-            row = info_row("Not provided by the kernel driver", view.reason)
+            row = info_row("Not provided by the kernel driver",
+                           "Not available right now: the firmware did not report usable "
+                           "power limits. If the asusd service is stopped, start it and "
+                           "restart TUF Control.")
+            row.set_tooltip_text(view.reason or None)
             note = info_row("Why nothing is shown",
                             "Without the real minimum and maximum, any slider would be a guess. "
                             "TUF Control never writes guessed power values. See "

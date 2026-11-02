@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """About page."""
 from __future__ import annotations
 
@@ -62,11 +64,17 @@ class AboutPage(Page):
                 badge = pill("Available", "accent")
             else:
                 reasons = [v for v in info["unavailable"].values() if v]
-                sub = reasons[0] if reasons else "No backend"
+                if reasons:
+                    sub = ("The firmware or system service does not provide this feature "
+                           "right now. Point here for technical details.")
+                else:
+                    sub = "No backend on this laptop provides it."
                 sub = sub[:1].upper() + sub[1:]
                 badge = pill("Unavailable")
             row = Adw.ActionRow(title=title, subtitle=sub)
             row.set_subtitle_lines(0)
+            if not info["available"]:
+                row.set_tooltip_text("\n".join(str(r) for r in reasons) or None)
             row.add_suffix(badge)
             self.support.add(row)
             self.rows.append(row)

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """'Effects (software)' section of the Keyboard page: picker, parameters, live preview,
 service status. The effect itself runs in tuf-controld; this only edits the config."""
 from __future__ import annotations
@@ -168,7 +170,8 @@ class EffectsSection(Adw.PreferencesGroup):
         if not run:
             sub = "Stopped. Effects need the service; Apply starts it."
         elif err:
-            sub = err
+            sub = ("The effect stopped on an error and is paused; it retries on its own. "
+                   "If it stays off, switch the effect Off and back on.")
         elif fx.get("waiting"):
             sub = f"Showing {fx.get('effect')} · {fx['waiting']}"
         elif fx.get("running"):

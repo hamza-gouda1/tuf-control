@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) Hamza Gouda
 // Pure-logic and lifecycle tests for the Quick Settings extension.
 // Run: gjs -m tests/test_quick_profiles.js
 
@@ -214,7 +215,10 @@ const D = await import('../extension/tuf-control-quick@hamza-gouda/dbus.js');
 const sources = [new D.AsusdProfileSource(), new D.PpdProfileSource(), new D.GpuModeSource()];
 await new Promise(res => GLib.timeout_add(GLib.PRIORITY_DEFAULT, 800, () => { res(); return GLib.SOURCE_REMOVE; }));
 print(`  live: asusd=${sources[0].available}/${sources[0].profile} ppd=${sources[1].available}/${sources[1].profile} gpu=${sources[2].mode}`);
+const generation = sources[0]._generation;
 sources.forEach(s => s.destroy());
+const lateProxy = {connect() { throw new Error('late proxy connected after destroy'); }};
+ok(!sources[0]._acceptProxy(lateProxy, generation), 'late async proxy cannot resurrect destroyed source');
 ok(sources.every(s => s.size === 0 && s._watchId === 0 && s._proxy === null), 'dbus sources fully cleaned up');
 
 print(`${passed} passed, ${failed} failed`);

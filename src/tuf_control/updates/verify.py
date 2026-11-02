@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 """Did an update really land? Compare installed versions before and after, item by item.
 
 A backend saying "finished" is not proof (PackageKit skips held packages and returns
@@ -26,7 +28,9 @@ def _fake() -> bool:
 
 
 def installed_versions(items: list[UpdateItem]) -> dict[str, str | None]:
-    """Installed version per item id, read from each package system (None: not found)."""
+    """Installed version per item id, read from each package system (None: not found).
+    In fake mode this is the state after a successful apply (see fake.fake_installed):
+    for the state before a run use before_versions()."""
     out: dict[str, str | None] = {i.id: None for i in items}
     if _fake():
         from .fake import fake_installed
@@ -49,35 +53,72 @@ def installed_versions(items: list[UpdateItem]) -> dict[str, str | None]:
     return out
 
 
+def before_versions(items: list[UpdateItem]) -> dict[str, str | None]:
+    """Versions before a run: the report's 'current' in fake mode (nothing is really
+    installed there), the live package databases otherwise."""
+    if _fake():
+        return {i.id: i.current for i in items}
+    return installed_versions(items)
+
+
 def _apt(items):
     names = sorted({f"{i.name}:{i.extra.get('arch')}" if i.extra.get("arch") else i.name
                     for i in items})
     r = subprocess.run(["dpkg-query", "-W", "-f=${Package}\t${Architecture}\t${Version}\t"
-                        "${db:Status-Abbrev}\n", *names], capture_output=True, text=True,
+                        "${db:Status-Abbrev}\n", "--", *names], capture_output=True, text=True,
                        timeout=30, stdin=subprocess.DEVNULL, env={**os.environ, "LC_ALL": "C"})
     got = {}
     for line in r.stdout.splitlines():
         f = line.split("\t")
         if len(f) >= 4 and f[3].strip().startswith(("ii", "hi")):
             got[(f[0], f[1])] = f[2]
-    return {i.id: got.get((i.name, i.extra.get("arch"))) or got.get((i.name, "all"))
-            for i in items}
+    out = {}
+    for i in items:
+        version = got.get((i.name, i.extra.get("arch"))) or got.get((i.name, "all"))
+        if version is None and not i.extra.get("arch"):
+            versions = {v for (name, _arch), v in got.items() if name == i.name}
+            version = next(iter(versions)) if len(versions) == 1 else None
+        out[i.id] = version
+    return out
 
 
 def _snap(items):
     from .snap import snapd
     doc = snapd("GET", "/v2/snaps")
-    cur = {s.get("name"): s.get("version") for s in doc.get("result") or []}
-    return {i.id: cur.get(i.name) for i in items}
+    if doc.get("type") == "error":
+        return {i.id: None for i in items}
+    cur = {s.get("name"): s for s in doc.get("result") or []}
+    out = {}
+    for i in items:
+        snap = cur.get(i.name) or {}
+        version, revision = snap.get("version"), snap.get("revision")
+        out[i.id] = (f"{version or 'unversioned'} (revision {revision})"
+                     if revision is not None else None)
+    return out
 
 
 def _flatpak(items):
     from .flatpak import LIST_COLS, parse_list
     r = subprocess.run(["flatpak", "list", f"--columns={LIST_COLS}"], capture_output=True,
                        text=True, timeout=60, stdin=subprocess.DEVNULL)
+    if r.returncode:
+        return {i.id: None for i in items}
     inst = parse_list(r.stdout)
-    return {i.id: inst.get((i.name, i.extra.get("branch"), i.extra.get("installation")))
-            for i in items}
+    out = {}
+    for i in items:
+        installation = i.extra.get("installation")
+        if installation not in ("user", "system"):
+            out[i.id] = None
+            continue
+        ref = i.extra.get("ref") or i.name
+        commit = subprocess.run(["flatpak", "info", f"--{installation}", "--show-commit", "--",
+                                 ref], capture_output=True, text=True, timeout=15,
+                                stdin=subprocess.DEVNULL)
+        version = inst.get((i.name, i.extra.get("branch"), installation))
+        sha = commit.stdout.strip()
+        out[i.id] = (f"{version or 'unversioned'} (commit {sha})"
+                     if not commit.returncode and sha else None)
+    return out
 
 
 def _firmware(items):
@@ -86,28 +127,53 @@ def _firmware(items):
     return {i.id: devs.get(i.extra.get("device_id")) for i in items}
 
 
+def staged_firmware(items: list[UpdateItem]) -> dict[str, str]:
+    """fwupd history must prove that the offered release is pending a reboot."""
+    its = [i for i in items if i.source == "firmware"]
+    if not its or _fake():
+        return {}
+    from .firmware import FwupdClient
+    try:
+        records = FwupdClient().history()
+    except Exception:
+        return {}
+    staged = {}
+    for i in its:
+        record = next((r for r in records if r.get("DeviceId") ==
+                       i.extra.get("device_id")), {})
+        if record.get("UpdateState") not in (1, 4):  # PENDING, NEEDS_REBOOT
+            continue
+        versions = [r.get("Version") for r in record.get("Releases") or []]
+        if i.available and i.available in versions:
+            staged[i.id] = i.available
+    return staged
+
+
 def verify(items: list[UpdateItem], before: dict, after: dict, outcomes: dict,
-           report: Report | None) -> list[dict]:
+           report: Report | None, cancelled: bool = False,
+           staged: dict | None = None) -> list[dict]:
     """Per-item verified result. `outcomes`: apply method -> backend message ('error: ...'
-    for a failure). `report`: the check made after applying (for blocker reasons)."""
+    for a failure). `report`: the check made after applying (for blocker reasons).
+    `cancelled`: the owner stopped the run; items that never started say so."""
     pending = {i.id: i for i in (report.items() if report else [])}
     out = []
     for i in items:
         old, new = before.get(i.id), after.get(i.id)
         msg = str(outcomes.get(_method(i), ""))
         err = msg[7:] if msg.startswith("error: ") else ""
-        changed = new is not None and new != old and new != i.current
+        changed = new is not None and old is not None and new != old
         res = {"id": i.id, "source": i.source, "name": i.name, "old": old or i.current,
                "new": new, "offered": i.available, "result": "", "reason": ""}
         if changed:
             res["result"] = "installed"
-            if i.available and new != i.available:
+            if i.available and new != i.available and i.source not in ("snap", "flatpak"):
                 res["reason"] = f"installed {new}; {i.available} was offered"
-        elif i.apply_method == "fwupd" and not err and i.needs_reboot:
+        elif (i.apply_method == "fwupd" and msg and not err and not cancelled
+              and (staged or {}).get(i.id) == i.available and i.available is not None):
             res["result"] = "restart"
-            res["reason"] = "fwupd staged the firmware; it is written during the next restart"
+            res["reason"] = "fwupd confirms this release is staged for the next restart"
         elif err:
-            res["result"] = "failed"
+            res["result"] = "failed" if "cancel" not in err.lower() else "pending"
             res["reason"] = err
         else:
             res["result"] = "pending"
@@ -116,8 +182,10 @@ def verify(items: list[UpdateItem], before: dict, after: dict, outcomes: dict,
             if bl:
                 res["reason"] = f"{bl['title']}: {bl['reason']}"
                 res["command"] = bl.get("command")
-            elif new is None and old is None:
-                res["reason"] = "could not read the installed version"
+            elif cancelled and not msg:
+                res["reason"] = "cancelled before it was installed"
+            elif new is None or old is None:
+                res["reason"] = "could not verify the installed version before and after the update"
             else:
                 res["reason"] = (f"{_backend(i)} reported success but the installed version "
                                  f"did not change (still {new or old})")

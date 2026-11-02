@@ -1,3 +1,4 @@
+// Copyright (C) Hamza Gouda
 // SPDX-License-Identifier: GPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 Hamza Gouda
 //
@@ -28,6 +29,8 @@ class ProxySource extends Emitter {
         this._iface = iface;
         this._proxy = null;
         this._proxyIds = [];
+        this._generation = 0;
+        this._destroyed = false;
         this._cancellable = new Gio.Cancellable();
         this.available = false;
         this._watchId = Gio.bus_watch_name(Gio.BusType.SYSTEM, name,
@@ -36,20 +39,35 @@ class ProxySource extends Emitter {
     }
 
     _appeared() {
+        if (this._destroyed)
+            return;
+        const generation = ++this._generation;
         Gio.DBusProxy.new_for_bus(Gio.BusType.SYSTEM, Gio.DBusProxyFlags.NONE, null,
             this._name, this._path, this._iface, this._cancellable, (_o, res) => {
                 try {
-                    this._proxy = Gio.DBusProxy.new_for_bus_finish(res);
+                    const proxy = Gio.DBusProxy.new_for_bus_finish(res);
+                    this._acceptProxy(proxy, generation);
                 } catch {
                     return; // cancelled on destroy, or the service left again
                 }
-                this._proxyIds.push(this._proxy.connect('g-properties-changed', () => this._update()));
-                this._proxyIds.push(this._proxy.connect('g-signal', (_p, _s, signal) => this._signal(signal)));
-                this._update();
             });
     }
 
+    _acceptProxy(proxy, generation) {
+        // Name loss/reappearance and disable can beat asynchronous construction.
+        // A late result must never reconnect handlers or resurrect a source.
+        if (this._destroyed || generation !== this._generation)
+            return false;
+        this._drop();
+        this._proxy = proxy;
+        this._proxyIds.push(proxy.connect('g-properties-changed', () => this._update()));
+        this._proxyIds.push(proxy.connect('g-signal', (_p, _s, signal) => this._signal(signal)));
+        this._update();
+        return true;
+    }
+
     _vanished() {
+        ++this._generation;
         this._drop();
         this.available = false;
         this._reset();
@@ -97,6 +115,8 @@ class ProxySource extends Emitter {
     }
 
     destroy() {
+        this._destroyed = true;
+        ++this._generation;
         this._cancellable.cancel();
         if (this._watchId) {
             Gio.bus_unwatch_name(this._watchId);

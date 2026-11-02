@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
 from __future__ import annotations
 
 from gi.repository import Adw, Gtk
@@ -49,8 +51,11 @@ class DisplayPage(Page):
 
     def _state_failed(self, exc) -> None:
         self.rate_row.set_sensitive(False)
-        self.msg.set_subtitle(f"Could not read the display layout: {exc}")
+        self.msg.set_subtitle("The desktop's display service did not report the screen's "
+                              "current mode, so the controls are off. Restart TUF Control "
+                              "to try again.")
         self.msg.set_visible(True)
+        self.msg.set_tooltip_text(str(exc))
 
     def _got_state(self, state) -> None:
         self.state = state
@@ -109,8 +114,9 @@ class DisplayPage(Page):
         self._quiet = True
         if od is None:
             self.overdrive.set_sensitive(False)
-            self.overdrive.set_subtitle("Not exposed by this firmware" +
-                                        (f" ({exc})" if exc else ""))
+            self.overdrive.set_subtitle("Panel overdrive is not available on this laptop" +
+                                        (f" (the firmware settings could not be read: {exc})"
+                                         if exc else ""))
         else:
             self.overdrive.set_sensitive(True)
             self.overdrive.set_active(str(od.current) == "1")

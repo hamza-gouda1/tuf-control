@@ -3,6 +3,7 @@
   "name": "TUF Control Quick Settings",
   "description": "Performance profile toggle (Quiet / Balanced / Performance) in Quick Settings for ASUS TUF and ROG laptops. Shows the new profile in an on-screen display when it changes, e.g. with Fn+F5. Talks to asusd, falls back to power-profiles-daemon.",
   "shell-version": ["46"],
-  "url": "https://github.com/hamzagouda/tuf-control",
+  "url": "https://github.com/hamza-gouda1/tuf-control",
+  "settings-schema": "org.gnome.shell.extensions.tuf-control-quick",
   "version": 1
 }
