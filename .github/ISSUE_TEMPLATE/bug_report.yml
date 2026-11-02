@@ -1,0 +1,32 @@
+name: Bug report
+description: Something in TUF Control does not work or shows wrong data
+labels: [bug]
+body:
+  - type: input
+    id: model
+    attributes:
+      label: Laptop model and BIOS
+      description: "`cat /sys/class/dmi/id/{product_name,bios_version}`"
+    validations: {required: true}
+  - type: input
+    id: stack
+    attributes:
+      label: Software
+      description: Distribution, kernel, asusd version (`asusctl --version`), GNOME Shell version
+    validations: {required: true}
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened and what you expected
+    validations: {required: true}
+  - type: textarea
+    id: status
+    attributes:
+      label: Output of `tuf-control status` and `tuf-control capabilities`
+      render: text
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: "`journalctl --user -b | grep tuf-control | tail -50` and `journalctl -u asusd -b | tail -50`"
+      render: text

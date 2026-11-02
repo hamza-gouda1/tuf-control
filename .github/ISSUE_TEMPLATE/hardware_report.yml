@@ -1,0 +1,19 @@
+name: Hardware report
+description: Tell us how TUF Control behaves on your laptop model
+labels: [hardware]
+body:
+  - type: input
+    id: model
+    attributes:
+      label: Laptop model
+    validations: {required: true}
+  - type: textarea
+    id: caps
+    attributes:
+      label: Output of `tuf-control capabilities --json`
+      render: json
+    validations: {required: true}
+  - type: textarea
+    id: notes
+    attributes:
+      label: What works, what does not
