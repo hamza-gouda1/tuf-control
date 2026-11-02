@@ -215,13 +215,14 @@ class TouchpadKeys(unittest.TestCase):
             self.pad.set_click_method(choice)
 
     def test_rejects_unknown_values(self):
+        before = self.pad.click_method()  # the schema default differs between desktops
         self.assertRaises(ValueError, self.pad.set_send_events, "when-idle")
         self.assertRaises(ValueError, self.pad.set_speed, 1.5)
         self.assertRaises(ValueError, self.pad.set_speed, -1.5)
         self.assertRaises(ValueError, self.pad.set_speed, "fast")
         # GNOME 46 has default/none/areas/fingers; "buttons" was the ask's shorthand
         self.assertRaises(ValueError, self.pad.set_click_method, "buttons")
-        self.assertEqual(self.pad.click_method(), "default")  # writes left alone
+        self.assertEqual(self.pad.click_method(), before)  # writes left alone
 
     def test_missing_schema_raises_on_construction(self):
         self.assertRaises(touchpad.SchemaMissing, touchpad.TouchpadSettings,
