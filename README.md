@@ -72,6 +72,19 @@ Comparison sources checked 2026-11-01: [G-Helper README](https://github.com/seer
 [ASUS Armoury Crate documentation](https://www.asus.com/support/faq/1043747/).
 Features and firmware support vary by model; this is not a full parity claim.
 
+## Hardware compatibility
+
+Only one model has been tested by the author. The other rows are what the design expects, not results.
+Run `tuf-control capabilities --json` on your laptop and open a
+[hardware report](https://github.com/hamza-gouda1/tuf-control/issues/new?template=hardware_report.yml)
+so this table can be filled in with real results.
+
+| Model | Status | Notes |
+| :--- | :--- | :--- |
+| TUF Gaming F16 FX608JHR | Tested | Power limits unavailable (missing kernel table entry); everything else works |
+| Other TUF / ROG laptops with asusd | Untested | Expected to work where asusd and supergfxd expose the same D-Bus interfaces |
+| Laptops without asusd | Not supported | The app needs asusd for profiles, fans and keyboard lighting |
+
 ## Limitations
 
 - **Power limits require support for the model in the kernel driver.** On the tested FX608JHR,
