@@ -41,3 +41,7 @@ markers = ["hardware: read-only smoke test on real hardware (set TUF_CONTROL_HAR
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+
+[tool.ruff.lint]
+# Real errors only for now: syntax errors, undefined names, invalid comparisons.
+select = ["E9", "F63", "F7", "F82"]

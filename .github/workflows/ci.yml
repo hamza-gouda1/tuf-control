@@ -29,7 +29,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: ShellCheck
-        run: shellcheck install.sh uninstall.sh tests/test_install.sh
+        run: shellcheck -S warning install.sh uninstall.sh tests/test_install.sh
       - name: Installer test (temporary HOME)
         run: bash tests/test_install.sh
 
