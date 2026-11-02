@@ -12,7 +12,7 @@ jobs:
   python:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: GTK and GLib bindings for the UI logic tests
         run: |
           sudo apt-get update
@@ -27,7 +27,7 @@ jobs:
   shell:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: ShellCheck
         run: shellcheck -S warning install.sh uninstall.sh tests/test_install.sh
       - name: Installer test (temporary HOME)
@@ -36,7 +36,7 @@ jobs:
   extension:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install gjs
         run: sudo apt-get update && sudo apt-get install -y gjs
       - name: Syntax check
