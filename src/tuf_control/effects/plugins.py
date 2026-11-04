@@ -6,10 +6,12 @@ from __future__ import annotations
 import colorsys
 import math
 
+from ..brand_palette import ACCENTS, HEX_PALETTES
 from .base import Effect, Param
 from .colour import RGB, gradient, lerp_rgb, scale
 
-BORDEAUX = "#8e2a44"
+BORDEAUX = ACCENTS["bordeaux"].lower()
+BRAND_GOLD = HEX_PALETTES["dark"]["gold"].lower()
 
 
 class TemperatureEffect(Effect):
@@ -22,7 +24,7 @@ class TemperatureEffect(Effect):
         Param("low", "int", 45, "Cool at (°C)", 20, 90),
         Param("high", "int", 90, "Hot at (°C)", 40, 110),
         Param("cool", "colour", "#2f6fdf", "Cool colour"),
-        Param("warm", "colour", "#c9ae86", "Warm colour"),
+        Param("warm", "colour", BRAND_GOLD, "Warm colour"),
         Param("hot", "colour", "#e0182d", "Hot colour"),
     )
 
@@ -94,7 +96,7 @@ class ProfileEffect(Effect):
     max_fps = 8
     params = (
         Param("quiet", "colour", "#2f6fdf", "Quiet"),
-        Param("balanced", "colour", "#c9ae86", "Balanced"),
+        Param("balanced", "colour", BRAND_GOLD, "Balanced"),
         Param("performance", "colour", BORDEAUX, "Performance"),
     )
 
@@ -180,7 +182,7 @@ class SpectrumEffect(Effect):
     params = (
         Param("style", "choice", "bands", "Style", choices=("bands", "meter")),
         Param("bass", "colour", "#e0182d", "Bass colour"),
-        Param("mid", "colour", "#c9ae86", "Mid colour"),
+        Param("mid", "colour", BRAND_GOLD, "Mid colour"),
         Param("treble", "colour", "#2f6fdf", "Treble colour"),
         Param("gain", "float", 1.2, "Sensitivity", 0.2, 4.0, step=0.1),
         Param("floor", "float", 0.08, "Resting level", 0.0, 0.6, step=0.02),
@@ -218,7 +220,7 @@ class GradientBreatheEffect(Effect):
     max_fps = 20
     params = (
         Param("colour1", "colour", BORDEAUX, "Colour 1"),
-        Param("colour2", "colour", "#c9ae86", "Colour 2"),
+        Param("colour2", "colour", BRAND_GOLD, "Colour 2"),
         Param("period", "float", 4.0, "Cycle length (s)", 1.5, 30.0, step=0.5),
         Param("dip", "float", 0.3, "Dim between colours", 0.0, 1.0, step=0.05),
     )
@@ -254,7 +256,7 @@ class CpuLoadEffect(Effect):
         Param("low", "int", 5, "Idle below (%)", 0, 90),
         Param("high", "int", 85, "Busy at (%)", 10, 100),
         Param("idle", "colour", "#2f6fdf", "Idle colour"),
-        Param("busy", "colour", "#c9ae86", "Busy colour"),
+        Param("busy", "colour", BRAND_GOLD, "Busy colour"),
         Param("max", "colour", "#e0182d", "Flat-out colour"),
     )
 

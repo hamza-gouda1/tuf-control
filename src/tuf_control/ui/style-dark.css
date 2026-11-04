@@ -3,29 +3,31 @@
  */
 /* Dark: warm near-black with a wine cast. */
 
+/* BEGIN GENERATED BORDEAUX PALETTE */
 @define-color accent_bg_color #8E2A44;
-@define-color accent_fg_color #FFF4F1;
-@define-color accent_color #E58BA1;
+@define-color accent_fg_color #FFF3F1;
+@define-color accent_color #E09AAE;
 @define-color gold_color #C9AE86;
-
-@define-color window_bg_color #161012;
-@define-color window_fg_color #F2E8E4;
-@define-color view_bg_color #1B1416;
-@define-color view_fg_color #F2E8E4;
-@define-color headerbar_bg_color #1A1315;
-@define-color headerbar_fg_color #F2E8E4;
-@define-color headerbar_backdrop_color #161012;
-@define-color sidebar_bg_color #120D0F;
-@define-color sidebar_fg_color #EDE2DE;
-@define-color sidebar_backdrop_color #120D0F;
-@define-color card_bg_color #211719;
-@define-color card_fg_color #F2E8E4;
-@define-color popover_bg_color #241A1D;
-@define-color popover_fg_color #F2E8E4;
-@define-color dialog_bg_color #211719;
-@define-color dialog_fg_color #F2E8E4;
-@define-color thumbnail_bg_color #241A1D;
-@define-color tile_border alpha(#F2E8E4, 0.06);
+@define-color window_bg_color #151112;
+@define-color window_fg_color #EEE7E4;
+@define-color view_bg_color #1C1718;
+@define-color view_fg_color #EEE7E4;
+@define-color headerbar_bg_color #151112;
+@define-color headerbar_fg_color #EEE7E4;
+@define-color headerbar_backdrop_color #151112;
+@define-color sidebar_bg_color #120E0F;
+@define-color sidebar_fg_color #C3B8B5;
+@define-color sidebar_backdrop_color #120E0F;
+@define-color card_bg_color #1C1718;
+@define-color card_fg_color #EEE7E4;
+@define-color popover_bg_color #262021;
+@define-color popover_fg_color #EEE7E4;
+@define-color dialog_bg_color #1C1718;
+@define-color dialog_fg_color #EEE7E4;
+@define-color thumbnail_bg_color #262021;
+@define-color banner_bg_color alpha(@accent_bg_color, 0.12);
+@define-color tile_border alpha(#EEE7E4, 0.06);
+/* END GENERATED BORDEAUX PALETTE */
 
 .tile { box-shadow: none; }
 .navigation-sidebar > row:selected { background-color: alpha(@accent_bg_color, 0.38); }

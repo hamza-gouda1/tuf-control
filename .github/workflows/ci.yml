@@ -24,6 +24,22 @@ jobs:
           python3 -m pip install --user ruff
           python3 -m ruff check src tests
 
+  brand-palette:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Shared Bordeaux source tokens
+        uses: actions/checkout@v7
+        with:
+          repository: hamza-gouda1/bordeaux-gnome
+          ref: main
+          path: brand-source
+          persist-credentials: false
+      - name: Shared generator and palette are current
+        run: |
+          cmp tools/sync_tuf_palette.py brand-source/tools/sync_tuf_palette.py
+          python3 tools/sync_tuf_palette.py --source brand-source --target . --check
+
   shell:
     runs-on: ubuntu-24.04
     steps:

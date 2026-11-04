@@ -3,26 +3,31 @@
  */
 /* TUF Control: warm wine palette. Light values here, dark overrides in style-dark.css. */
 
-@define-color accent_bg_color #8E2A44;
-@define-color accent_fg_color #FFF7F4;
-@define-color accent_color #8E2A44;
-@define-color gold_color #9E7F51;
-
-@define-color window_bg_color #F8F3F1;
-@define-color window_fg_color #2A1A1F;
-@define-color view_bg_color #FFFFFF;
-@define-color view_fg_color #2A1A1F;
-@define-color headerbar_bg_color #F8F3F1;
-@define-color headerbar_fg_color #2A1A1F;
-@define-color sidebar_bg_color #F1E8E5;
-@define-color sidebar_fg_color #2A1A1F;
-@define-color sidebar_backdrop_color #F4EDEA;
-@define-color card_bg_color #FFFFFF;
-@define-color card_fg_color #2A1A1F;
-@define-color popover_bg_color #FFFFFF;
-@define-color dialog_bg_color #FBF7F5;
+/* BEGIN GENERATED BORDEAUX PALETTE */
+@define-color accent_bg_color #7A1C34;
+@define-color accent_fg_color #FFF7F2;
+@define-color accent_color #7A1C34;
+@define-color gold_color #A8844C;
+@define-color window_bg_color #F8F4EE;
+@define-color window_fg_color #2B1A1E;
+@define-color view_bg_color #FDFBF7;
+@define-color view_fg_color #2B1A1E;
+@define-color headerbar_bg_color #F8F4EE;
+@define-color headerbar_fg_color #2B1A1E;
+@define-color headerbar_backdrop_color #F8F4EE;
+@define-color sidebar_bg_color #EFE8DD;
+@define-color sidebar_fg_color #5A454A;
+@define-color sidebar_backdrop_color #EFE8DD;
+@define-color card_bg_color #FDFBF7;
+@define-color card_fg_color #2B1A1E;
+@define-color popover_bg_color #E6DDCF;
+@define-color popover_fg_color #2B1A1E;
+@define-color dialog_bg_color #FDFBF7;
+@define-color dialog_fg_color #2B1A1E;
+@define-color thumbnail_bg_color #E6DDCF;
 @define-color banner_bg_color alpha(@accent_bg_color, 0.12);
-@define-color tile_border alpha(#2A1A1F, 0.07);
+@define-color tile_border alpha(#2B1A1E, 0.07);
+/* END GENERATED BORDEAUX PALETTE */
 
 /* gold, sparingly: focus ring and active ticks */
 *:focus-visible { outline-color: alpha(@gold_color, 0.85); }
@@ -37,7 +42,7 @@ checkbutton check:checked, checkbutton radio:checked {
 }
 switch:checked { background-color: @accent_bg_color; }
 .linked > button.toggle:checked { background-color: @accent_bg_color; color: @accent_fg_color; }
-switch:checked > slider { background-color: #FFF7F4; }
+switch:checked > slider { background-color: @accent_fg_color; }
 
 /* numerals */
 .stat-value, .mini-value, .scale-value, .mono {

@@ -7,20 +7,9 @@ from pathlib import Path
 
 from gi.repository import Adw, Gdk, Gtk, Pango, PangoCairo
 
+from ..brand_palette import BURGUNDY, GOLD, PALETTE
+
 HERE = Path(__file__).resolve().parent
-BURGUNDY = (0x8E / 255, 0x2A / 255, 0x44 / 255)
-GOLD = (0xC9 / 255, 0xAE / 255, 0x86 / 255)
-
-# Cairo palette per scheme: line, fill, grid, text-dim
-PALETTE = {
-    "dark": {"line": (0.86, 0.45, 0.55), "fill": (0.56, 0.16, 0.27),
-             "grid": (1, 0.94, 0.92, 0.07),
-             "dim": (0.95, 0.90, 0.88, 0.55), "gold": GOLD, "point": (0.96, 0.91, 0.88)},
-    "light": {"line": (0.56, 0.16, 0.27), "fill": (0.56, 0.16, 0.27),
-              "grid": (0.2, 0.08, 0.1, 0.08),
-              "dim": (0.17, 0.10, 0.12, 0.55), "gold": (0.62, 0.50, 0.32), "point": (1, 1, 1)},
-}
-
 _mono_family: str | None = None
 
 

@@ -12,9 +12,9 @@ import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
+from ..brand_palette import ACCENTS
 from .colour import RGB, hex_to_rgb
 
-ACCENTS = {"bordeaux": "#8E2A44", "oxblood-noir": "#A3283A", "merlot-day": "#7A1C34"}
 _ALIASES = {"noir": "oxblood-noir", "oxblood": "oxblood-noir", "merlot": "merlot-day"}
 
 
