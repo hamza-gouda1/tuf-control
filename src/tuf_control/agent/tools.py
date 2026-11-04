@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 import time
 from collections import deque
 from collections.abc import Callable
@@ -147,6 +148,16 @@ class ToolError(Exception):
 
 # -- the service ----------------------------------------------------------------------------
 
+def parent_process() -> dict:
+    """OS-reported launcher, for attribution only; wrappers may be the parent."""
+    pid = os.getppid()
+    try:
+        executable = os.readlink(f"/proc/{pid}/exe")
+    except OSError:
+        executable = "unavailable"
+    return {"pid": pid, "executable": clean(executable, 300)}
+
+
 class AgentService:
     def __init__(self, ctl=None, *, queue: ApprovalQueue | None = None,
                  audit: AuditLog | None = None, access_file=None,
@@ -162,6 +173,10 @@ class AgentService:
         self._observer = observer
         self.clock = clock
         self.client = "unknown"
+        # A client cannot select or recover this session through initialize. A fresh
+        # server must obtain fresh approvals even when it claims the same name.
+        self._session = secrets.token_hex(32)
+        self.process = parent_process()
 
     # -- dependencies ---------------------------------------------------------------------
     @property
@@ -255,7 +270,8 @@ class AgentService:
         logged = args if isinstance(args, dict) else {"_": str(type(args).__name__)}
         try:
             out, decision, rid = self._call(tool, args)
-            self.audit.write(client=self.client, kind="tool", name=name, decision=decision,
+            self.audit.write(client=self.client, process=self.process, kind="tool", name=name,
+                             decision=decision,
                              params=logged, result=_brief(out), request_id=rid)
             return _finish(out), False
         except ToolError as exc:
@@ -267,7 +283,8 @@ class AgentService:
             if exc.code.startswith("approval_") or exc.code in ("still_pending",
                                                                "unknown_request", "queue_full"):
                 decision = "refused"
-            self.audit.write(client=self.client, kind="tool", name=name, decision=decision,
+            self.audit.write(client=self.client, process=self.process, kind="tool", name=name,
+                             decision=decision,
                              params=logged, result=err,
                              request_id=exc.extra.get("approval_id"))
             return {"error": err}, True
@@ -329,7 +346,8 @@ class AgentService:
                     "dry_run", None)
         rid = args.get("approval_id")
         if rid:
-            self.queue.consume(rid, tool=tool.name, params=plan.params, client=self.client)
+            self.queue.consume(rid, tool=tool.name, params=plan.params, client=self.client,
+                               session=self._session)
             res = plan.run(False)
             return {**base, "dry_run": False, "applied": True, "approval": "per-call",
                     "result": res}, "executed", rid
@@ -341,7 +359,8 @@ class AgentService:
         reason = clean(args.get("reason") or "", 200)
         entry, created = self.queue.request(tool=tool.name, tier=tool.tier, params=plan.params,
                                             summary=plan.summary, reason=reason,
-                                            client=self.client)
+                                            client=self.client, session=self._session,
+                                            process=self.process)
         if created and self.notifier is not None and acc.notifications:
             try:
                 self.notifier.notify(entry)
@@ -366,22 +385,25 @@ class AgentService:
         now = self.clock()
         fake_tool = Tool(uri, uri, "", "read", obj({}), lambda *_: {})
         if uri == "tuf://docs/safety":
-            self.audit.write(client=self.client, kind="resource", name=uri, decision="ok")
+            self.audit.write(client=self.client, process=self.process, kind="resource",
+                             name=uri, decision="ok")
             return "text/markdown", SAFETY_DOC
         if not acc.allows("read", now):
             code, msg = self._denial(fake_tool, acc, now)
-            self.audit.write(client=self.client, kind="resource", name=uri, decision="denied")
+            self.audit.write(client=self.client, process=self.process, kind="resource",
+                             name=uri, decision="denied")
             raise ToolError(code, msg)
         wait = self.limiter.check(uri, 20)
         if wait is not None:
-            self.audit.write(client=self.client, kind="resource", name=uri,
+            self.audit.write(client=self.client, process=self.process, kind="resource", name=uri,
                              decision="rate_limited")
             raise ToolError("rate_limited", "resource read rate limit", retry_after_s=wait)
         fn = {"tuf://status": t_get_status, "tuf://capabilities": t_get_capabilities,
               "tuf://telemetry/summary": lambda s, a: t_get_telemetry(
                   s, {"sections": ["cpu", "memory", "gpus", "fans", "battery"]})}[uri]
         data = _finish(fn(self, {}))
-        self.audit.write(client=self.client, kind="resource", name=uri, decision="ok")
+        self.audit.write(client=self.client, process=self.process, kind="resource",
+                             name=uri, decision="ok")
         return "application/json", json.dumps(data, separators=(",", ":"))
 
 

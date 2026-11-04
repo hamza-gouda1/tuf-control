@@ -12,6 +12,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from tuf_control import cli
 from tuf_control.agent import policy, present
@@ -19,7 +20,7 @@ from tuf_control.agent.approvals import APPROVED_TTL_S, PENDING_TTL_S, ApprovalQ
 from tuf_control.agent.audit import AuditLog
 from tuf_control.agent.sanitize import WITHHELD, clean, looks_like_instruction, untrusted
 from tuf_control.agent.schema import SchemaError, validate
-from tuf_control.agent.tools import TOOLS, AgentService, RateLimiter
+from tuf_control.agent.tools import TOOLS, AgentService, RateLimiter, parent_process
 from tuf_control.automation.config import CONFIG_DIR_ENV, RUNTIME_DIR_ENV
 from tuf_control.agent.store import STATE_DIR_ENV
 from tuf_control.backends.fake import build_fake_tree
@@ -300,6 +301,60 @@ class WriteFlow(AgentEnv):
         reuse, err = svc.call("set_charge_limit", {**args, "approval_id": rid})
         self.assertTrue(err)
         self.assertEqual(reuse["error"]["code"], "approval_used")
+
+    def test_copied_client_name_cannot_replay_another_server_approval(self):
+        self.grant("control-basic")
+        args = {"percent": 75, "dry_run": False}
+        queued, err = self.svc.call("set_charge_limit", args)
+        self.assertFalse(err, queued)
+        rid = queued["approval_id"]
+        self.queue.decide(rid, True, by="test-owner")
+        attacker = self.service()  # deliberately declares the exact same name/version
+        self.assertEqual(attacker.client, self.svc.client)
+        stolen, err = attacker.call("set_charge_limit", {**args, "approval_id": rid})
+        self.assertTrue(err, stolen)
+        self.assertEqual(stolen["error"]["code"], "approval_mismatch")
+        self.assertEqual(self.charge(), "90")
+        self.assertEqual(self.queue.get(rid)["status"], "approved")
+        own_request, err = attacker.call("set_charge_limit", args)
+        self.assertFalse(err, own_request)
+        self.assertNotEqual(own_request["approval_id"], rid)
+        done, err = self.svc.call("set_charge_limit", {**args, "approval_id": rid})
+        self.assertFalse(err, done)
+        self.assertTrue(done["applied"])
+
+    def test_legacy_approval_without_session_fails_closed(self):
+        self.grant("control-basic")
+        args = {"percent": 75, "dry_run": False}
+        queued, _ = self.call("set_charge_limit", args)
+        rid = queued["approval_id"]
+        self.queue.decide(rid, True, by="test-owner")
+        data = json.loads(self.queue.path.read_text())
+        del data["requests"][0]["session"]
+        self.queue.path.write_text(json.dumps(data))
+        result, err = self.call("set_charge_limit", {**args, "approval_id": rid})
+        self.assertTrue(err, result)
+        self.assertEqual(result["error"]["code"], "approval_mismatch")
+        self.assertEqual(self.charge(), "90")
+
+    def test_launcher_is_os_reported_and_visible_to_owner(self):
+        with patch("tuf_control.agent.tools.os.getppid", return_value=123), \
+                patch("tuf_control.agent.tools.os.readlink", return_value="/usr/bin/client"):
+            svc = self.service()
+        svc.set_client("a self-declared name", "1")
+        self.grant("control-basic")
+        queued, err = svc.call("set_charge_limit", {"percent": 75, "dry_run": False})
+        self.assertFalse(err, queued)
+        expected = {"pid": 123, "executable": "/usr/bin/client"}
+        entry = self.queue.get(queued["approval_id"])
+        self.assertEqual(entry["process"], expected)
+        self.assertEqual(self.audit.tail(1)[0]["process"], expected)
+        self.assertIn("Launcher: /usr/bin/client (PID 123)",
+                      present.pending_rows([entry])[0]["subtitle"])
+        self.assertIn("Launcher: /usr/bin/client (PID 123)",
+                      present.audit_row(self.audit.tail(1)[0])["detail"])
+        with patch("tuf_control.agent.tools.os.readlink", side_effect=OSError):
+            self.assertEqual(parent_process()["executable"], "unavailable")
 
     def test_denied_request(self):
         self.grant("control-basic")

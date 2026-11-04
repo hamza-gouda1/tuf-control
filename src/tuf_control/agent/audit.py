@@ -3,7 +3,7 @@
 """Audit log: one JSON object per line, ~/.local/state/tuf-control/agent-audit.log.
 
 Every tool call, resource read and prompt request is recorded with the time, the client
-name from initialize, the tool, the (cleaned, size-capped) parameters, the decision and a
+name from initialize, the OS-reported launcher (PID and executable), the tool, the (cleaned, size-capped) parameters, the decision and a
 short result. Owner actions (grant, revoke, approve, deny) are recorded too. The file is
 created 0600 and rotated at 512 KiB, keeping three old files.
 """
@@ -59,11 +59,13 @@ class AuditLog:
         os.replace(p, p.with_name(f"{p.name}.1"))
 
     def write(self, *, client: str, kind: str, name: str, decision: str, params=None,
-              result=None, request_id: str | None = None) -> dict:
+              result=None, request_id: str | None = None, process: dict | None = None) -> dict:
         ts = self.clock()
         entry = {"time": datetime.fromtimestamp(ts).astimezone().isoformat(timespec="seconds"),
                  "ts": round(ts, 3), "client": clean(client, 80), "kind": kind,
                  "tool": clean(name, 64), "decision": decision}
+        if process is not None:
+            entry["process"] = _compact(process)
         if params is not None:
             entry["params"] = _compact(params)
         if result is not None:

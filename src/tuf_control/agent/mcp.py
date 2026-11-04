@@ -54,8 +54,11 @@ SAFETY_DOC = """# TUF Control agent access: safety model
   (control-basic tools only), or a per-call approval. Without one the request is queued,
   the owner sees it in the app (and a desktop notification), and you get an
   `approval_id`. Poll `get_approval_status`; once approved, repeat the identical call
-  with `approval_id`. An approval is bound to the tool, the exact parameters and your
-  client name, works once, and expires.
+  with `approval_id`. An approval is bound to the tool, the exact parameters and this
+  server session, works once, and expires. Restarting the server requires a fresh
+  approval. The client name is self-declared and informational, not authentication;
+  approval and audit records include the OS-reported parent PID and executable.
+  A wrapper may be the parent. This is not a sandbox against processes running as you.
 - High-risk tools (set_fan_curve, set_gpu_mode, set_power_limit, restore_defaults) are
   disabled unless the owner enables them, and always need a per-call approval.
 - Calls are rate limited per tool and in total; arguments are size-capped and checked
@@ -241,7 +244,8 @@ class McpServer:
             if not isinstance(args, dict) or any(not isinstance(v, str) or len(v) > 500
                                                  for v in args.values()):
                 return self._err(mid, INVALID_PARAMS, "prompt arguments must be short strings")
-            self.svc.audit.write(client=self.svc.client, kind="prompt", name=name,
+            self.svc.audit.write(client=self.svc.client, process=self.svc.process,
+                                 kind="prompt", name=name,
                                  decision="ok", params=args)
             return self._ok(mid, {"description": pr["description"], "messages": [
                 {"role": "user", "content": {"type": "text", "text": pr["build"](args)}}]})
@@ -255,7 +259,8 @@ class McpServer:
         info = p.get("clientInfo") if isinstance(p.get("clientInfo"), dict) else {}
         self.svc.set_client(info.get("name"), info.get("version"))
         self._init_done = True
-        self.svc.audit.write(client=self.svc.client, kind="session", name="initialize",
+        self.svc.audit.write(client=self.svc.client, process=self.svc.process,
+                             kind="session", name="initialize",
                              decision="ok", params={"protocolVersion": clean(want, 20)})
         return self._ok(mid, {
             "protocolVersion": self.protocol,

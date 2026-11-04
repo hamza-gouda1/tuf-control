@@ -59,10 +59,18 @@ def master_subtitle(acc: policy.Access) -> str:
     return policy.LEVEL_TITLES[acc.effective_level()]
 
 
+def process_label(e: dict) -> str:
+    process = e.get("process")
+    if not isinstance(process, dict):
+        return ""
+    return (f"Launcher: {clean(process.get('executable'), 300)} "
+            f"(PID {clean(process.get('pid'), 12)})")
+
+
 def pending_rows(items: list[dict], now: float | None = None) -> list[dict]:
     rows = []
     for e in items:
-        sub = [clean(e.get("client"), 40), ago(e.get("created_at"), now)]
+        sub = [clean(e.get("client"), 40), process_label(e), ago(e.get("created_at"), now)]
         if e.get("tier") == "high":
             sub.insert(0, "High risk")
         reason = clean(e.get("reason") or "", 140)
@@ -82,6 +90,8 @@ def audit_row(e: dict) -> dict:
     res = e.get("result")
     if isinstance(res, dict):
         detail = clean(res.get("summary") or res.get("message") or res.get("detail") or "", 90)
+    launcher = process_label(e)
+    detail = " · ".join(x for x in (detail, launcher) if x)
     return {"time": t[11:16] if len(t) >= 16 else t, "who": who, "what": what,
             "detail": detail, "label": label, "tone": tone}
 

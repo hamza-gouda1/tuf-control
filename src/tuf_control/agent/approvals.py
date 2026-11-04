@@ -5,8 +5,9 @@
 The MCP server records a request (tool, validated parameters, the agent's stated
 reason); the owner approves once or denies it in the app, the CLI or a notification; the
 agent polls get_approval_status and then repeats the exact same call with approval_id.
-An approval is bound to the tool, a hash of the normalised parameters and the client
-name, is used at most once and expires if it is not used soon.
+An approval is bound to the tool, a hash of the normalised parameters and the server
+session. The claimed client name is informational, not authentication. An approval is
+used at most once and expires if it is not used soon.
 
 States: pending -> approved -> used | pending -> denied | pending/approved -> expired |
 any open state -> cancelled (kill switch).
@@ -113,20 +114,22 @@ class ApprovalQueue:
 
     # -- changes ----------------------------------------------------------------------
     def request(self, *, tool: str, tier: str, params: dict, summary: str, reason: str,
-                client: str) -> tuple[dict, bool]:
+                client: str, session: str, process: dict) -> tuple[dict, bool]:
         """(entry, created). An identical open request from the same client is reused."""
         h = params_hash(tool, params)
 
         def fn(items, now):
             for x in items:
-                if x["status"] in OPEN and x["params_hash"] == h and x["client"] == client:
+                if (x["status"] in OPEN and x["params_hash"] == h and
+                        x["client"] == client and x.get("session") == session):
                     return (dict(x), False), False
             if sum(1 for x in items if x["status"] == "pending") >= MAX_PENDING:
                 raise ApprovalError("queue_full", f"{MAX_PENDING} requests are already "
                                     "waiting for the owner; wait for a decision")
             entry = {"id": secrets.token_hex(8), "tool": tool, "tier": tier,
                      "params": params, "params_hash": h, "summary": summary,
-                     "reason": reason, "client": client, "created_at": now,
+                     "reason": reason, "client": client, "session": session,
+                     "process": process, "created_at": now,
                      "expires_at": now + PENDING_TTL_S, "status": "pending",
                      "decided_at": None, "decided_by": None, "use_by": None,
                      "used_at": None}
@@ -146,7 +149,7 @@ class ApprovalQueue:
             raise ApprovalError("unknown_request", f"no request with id {rid}")
         return self._rmw(fn)
 
-    def consume(self, rid: str, *, tool: str, params: dict, client: str) -> dict:
+    def consume(self, rid: str, *, tool: str, params: dict, client: str, session: str) -> dict:
         """Mark an approval used, after checking it covers exactly this call."""
         h = params_hash(tool, params)
 
@@ -163,9 +166,9 @@ class ApprovalQueue:
                 if x["tool"] != tool or x["params_hash"] != h:
                     raise ApprovalError("approval_mismatch", "this approval was given for "
                                         "a different tool or different parameters")
-                if x["client"] != client:
+                if x["client"] != client or x.get("session") != session:
                     raise ApprovalError("approval_mismatch", "this approval belongs to "
-                                        "another client")
+                                        "another client or server session")
                 x.update(status="used", used_at=now)
                 return dict(x), True
             raise ApprovalError("unknown_request", f"no request with id {rid}")

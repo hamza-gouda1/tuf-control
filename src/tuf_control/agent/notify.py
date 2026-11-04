@@ -81,7 +81,11 @@ class DesktopNotifier:
             body = escape_markup(clean(entry["summary"], 160))
             if entry.get("reason"):
                 body += "\nStated reason: “" + escape_markup(clean(entry["reason"], 120)) + "”"
-            body += "\nFrom: " + escape_markup(clean(entry.get("client"), 60))
+            body += "\nClaimed client: " + escape_markup(clean(entry.get("client"), 60))
+            from .present import process_label
+            launcher = process_label(entry)
+            if launcher:
+                body += "\n" + escape_markup(launcher)
             # high-risk requests are approved in the app, where every parameter is shown
             actions = ["deny", "Deny"] if high else ["approve", "Approve once", "deny", "Deny"]
             if high:

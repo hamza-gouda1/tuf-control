@@ -68,6 +68,7 @@ class Protocol(Env):
         self.assertEqual(set(res["capabilities"]), {"tools", "resources", "prompts"})
         self.assertIn("dry_run", res["instructions"])
         self.assertEqual(self.svc.client, "conformance/0.1")
+        self.assertEqual(self.svc.audit.tail(1)[0]["process"], self.svc.process)
         again = self.srv.handle(INIT)
         self.assertEqual(again["error"]["code"], -32600)
 
