@@ -316,7 +316,7 @@ MIGRATE=()
 focus_gs() { GSETTINGS_SCHEMA_DIR="$FOCUS_SCHEMAS${GSETTINGS_SCHEMA_DIR:+:$GSETTINGS_SCHEMA_DIR}" gsettings "$@"; }
 focus_schema() {
     [ -f "$FOCUS_SCHEMAS/gschemas.compiled" ] &&
-        focus_gs list-keys "$FOCUS_SCHEMA" 2>/dev/null | grep -qx bindings
+        focus_gs list-keys "$FOCUS_SCHEMA" 2>/dev/null | grep -x bindings >/dev/null
 }
 
 # True when the extension is installed for this user (with its schema) and enabled.
@@ -473,14 +473,14 @@ claim_mic_key() {
             say "+ save mic-mute / mic-mute-static to $tsv"
         else
             for k in mic-mute mic-mute-static; do
-                gsettings list-keys "$KB_SCHEMA" | grep -qx "$k" || continue
+                gsettings list-keys "$KB_SCHEMA" | grep -x "$k" >/dev/null || continue
                 v=$(gsettings get "$KB_SCHEMA" "$k")
                 printf '%s\t%s\n' "$k" "$v" >>"$tsv"
             done
         fi
     fi
     for k in mic-mute mic-mute-static; do
-        gsettings list-keys "$KB_SCHEMA" | grep -qx "$k" || continue
+        gsettings list-keys "$KB_SCHEMA" | grep -x "$k" >/dev/null || continue
         act gsettings set "$KB_SCHEMA" "$k" '[]'
     done
 }

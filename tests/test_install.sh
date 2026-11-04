@@ -26,6 +26,20 @@ if command -v gsettings >/dev/null 2>&1 && gsettings list-keys "$KB" >/dev/null 
 fi
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
+# A match near the start of a large schema listing must not let grep exit early:
+# under pipefail that closes the pipe, SIGPIPEs the producer, and hides the match.
+streaming_keys() {
+    printf 'mic-mute\n'
+    for ((i = 0; i < 20000; i++)); do printf 'unused-%d\n' "$i"; done
+}
+if streaming_keys 2>/dev/null | grep -qx mic-mute >/dev/null; then
+    fail "streaming fixture did not reproduce grep -q SIGPIPE"
+fi
+streaming_keys | grep -x mic-mute >/dev/null || fail "consuming grep missed an early schema key"
+if grep -Eq 'list-keys[^|]*\|[[:space:]]*grep[^|]*-q' "$ROOT/install.sh"; then
+    fail "gsettings list-keys pipeline still uses early-exit grep -q"
+fi
+
 echo "# my own launcher" >"$HOME/.local/bin/tuf-control"
 
 "$ROOT/install.sh" --dry-run --no-copilot-key --no-mic-key >"$T/dry.txt"
