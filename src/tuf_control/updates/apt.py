@@ -15,12 +15,15 @@ import os
 import re
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 from . import blockers
 from .model import SourceResult, UpdateItem
 
 TIMEOUT_S = 60
+DIAGNOSTIC_BUDGET_S = 15
+DIAGNOSTIC_COMMAND_TIMEOUT_S = 3
 REBOOT_PKGS = ("libc6", "systemd", "dbus", "dbus-broker", "linux-firmware", "intel-microcode",
                "amd64-microcode", "udev")
 _KERNEL = re.compile(r"^linux-(image|headers|modules|generic|signed|tools|hwe|lowlatency|"
@@ -159,6 +162,17 @@ def simulation_facts(text: str, name: str, holds: set[str]) -> dict:
 
 def text_blockers(items: list[UpdateItem], holds: set[str], safe: str,
                   full: str, debug: str = "") -> None:
+    # Targeted diagnostics must not consume the check child's entire 240 s lifetime.
+    # Every command shares this deadline; queued items remain conservatively held
+    # when it expires, with no invented dependency-install plan.
+    deadline = time.monotonic() + DIAGNOSTIC_BUDGET_S
+
+    def diagnostic(cmd: list[str]) -> str | None:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return None
+        return _run(cmd, timeout=min(DIAGNOSTIC_COMMAND_TIMEOUT_S, remaining))
+
     safe_names = {i.name for i in parse_apt_get_sim(safe)}
     for item in items:
         kept = item.name in holds or item.name not in safe_names
@@ -172,19 +186,25 @@ def text_blockers(items: list[UpdateItem], holds: set[str], safe: str,
         try:
             if not re.fullmatch(r"[a-z0-9][a-z0-9+.-]*", item.name):
                 raise ValueError("invalid package name")
-            targeted = _run(["apt-get", "-s", "-o", "Debug::NoLocking=1", "install", "--",
-                             item.name + "=" + item.available])
-            facts.update(simulation_facts(targeted, item.name, holds))
+            targeted = diagnostic(["apt-get", "-s", "-o", "Debug::NoLocking=1", "install", "--",
+                                   item.name + "=" + item.available])
+            if targeted is None:
+                facts["diagnostics_deferred"] = True
+            else:
+                facts.update(simulation_facts(targeted, item.name, holds))
         except (RuntimeError, OSError, subprocess.SubprocessError, ValueError):
             facts["broken"] = True
             involved = {n for n in holds if re.search(r"(?<![\w+.-])" + re.escape(n) +
                                                        r"(?![\w+.-])", debug)}
             facts["held_involved"] = sorted(involved)
         try:
-            policy = _run(["apt-cache", "policy", "--", item.name])
-            match = re.search(r"\(phased (\d+)%\)", policy)
-            if match:
-                facts["phased_pct"] = int(match.group(1))
+            policy = diagnostic(["apt-cache", "policy", "--", item.name])
+            if policy is None:
+                facts["diagnostics_deferred"] = True
+            else:
+                match = re.search(r"\(phased (\d+)%\)", policy)
+                if match:
+                    facts["phased_pct"] = int(match.group(1))
         except (RuntimeError, OSError, subprocess.SubprocessError):
             pass
         item.extra.update(held=True, facts=facts, blocker=blockers.classify(item.name, facts))
