@@ -1,14 +1,16 @@
 # Release checks
 
-Reviewed on 2026-11-02. The check uses fake hardware and recorded system-service
+Reviewed on 2026-11-04. The check uses fake hardware and recorded system-service
 transactions; no package updates, firmware flashes or hardware writes were performed.
 
-- Unit suite: 393 tests run, two intentional skips.
-- Updates and Services UI: dark/light at 1280x720 and 360x640, zero failures and
-  zero warnings. Fifteen informational notes describe shortened labels with tooltips.
+- Unit suite: 486 tests run, two intentional skips.
+- Full UI matrix: all 21 pages, dialogs and transient states across 27 combinations
+  (five sizes, three themes, and six stress modes at two sizes). Zero failures and
+  warnings; 42 grouped informational notes record shortened labels with tooltips.
+  The matrix combines sequential bounded runs and affected-case reruns after fixes.
 - Installer: temporary-home round trips, original asset/service restoration, and
   literal paths containing shell-special characters pass.
-- Extension logic: 36 profile assertions and 143 gesture assertions pass.
+- Extension logic: 36 profile assertions and 150 gesture assertions pass.
 - Desktop entry and AppStream metadata validate; extension schemas validate.
 - ShellCheck and Python syntax checks pass. Ruff is unavailable locally; its CI
   job must pass after publishing before a release is announced.
