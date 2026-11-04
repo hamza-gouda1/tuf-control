@@ -62,8 +62,8 @@ switch:checked > slider { background-color: @accent_fg_color; }
 .sidebar-brand { padding: 2px 0; }
 .sidebar-brand .brand-title { font-weight: 800; letter-spacing: 0.02em; }
 .sidebar-mode { font-size: 0.8em; }
-/* Sidebar foreground tokens are already muted; opacity would dim them twice. */
-.sidebar-section, .sidebar-mode { opacity: 1; }
+/* Small sidebar labels need the full foreground colour for readable glyphs. */
+.sidebar-section, .sidebar-mode { color: @window_fg_color; opacity: 1; }
 
 /* header chips */
 .profile-chip {
