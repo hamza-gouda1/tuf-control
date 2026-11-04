@@ -84,6 +84,13 @@ a terminal, keep its window focused and press the key (look for `keycode 210 ...
 If it shows something else (for example XF86Launch1, KEY_PROG1 from WMI 0x86/0x8A, or XF86Launch4),
 run `./install.sh --hotkey=<that name>`. Keysyms already bound by GNOME itself are not used.
 
+## Background service permissions
+
+The user service keeps `NoNewPrivileges=yes`. Automation cannot elevate through the
+polkit sysfs helper, even when it is installed. Use asusd or power-profiles-daemon for
+protected background changes; otherwise they are unavailable with a permission reason.
+The interactive GUI and CLI can use the optional helper below.
+
 ## Root-only writes (optional, polkit)
 
 Most settings go through `asusd`, which already holds the privileges. Direct sysfs writes

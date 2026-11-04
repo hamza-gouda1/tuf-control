@@ -10,10 +10,10 @@ from tuf_control.backends.cli import check_args
 from tuf_control.backends.dbus import DBusBackend
 from tuf_control.backends.fake import FakeBackend, build_fake_tree
 from tuf_control.backends.sysfs import SysfsBackend
-from tuf_control.backends.util import RecordingWriter
+from tuf_control.backends.util import PkexecWriter, RecordingWriter
 from tuf_control.controller import FAKE_ROOT_ENV, Controller, default_backends
 from tuf_control.core import (
-    BackendUnavailable, Capability, CapStatus, GpuMode, Profile, ValidationError,
+    BackendUnavailable, Capability, CapStatus, GpuMode, PrivilegeRequired, Profile, ValidationError,
 )
 
 
@@ -22,6 +22,18 @@ class TreeCase(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         self.root = build_fake_tree(Path(self._tmp.name) / "root")
+
+
+class PrivilegePolicyTests(unittest.TestCase):
+    def test_no_new_privileges_never_attempts_helper(self):
+        from unittest.mock import patch
+        writer = PkexecWriter()
+        with patch("tuf_control.backends.util.read_text", return_value="NoNewPrivs:\t1\n"), \
+                patch("tuf_control.backends.util.subprocess.run") as run:
+            self.assertFalse(writer.available())
+            with self.assertRaisesRegex(PrivilegeRequired, "NoNewPrivileges"):
+                writer.write(Path("/sys/fake"), "1")
+            run.assert_not_called()
 
 
 class SysfsParsing(TreeCase):

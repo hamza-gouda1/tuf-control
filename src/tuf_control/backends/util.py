@@ -69,10 +69,20 @@ class PkexecWriter:
     def __init__(self, helper: str = HELPER_PATH, timeout: float = 120.0) -> None:
         self.helper, self.timeout = helper, timeout
 
+    @staticmethod
+    def no_new_privileges() -> bool:
+        status = read_text(Path("/proc/self/status")) or ""
+        return any(line.split() == ["NoNewPrivs:", "1"] for line in status.splitlines())
+
     def available(self) -> bool:
-        return os.access(self.helper, os.X_OK) and shutil.which("pkexec") is not None
+        return (not self.no_new_privileges() and os.access(self.helper, os.X_OK)
+                and shutil.which("pkexec") is not None)
 
     def write(self, path: Path, value: str) -> None:
+        if self.no_new_privileges():
+            raise PrivilegeRequired(
+                "privileged sysfs writes are unavailable under NoNewPrivileges; "
+                "the background service needs asusd or power-profiles-daemon for this change")
         pkexec = shutil.which("pkexec")
         if not self.available() or pkexec is None:
             raise PrivilegeRequired(

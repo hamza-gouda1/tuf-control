@@ -16,7 +16,8 @@ KillSignal=SIGTERM
 TimeoutStopSec=10
 Restart=on-failure
 RestartSec=5
-# A user daemon: no root. Resource caps apply where the user manager delegates them.
+# A user daemon: protected writes require asusd/PPD; pkexec cannot elevate here.
+# Resource caps apply where the user manager delegates them.
 NoNewPrivileges=yes
 MemoryMax=96M
 CPUQuota=25%

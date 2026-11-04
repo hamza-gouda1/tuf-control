@@ -34,9 +34,15 @@ real hardware, D-Bus and asusctl are never touched.
 
 Reads need no privileges. Writes go through a `Writer`; the default writes directly
 where sysfs permits (for example keyboard brightness for the `input` group) and raises
-`PrivilegeRequired` otherwise. A later small polkit-guarded helper (`packaging/polkit/`)
-will provide a `Writer` for root-only attributes. The D-Bus backend writes via asusd,
-which holds the privileges itself.
+`PrivilegeRequired` otherwise. The optional polkit-guarded helper (`packaging/polkit/`)
+provides a `Writer` for root-only attributes from an interactive GUI or CLI. The D-Bus
+backend writes via asusd, which holds the privileges itself.
+
+The shipped `tuf-controld` user unit keeps `NoNewPrivileges=yes`. It cannot invoke the
+privileged sysfs fallback: those changes report `PrivilegeRequired` with an unavailable
+reason. Background rules need asusd or power-profiles-daemon for protected changes;
+attributes already writable by the user remain usable. Installing the helper does not
+remove this daemon boundary.
 
 ## Time and threads
 
