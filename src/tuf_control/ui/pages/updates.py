@@ -19,6 +19,7 @@ from ...updates.model import SOURCE_ORDER, SOURCE_TITLES, Report, UpdateItem, ag
     human_size
 from ...updates.progress import TICK_MS, RunState, fmt_duration, fmt_speed
 from ...updates.verify import RESULT_TITLES
+from ...automation.config import update_config
 from ..tasks import run_bg
 from ..widgets import label
 from .base import Page, button, info_row, pill, prefs_page
@@ -57,6 +58,11 @@ def _load() -> Report | None:
     if rep is not None:
         rep.checking = is_checking()  # type: ignore[attr-defined]
     return rep
+
+
+def _write_background_checks(enabled: bool, updater=update_config):
+    """Persist the background-check toggle through the config layer's atomic update."""
+    return updater(lambda cfg: cfg["updates"].__setitem__("enabled", bool(enabled)))
 
 
 def item_subtitle(i: UpdateItem) -> str:
@@ -148,6 +154,13 @@ class UpdatesPage(Page):
         self.auto_row = Adw.ActionRow(title="Background checks", subtitle="")
         self.auto_row.set_subtitle_lines(0)
         self.auto_row.add_prefix(Gtk.Image.new_from_icon_name("alarm-symbolic"))
+        self.auto_switch = Gtk.Switch(valign=Gtk.Align.CENTER,
+                                      tooltip_text="Enable or pause automatic update checks")
+        self.auto_switch.update_property([Gtk.AccessibleProperty.LABEL],
+                                         ["Background update checks"])
+        self.auto_row.add_suffix(self.auto_switch)
+        self.auto_row.set_activatable_widget(self.auto_switch)
+        self.auto_switch.connect("notify::active", self._background_checks_changed)
         self.tools_g.add(self.auto_row)
 
         self.progress_g = Adw.PreferencesGroup(visible=False)
@@ -478,8 +491,11 @@ class UpdatesPage(Page):
     def _render_auto(self) -> None:
         from ...updates.settings import load_settings
         st = load_settings()
+        self._syncing_auto = True
+        self.auto_switch.set_active(bool(st.get("enabled", True)))
+        self._syncing_auto = False
         if not st.get("enabled", True):
-            text = "Off. Turn on with \"updates\": {\"enabled\": true} in the config."
+            text = "Off. Turn on automatic checks with the switch."
         else:
             text = (f"tuf-controld checks at most every {st.get('interval_h', 6):g} hours"
                     + (", not on metered connections" if st.get("respect_metered", True)
@@ -487,6 +503,24 @@ class UpdatesPage(Page):
                     + (", and notifies once per new update" if st.get("notify", True)
                        else ""))
         self.auto_row.set_subtitle(text)
+        self.auto_row.set_tooltip_text("Settings are stored in ~/.config/tuf-control/config.json")
+
+    def _background_checks_changed(self, switch, _pspec) -> None:
+        if getattr(self, "_syncing_auto", False):
+            return
+        enabled = switch.get_active()
+        switch.set_sensitive(False)
+
+        def done(_cfg):
+            switch.set_sensitive(True)
+            self._render_auto()
+
+        def error(exc):
+            switch.set_sensitive(True)
+            self._render_auto()
+            self.win.toast_error(exc)
+
+        run_bg(_write_background_checks, enabled, done=done, error=error)
 
     def _add(self, g: Gtk.Widget) -> None:
         g.set_sensitive(not self.busy)
