@@ -17,6 +17,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import http.client
+import io
 import ipaddress
 import os
 import re
@@ -53,6 +54,8 @@ PK_STATUS = {7: "Refreshing", 8: "Downloading", 13: "Resolving dependencies", 14
              30: "Waiting", 31: "Waiting for password", 36: "Running hooks"}
 FIRMWARE_HOSTS = ("fwupd.org", "cdn.fwupd.org")
 MAX_FIRMWARE_BYTES = 256 << 20
+LVFS_CONNECT_TIMEOUT_S = 60
+LVFS_TRANSFER_TIMEOUT_S = 180
 FIRMWARE_WARNING = (
     "Firmware updates write to the laptop's own chips. Keep the charger connected and the "
     "battery above 30 %, do not close the lid, suspend or switch off until it says it is "
@@ -325,18 +328,28 @@ class _PinnedHTTPSConnection(http.client.HTTPSConnection):
     connect() also avoids a second DNS lookup between validation and the TLS handshake.
     """
 
-    def __init__(self, host: str, addresses: list, *, timeout: float = 60) -> None:
+    def __init__(self, host: str, addresses: list, *, timeout: float = 60,
+                 connect_deadline: float | None = None) -> None:
         super().__init__(host, timeout=timeout, context=ssl.create_default_context())
         self.addresses = addresses
+        self.connect_deadline = (connect_deadline if connect_deadline is not None
+                                 else time.monotonic() + timeout)
 
     def connect(self) -> None:
         last_error = None
         for family, socktype, proto, _canonname, address in self.addresses:
             raw = None
             try:
+                remaining = self.connect_deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("LVFS connection deadline exceeded")
                 raw = socket.socket(family, socktype, proto)
-                raw.settimeout(self.timeout)
+                raw.settimeout(min(self.timeout, remaining))
                 raw.connect(address)
+                remaining = self.connect_deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("LVFS connection deadline exceeded before TLS")
+                raw.settimeout(min(self.timeout, remaining))
                 self.sock = self._context.wrap_socket(raw, server_hostname=self.host)
                 return
             except OSError as exc:
@@ -346,6 +359,50 @@ class _PinnedHTTPSConnection(http.client.HTTPSConnection):
         if last_error is not None:
             raise last_error
         raise ActionError("the LVFS hostname has no usable public address")
+
+
+class _DeadlineReader(io.RawIOBase):
+    """Bound every raw TLS read, including HTTP headers and chunk framing."""
+
+    def __init__(self, stream, transport, deadline: float) -> None:
+        super().__init__()
+        self.stream, self.transport, self.deadline = stream, transport, deadline
+
+    def readable(self) -> bool:
+        return True
+
+    def _remaining(self) -> float:
+        remaining = self.deadline - time.monotonic()
+        if remaining <= 0:
+            raise ActionError("LVFS download exceeded the 180 second time limit")
+        return remaining
+
+    def readinto(self, buffer) -> int | None:
+        self.transport.settimeout(min(LVFS_CONNECT_TIMEOUT_S, self._remaining()))
+        try:
+            size = self.stream.readinto(buffer)
+        except TimeoutError:
+            self._remaining()  # report the total deadline when it caused the timeout
+            raise
+        self._remaining()
+        return size
+
+    def close(self) -> None:
+        try:
+            self.stream.close()
+        finally:
+            super().close()
+
+
+class _DeadlineResponseSocket:
+    """Adapt only HTTPResponse's file reads; connection ownership stays unchanged."""
+
+    def __init__(self, transport, deadline: float) -> None:
+        self.transport, self.deadline = transport, deadline
+
+    def makefile(self, mode: str):
+        stream = self.transport.makefile(mode, buffering=0)
+        return io.BufferedReader(_DeadlineReader(stream, self.transport, self.deadline))
 
 
 def _fetch_lvfs(url: str, watch: object | None = None) -> bytes:
@@ -368,11 +425,17 @@ def _fetch_lvfs(url: str, watch: object | None = None) -> bytes:
                 address[0]).is_global:
             raise ActionError("the LVFS hostname resolves to a non-public address")
     t0 = time.monotonic()
-    conn = _PinnedHTTPSConnection(u.hostname, addresses, timeout=60)
+    transfer_deadline = t0 + LVFS_TRANSFER_TIMEOUT_S
+    conn = _PinnedHTTPSConnection(u.hostname, addresses, timeout=LVFS_CONNECT_TIMEOUT_S,
+                                  connect_deadline=t0 + LVFS_CONNECT_TIMEOUT_S)
+    conn.response_class = lambda sock, **kwargs: http.client.HTTPResponse(
+        _DeadlineResponseSocket(sock, transfer_deadline), **kwargs)
     target = urllib.parse.urlunparse(("", "", u.path or "/", u.params, u.query, ""))
     buf = bytearray()
     try:
         conn.request("GET", target, headers={"User-Agent": "tuf-control"})
+        # Keep our own reference: HTTPResponse may clear conn.sock on close.
+        transport = conn.sock
         with conn.getresponse() as resp:
             if 300 <= resp.status < 400:
                 raise ActionError("the LVFS tried to redirect the download; refused")
@@ -382,7 +445,20 @@ def _fetch_lvfs(url: str, watch: object | None = None) -> bytes:
             if total > MAX_FIRMWARE_BYTES:
                 raise ActionError("Firmware cabinet exceeds the 256 MiB download limit")
             while True:
-                chunk = resp.read(1 << 16)
+                remaining = transfer_deadline - time.monotonic()
+                if remaining <= 0:
+                    raise ActionError("LVFS download exceeded the 180 second time limit")
+                if transport is not None:
+                    transport.settimeout(min(LVFS_CONNECT_TIMEOUT_S, remaining))
+                try:
+                    chunk = resp.read1(1 << 16)
+                except TimeoutError as exc:
+                    if time.monotonic() >= transfer_deadline:
+                        raise ActionError(
+                            "LVFS download exceeded the 180 second time limit") from exc
+                    raise
+                if time.monotonic() >= transfer_deadline:
+                    raise ActionError("LVFS download exceeded the 180 second time limit")
                 if not chunk:
                     break
                 if len(buf) + len(chunk) > MAX_FIRMWARE_BYTES:

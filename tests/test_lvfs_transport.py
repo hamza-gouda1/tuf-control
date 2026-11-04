@@ -41,7 +41,9 @@ class LvfsTransportTests(unittest.TestCase):
                                     proto=socket.IPPROTO_TCP)
         sockets.assert_called_once_with(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP)
         raw.connect.assert_called_once_with(PUBLIC[4])
-        raw.settimeout.assert_called_once_with(60)
+        timeout = raw.settimeout.call_args.args[0]
+        self.assertGreater(timeout, 0)
+        self.assertLessEqual(timeout, actions.LVFS_CONNECT_TIMEOUT_S)
         default_context.assert_called_once_with()
         context.wrap_socket.assert_called_once_with(raw, server_hostname="fwupd.org")
         request = b"".join(call.args[0] for call in tls.sendall.call_args_list)
@@ -82,6 +84,126 @@ class LvfsTransportTests(unittest.TestCase):
         second.connect.assert_called_once_with(second_addr[4])
         context.wrap_socket.assert_called_once_with(second, server_hostname="fwupd.org")
         dns.assert_called_once()
+
+    def test_connect_fallback_shares_one_deadline(self):
+        dns, sockets, first, *_ = self.transport()
+        second = mock.Mock()
+        second_addr = (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "",
+                       ("1.1.1.1", 443))
+        dns.return_value = [PUBLIC, second_addr]
+        sockets.side_effect = [first, second]
+        clock = {"now": 100.0}
+
+        def advance_past_connect_budget(_address):
+            clock["now"] = 161.0
+            raise OSError("connect timed out")
+
+        first.connect.side_effect = advance_past_connect_budget
+        with mock.patch.object(actions.time, "monotonic", side_effect=lambda: clock["now"]):
+            with self.assertRaises(TimeoutError):
+                actions._fetch_lvfs(URL)
+
+        sockets.assert_called_once_with(socket.AF_INET, socket.SOCK_STREAM,
+                                        socket.IPPROTO_TCP)
+        first.close.assert_called_once_with()
+        second.connect.assert_not_called()
+
+    def test_tls_handshake_uses_only_the_remaining_connect_budget(self):
+        _, _, raw, _, context, _ = self.transport()
+        now = [0.0]
+        raw.connect.side_effect = lambda _address: now.__setitem__(0, 59.0)
+        with mock.patch.object(actions.time, "monotonic", side_effect=lambda: now[0]):
+            self.assertEqual(actions._fetch_lvfs(URL), b"cabinet")
+        self.assertEqual(raw.settimeout.call_args_list,
+                         [mock.call(60), mock.call(1)])
+        context.wrap_socket.assert_called_once()
+
+    def test_expired_connect_budget_never_starts_tls(self):
+        _, _, raw, _, context, _ = self.transport()
+        now = [0.0]
+        raw.connect.side_effect = lambda _address: now.__setitem__(0, 60.0)
+        with mock.patch.object(actions.time, "monotonic", side_effect=lambda: now[0]):
+            with self.assertRaises(TimeoutError):
+                actions._fetch_lvfs(URL)
+        context.wrap_socket.assert_not_called()
+        raw.close.assert_called_once_with()
+
+    def test_slow_trickle_cannot_exceed_overall_transfer_deadline(self):
+        _, _, _, tls, _, _ = self.transport(
+            b"HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\nx")
+        clock = {"now": 0.0}
+        class SlowReader(io.BytesIO):
+            def readinto(self, buffer):
+                # Complete headers first, then trickle the body beyond the budget.
+                if self.tell() == 0:
+                    prefix = self.getvalue().index(b"\r\n\r\n") + 4
+                    return super().readinto(memoryview(buffer)[:prefix])
+                result = super().readinto(buffer)
+                if result:
+                    clock["now"] += actions.LVFS_TRANSFER_TIMEOUT_S + 1
+                return result
+
+        reader = SlowReader(b"HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\nx")
+        tls.makefile.return_value = reader
+        with mock.patch.object(actions.time, "monotonic", side_effect=lambda: clock["now"]):
+            with self.assertRaisesRegex(actions.ActionError, "180 second time limit"):
+                actions._fetch_lvfs(URL)
+        tls.close.assert_called_once_with()
+
+    def test_status_and_header_trickles_share_the_absolute_deadline(self):
+        prefix = b"HTTP/1.1 200 OK\r\n"
+        headers = b"X-Slow: yes\r\nContent-Length: 1\r\n\r\nx"
+        for fast_prefix in (b"", prefix):
+            with self.subTest(phase="headers" if fast_prefix else "status"):
+                _, _, _, tls, _, _ = self.transport()
+                clock = {"now": 0.0}
+
+                class TrickleReader(io.BytesIO):
+                    def readinto(self, buffer):
+                        if self.tell() < len(fast_prefix):
+                            return super().readinto(memoryview(buffer)[:len(fast_prefix)])
+                        clock["now"] += 59
+                        return super().readinto(memoryview(buffer)[:1])
+
+                reader = TrickleReader(prefix + headers)
+                tls.makefile.return_value = reader
+                with mock.patch.object(actions.time, "monotonic",
+                                       side_effect=lambda: clock["now"]):
+                    with self.assertRaisesRegex(actions.ActionError, "180 second time limit"):
+                        actions._fetch_lvfs(URL)
+                # A real socket times out after the remaining 3 seconds. Our fake
+                # intentionally ignores it, so the post-read check catches overrun.
+                self.assertEqual(clock["now"], 236)
+                self.assertIn(mock.call(3), tls.settimeout.call_args_list)
+                self.assertTrue(reader.closed)
+                tls.makefile.assert_called_once_with("rb", buffering=0)
+                tls.close.assert_called_once_with()
+
+    def test_chunk_size_and_trailer_trickles_share_the_absolute_deadline(self):
+        headers = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n"
+        for framing in (b"00000001\r\nx\r\n0\r\n\r\n",
+                        b"0\r\nX-Trailer: slow\r\n\r\n"):
+            with self.subTest(framing=framing):
+                _, _, _, tls, _, _ = self.transport()
+                clock = {"now": 0.0}
+
+                class TrickleReader(io.BytesIO):
+                    def readinto(self, buffer):
+                        if self.tell() == 0:
+                            return super().readinto(memoryview(buffer)[:len(headers)])
+                        clock["now"] += 59
+                        return super().readinto(memoryview(buffer)[:1])
+
+                reader = TrickleReader(headers + framing)
+                tls.makefile.return_value = reader
+                with mock.patch.object(actions.time, "monotonic",
+                                       side_effect=lambda: clock["now"]):
+                    with self.assertRaisesRegex(actions.ActionError, "180 second time limit"):
+                        actions._fetch_lvfs(URL)
+                self.assertEqual(clock["now"], 236)
+                self.assertIn(mock.call(3), tls.settimeout.call_args_list)
+                self.assertTrue(reader.closed)
+                tls.close.assert_called_once_with()
 
     def test_tls_verification_error_closes_socket_and_propagates(self):
         _, _, raw, _, context, _ = self.transport()
