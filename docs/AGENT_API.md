@@ -143,7 +143,13 @@ by the client and not by this document.
    (`ok`, `dry_run`, `pending`, `executed`, `denied`, `refused`, `invalid`, `rate_limited`,
    `error`) and a short result. Owner actions (grant, revoke, approve, deny) are logged as
    `owner:app`, `owner:cli` or `owner:notification`. Created 0600, rotated at 512 KiB, three
-   old files kept. `tuf-control agent audit --tail 20`; the page shows the last 50.
+   old files kept. Owner decisions and pending/executed writes are also copied to
+   `agent-audit-important.log` with independent rotation and the same permissions.
+   Routine, refused and rate-limited calls cannot rotate this protected history.
+   `tuf-control agent audit --tail 20`; the page shows up to 50 events, reserving half
+   the slots for protected events so a flood cannot hide them. Results are chronological;
+   a one-event query returns the newest event. Protected history is still bounded:
+   subsequent owner decisions and approved writes can eventually rotate older entries.
 10. **Kill switch.** `tuf-control agent revoke` or **Revoke all** on the page: access off,
     level back to read, standing grant and high-risk tools off, every open request
     cancelled (an approved but unused request can no longer be used). Running servers see it

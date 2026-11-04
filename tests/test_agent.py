@@ -524,6 +524,50 @@ class AuditAndKillSwitch(AgentEnv):
         self.assertLess((self.tmp / "rot/audit.log").stat().st_size, 600)
         self.assertEqual(log.tail(1)[0]["params"], {"i": 39})
 
+    def test_refused_flood_cannot_evict_owner_or_executed_history(self):
+        log = AuditLog(self.tmp / "protected/audit.log", max_bytes=400, keep=2)
+        owner = log.write(client="owner:cli", kind="owner", name="approve", decision="approve")
+        pending = log.write(client="client", kind="tool", name="set_charge_limit",
+                            decision="pending")
+        executed = log.write(client="client", kind="tool", name="set_charge_limit",
+                             decision="executed")
+        # New instances ensure protection is persistent rather than a process cache.
+        for i in range(60):
+            decision = ("ok", "refused", "rate_limited")[i % 3]
+            AuditLog(log.path, max_bytes=400, keep=2).write(
+                client="owner:cli", kind="tool", name="get_status", decision=decision,
+                params={"padding": "x" * 180, "i": i})
+        events = AuditLog(log.path, max_bytes=400, keep=2).tail(10)
+        ids = [e["id"] for e in events]
+        self.assertIn(owner["id"], ids)
+        self.assertIn(pending["id"], ids)
+        self.assertIn(executed["id"], ids)
+        self.assertEqual(len(ids), len(set(ids)))
+        self.assertEqual(log.tail(1)[0]["params"]["i"], 59)
+        important_files = list(log.path.parent.glob("audit-important.log*"))
+        self.assertTrue(important_files)
+        for p in important_files:
+            self.assertEqual(p.stat().st_mode & 0o777, 0o600)
+        before = log.signature()
+        log.write(client="owner:cli", kind="owner", name="deny", decision="deny")
+        self.assertNotEqual(log.signature(), before)
+
+    def test_protected_log_is_bounded_and_rejects_symlinks(self):
+        log = AuditLog(self.tmp / "bounded/audit.log", max_bytes=400, keep=2)
+        for _ in range(30):
+            log.write(client="owner:cli", kind="owner", name="approve", decision="approve")
+        files = list(log.path.parent.glob("audit-important.log*"))
+        self.assertEqual(len([p for p in files if p.suffix != ".lock"]), 3)
+        for p in files:
+            self.assertLess(p.stat().st_size, 800)
+        other = self.tmp / "do-not-write"
+        other.write_text("unchanged")
+        log.important_path.unlink()
+        log.important_path.symlink_to(other)
+        with contextlib.redirect_stderr(io.StringIO()):
+            log.write(client="owner:cli", kind="owner", name="deny", decision="deny")
+        self.assertEqual(other.read_text(), "unchanged")
+
     def test_kill_switch(self):
         self.grant("control-all", 3600, high_risk=True)
         out, _ = self.call("set_charge_limit", {"percent": 77, "dry_run": False})
