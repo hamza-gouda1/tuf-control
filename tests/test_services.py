@@ -28,7 +28,7 @@ class SafetyTests(unittest.TestCase):
                   "display-manager.service", "sddm.service", "user@1000.service",
                   "getty@tty1.service", "org.gnome.Shell@wayland.service",
                   "tuf-controld.service", "app-io.github.hamzagouda.TufControl-1234.scope",
-                  "init.scope", "asusd.service"):
+                  "init.scope", "asusd.service", "thermald.service", "ModemManager.service"):
             self.assertTrue(is_critical(n), n)
         for n in ("cups.service", "docker.service", "ssh.service", "syncthing.service",
                   "bluetooth.service", "apt-daily.timer"):
@@ -36,6 +36,9 @@ class SafetyTests(unittest.TestCase):
         self.assertEqual(template_of("getty@tty1.service"), "getty@.service")
 
     def test_refusals(self):
+        for name in ("thermald.service", "ModemManager.service"):
+            for operation in ("stop", "restart", "disable"):
+                self.assertIn("core part", refusal(unit(name), operation))
         nm = unit("NetworkManager.service")
         self.assertIn("core part", refusal(nm, "stop"))
         self.assertIn("core part", refusal(nm, "restart"))
@@ -58,7 +61,7 @@ class SafetyTests(unittest.TestCase):
         self.assertIn("unusual", refusal(unit("a b.service"), "stop"))
         self.assertIn("unknown", refusal(cups, "kill"))
         failed = unit("thermald.service", "failed", "failed")
-        self.assertIsNone(refusal(failed, "restart"))
+        self.assertIn("core part", refusal(failed, "restart"))
         self.assertIsNone(refusal(failed, "start"))
 
 
