@@ -26,6 +26,19 @@ def _icon_dirs() -> list[Path]:
     return [p for p in (here.parent / "icons", here.parents[3] / "data" / "icons") if p.is_dir()]
 
 
+def _show_start_page(window, start_page: str | None) -> bool:
+    """Show a requested page without building pages just to validate its key."""
+    if not start_page:
+        return False
+    if start_page in window.pages:
+        window.show_page(start_page)
+        return True
+    valid_keys = ", ".join(window.pages)
+    print(f"tuf-control-gui: unknown page {start_page!r}; valid pages: {valid_keys}",
+          file=sys.stderr)
+    return False
+
+
 class TufControlApp(Adw.Application):
     def __init__(self, controller: Controller | None = None) -> None:
         from .lean import choose_renderer
@@ -66,8 +79,7 @@ class TufControlApp(Adw.Application):
         if self.window is None:
             from .window import MainWindow
             self.window = MainWindow(self, self.controller or Controller())
-        if self.start_page and self.start_page in self.window.pages:
-            self.window.show_page(self.start_page)
+        _show_start_page(self.window, self.start_page)
         self.window.present()
 
 

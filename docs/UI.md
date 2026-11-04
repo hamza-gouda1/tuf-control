@@ -5,6 +5,11 @@ GTK 4 + Libadwaita 1.5 through PyGObject. Runs as the user; no root.
     PYTHONPATH=src python3 -m tuf_control.ui          # or: tuf-control-gui (after pip install)
     TUF_CONTROL_FAKE_ROOT=/tmp/tree PYTHONPATH=src python3 -m tuf_control.ui   # fake hardware
 
+`tuf-control-gui --page KEY` opens a page at startup. The page keys are `dashboard`,
+`processes`, `services`, `cpu`, `memory`, `dgpu`, `igpu`, `fanmon`, `storage`, `network`,
+`performance`, `fans`, `gpu`, `display`, `gestures`, `battery`, `keyboard`, `automation`,
+`agent`, `updates`, and `about`. An unknown key is reported to stderr along with this list.
+
 Create a fake tree with `python3 -c "from tuf_control.backends.fake import build_fake_tree;
 build_fake_tree('/tmp/tree')"`. `TUF_CONTROL_COLOR_SCHEME=dark|light` forces a scheme;
 otherwise the system preference is followed.
