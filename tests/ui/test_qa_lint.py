@@ -199,6 +199,21 @@ class SnapshotTargetTests(unittest.TestCase):
         self.assertIs(snapshot_widget(window), window)
         self.assertIs(snapshot_widget(content), content)
 
+    def test_window_child_is_snapshotted_directly_instead_of_cached_paintable(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        from qa_lint import snapshot_contents
+        child = SimpleNamespace(get_width=lambda: 360, get_height=lambda: 640)
+        window = SimpleNamespace(get_width=lambda: 360, get_height=lambda: 640,
+                                 get_child=lambda: child, snapshot_child=Mock())
+        snapshot, factory = object(), Mock()
+        snapshot_contents(window, snapshot, factory)
+        window.snapshot_child.assert_called_once_with(child, snapshot)
+        factory.assert_not_called()
+        snapshot_contents(child, snapshot, factory)
+        factory.assert_called_once_with(widget=child)
+        factory.return_value.snapshot.assert_called_once_with(snapshot, 360, 640)
+
 
 if __name__ == "__main__":
     unittest.main()

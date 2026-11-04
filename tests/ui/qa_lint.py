@@ -83,6 +83,16 @@ def snapshot_widget(widget):
     return widget
 
 
+def snapshot_contents(widget, snapshot, paintable_factory):
+    """Build the window child's current node rather than its cached paintable."""
+    child = snapshot_widget(widget)
+    if child is not widget:
+        widget.snapshot_child(child, snapshot)
+    else:
+        paintable_factory(widget=widget).snapshot(
+            snapshot, widget.get_width(), widget.get_height())
+
+
 def combo_name(variant: str, size: str, mode: str = "") -> str:
     return f"{variant}@{size}" + (f"+{mode}" if mode else "")
 
@@ -369,7 +379,7 @@ def child(job: dict) -> int:
         snap = Gtk.Snapshot()
         bg = widget.get_style_context().lookup_color("window_bg_color")[1]
         snap.append_color(bg, Graphene.Rect().init(0, 0, ww, hh))
-        Gtk.WidgetPaintable(widget=snapshot_widget(widget)).snapshot(snap, ww, hh)
+        snapshot_contents(widget, snap, Gtk.WidgetPaintable)
         renderer = Gsk.CairoRenderer.new()
         renderer.realize_for_display(widget.get_display())
         try:
