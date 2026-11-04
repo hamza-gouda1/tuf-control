@@ -4,9 +4,23 @@ All notable changes to this project. Format follows Keep a Changelog; versions f
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-04
+
 ### Fixed
-- Bind approvals to server sessions, retain important audit events, recover original keyboard
-  lighting after daemon crashes, refresh late backend capabilities and protect thermal services.
+- Bind approvals to server sessions and show launcher identity; protect important audit
+  history from routine-call floods and validate sysfs writes against the opened attribute.
+- Restore original keyboard lighting after crashes and refresh capabilities when services
+  appear after startup. Protect thermal services and pause unreadable GPU telemetry.
+- Retry failed update notifications, eliminate click-watch busy polling, bound package
+  diagnostics and firmware transfers, and preserve complete firmware device identities.
+- Confirm rule deletion and shared-service stops; improve fan-editor accessibility,
+  startup-page diagnostics, background-check controls and process-column explanations.
+- Generate shared app colours from Bordeaux tokens and keep state and token files private.
+- Preserve shortcut backup and schema detection when settings listings are streamed.
+
+### Added
+- Full scheduled UI QA, source archive/checksum automation, pinned installation instructions,
+  AppStream screenshots and fixture coverage for the primary package resolver.
 
 ## [0.1.0] - 2026-11-02
 

@@ -1,6 +1,6 @@
 # Maintainer: Hamza Gouda <hraafat357@gmail.com>
 # NOT yet built or tested on Arch. Build it in a clean chroot (extra-x86_64-build) before
-# submitting to the AUR, and replace the checksum with the one from the release tarball.
+# submitting to the AUR. Publish the deterministic release asset before building.
 pkgname=tuf-control
 pkgver=0.1.0
 pkgrel=1
@@ -8,11 +8,12 @@ pkgdesc='Control app for ASUS TUF/ROG laptops: profiles, fans, keyboard lighting
 arch=('any')
 url='https://github.com/hamza-gouda1/tuf-control'
 license=('GPL-3.0-or-later')
-depends=('python' 'python-gobject' 'python-cairo' 'gtk4' 'libadwaita' 'asusctl' 'supergfxctl' 'polkit')
-optdepends=('gnome-shell: Quick Settings profile toggle')
+depends=('python' 'python-gobject' 'python-cairo' 'gtk4' 'libadwaita' 'asusctl' 'polkit')
+optdepends=('gnome-shell: Quick Settings profile toggle'
+            'supergfxctl: GPU mode switching through supergfxd')
 makedepends=('glib2' 'python-build' 'python-installer' 'python-setuptools' 'python-wheel')
-source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('SKIP')
+source=("$url/releases/download/v$pkgver/$pkgname-$pkgver.tar.gz")
+sha256sums=('500aae137ead5e3db6b8dd8b3f651964b357a1ac4e1df9397544d8ff86bf2d04')
 
 build() {
   cd "$pkgname-$pkgver"
