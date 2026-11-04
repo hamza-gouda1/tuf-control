@@ -46,7 +46,7 @@ def parse_release(dev: dict, rel: dict) -> UpdateItem:
     desc = (rel.get("Summary") or "").strip()
     did = dev.get("DeviceId") or ""
     return UpdateItem(
-        id=f"firmware:{did[:12]}", source="firmware",
+        id=f"firmware:{did}", source="firmware",
         name=dev.get("Name") or "Device", current=dev.get("Version"),
         available=rel.get("Version"), size=int(rel.get("Size") or 0) or None,
         security=bool(issues) or urgency in ("high", "critical"), description=desc,
