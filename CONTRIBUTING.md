@@ -9,6 +9,7 @@ Copyright (C) Hamza Gouda. Run:
 
 ```sh
 PYTHONPATH=src python3 -m unittest discover -s tests
+python3 -m ruff check src tests
 bash tests/test_install.sh
 shellcheck -S warning install.sh uninstall.sh tests/*.sh
 gjs -m tests/test_quick_profiles.js

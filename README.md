@@ -3,7 +3,7 @@
 [![ci](https://github.com/hamza-gouda1/tuf-control/actions/workflows/ci.yml/badge.svg)](https://github.com/hamza-gouda1/tuf-control/actions/workflows/ci.yml)
 ![Python 3.12](https://img.shields.io/badge/python-3.12-3776ab)
 ![GTK 4 + Libadwaita](https://img.shields.io/badge/GTK%204-Libadwaita-4a86cf)
-![License](https://img.shields.io/badge/license-GPL--3.0-blue)
+![License](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)
 
 A native control app for ASUS TUF and ROG laptops on Linux: performance profile, power
 limits, fan curves, GPU mode, battery charge limit, keyboard lighting and display options,
@@ -107,16 +107,21 @@ so this table can be filled in with real results.
 - Tested on one machine only: ASUS TUF F16 FX608JHR on Ubuntu 24.04, GNOME Wayland; other models and
   X11 sessions are untested.
 - Real PackageKit, snap, Flatpak and fwupd installations have not been exercised in this
-  development audit; tests simulate transactions and verify installed-version results. Firmware
+  development; tests simulate transactions and verify installed-version results. Firmware
   pending a restart is reported separately from a confirmed installed version.
 - The GUI and Shell integration target Wayland; X11 is untested.
 - GNOME Shell 46 is the only version the Quick Settings extension declares.
 
 ## Install
 
+    git clone --branch v0.1.1 --depth 1 https://github.com/hamza-gouda1/tuf-control.git
+    cd tuf-control
     ./install.sh --dry-run
     ./install.sh
     gnome-extensions enable tuf-control-quick@hamza-gouda
+
+Install instructions pin the tested release tag. Contributors can clone `main` with
+`git clone --branch main https://github.com/hamza-gouda1/tuf-control.git`; see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 See [docs/INSTALL.md](docs/INSTALL.md). User-level, no root, no downloads. The optional polkit
 helper is printed with `./install.sh --system` and never run for you.
@@ -203,4 +208,4 @@ Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/UI.md](docs/UI.md).
 
 Written by Hamza Gouda. Built on the work of the asus-linux project (asusd, supergfxd) and the
 kernel's asus-wmi and asus-armoury drivers; this project is not affiliated with ASUS.
-GPL-3.0-or-later, see [LICENSE](LICENSE).
+Version 3 or, at your option, any later version (SPDX: GPL-3.0-or-later). See [LICENSE](LICENSE).
