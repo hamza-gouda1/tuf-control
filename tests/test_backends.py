@@ -107,6 +107,20 @@ class Stub(Backend):
 
 
 class ControllerTests(TreeCase):
+    def test_probe_cache_recovers_when_service_appears(self):
+        now = [0.0]
+        backend = Stub("late-service", set(), Profile.QUIET)
+        ctl = Controller([backend], clock=lambda: now[0])
+        self.assertFalse(ctl.capabilities()["profile"]["available"])
+        backend._caps.add(Capability.PROFILE)
+        now[0] = 59.0
+        self.assertFalse(ctl.capabilities()["profile"]["available"])
+        now[0] = 60.0
+        self.assertEqual(ctl.get_profile(), (Profile.QUIET, "late-service"))
+        backend._caps.clear()
+        ctl.invalidate()
+        self.assertFalse(ctl.capabilities()["profile"]["available"])
+
     def test_order_and_fallback(self):
         a = Stub("dbus", {Capability.PROFILE}, Profile.QUIET)
         b = Stub("sysfs", {Capability.PROFILE}, Profile.BALANCED)

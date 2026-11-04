@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -26,6 +27,7 @@ from .core import (
 )
 
 FAKE_ROOT_ENV = "TUF_CONTROL_FAKE_ROOT"
+PROBE_TTL_S = 60.0
 
 
 @dataclass
@@ -49,20 +51,26 @@ def default_backends() -> list[Backend]:
 
 
 class Controller:
-    def __init__(self, backends: list[Backend] | None = None) -> None:
+    def __init__(self, backends: list[Backend] | None = None, *, clock=time.monotonic) -> None:
+        self.clock = clock
+        self._probed_at = 0.0
         self.backends = backends if backends is not None else default_backends()
         self._probes: dict[str, dict[Capability, CapStatus]] | None = None
 
     # -- capabilities -------------------------------------------------------
     def _probe_all(self) -> dict[str, dict[Capability, CapStatus]]:
-        if self._probes is None:
-            self._probes = {}
+        now = self.clock()
+        if self._probes is None or now - self._probed_at >= PROBE_TTL_S:
+            # All consumers recover from services appearing after startup. Publish a
+            # complete snapshot so concurrent effect and automation reads stay valid.
+            probes = {}
             for b in self.backends:
                 try:
-                    self._probes[b.name] = b.probe()
+                    probes[b.name] = b.probe()
                 except Exception as exc:  # a broken backend must not break discovery
-                    self._probes[b.name] = {c: CapStatus(False, f"probe failed: {exc}")
-                                            for c in Capability}
+                    probes[b.name] = {c: CapStatus(False, f"probe failed: {exc}")
+                                      for c in Capability}
+            self._probes, self._probed_at = probes, now
         return self._probes
 
     def invalidate(self) -> None:
