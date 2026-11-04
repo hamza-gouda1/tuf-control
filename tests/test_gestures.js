@@ -257,7 +257,7 @@ const ev = (type, phase, fingers, dx, dy) => ({
 });
 
 function makeWatcher({bindings = {}, enabled = true, overview = false,
-                      canReturn = false} = {}) {
+                      canReturn = false, info = [], debug = []} = {}) {
     const fired = [];
     const actions = {
         overviewVisible: () => overview,
@@ -284,7 +284,8 @@ function makeWatcher({bindings = {}, enabled = true, overview = false,
     };
     const settings = fakeSettings(bindings, enabled);
     const watcher = new G.GestureWatcher({settings, stage, actions, clutter: CT,
-                                          log: () => {}});
+                                          log: msg => info.push(msg),
+                                          debug: msg => debug.push(msg)});
     watcher.enable();
     const handle = stage.handlers[0];
     // one full swipe through the handler; returns every answer it gave
@@ -295,9 +296,28 @@ function makeWatcher({bindings = {}, enabled = true, overview = false,
         answers.push(handle(null, ev(type, PHASE_END, fingers, 0, 0)));
         return answers;
     };
-    return {watcher, stage, settings, fired, swipe};
+    return {watcher, stage, settings, fired, swipe, info, debug};
 }
 
+{
+    // Shell-owned three-finger navigation that misses our gesture threshold
+    // should leave only DEBUG diagnostics, not routine journal INFO noise.
+    const wt = makeWatcher();
+    wt.swipe(3, [[0, -30], [0, -43]]);
+    eq(wt.info, [], 'ordinary navigation is not logged at info level');
+    ok(wt.debug.length === 3 && wt.debug[0].includes('phase=begin')
+        && wt.debug[1].includes('phase=end') && wt.debug[2].includes('no gesture'),
+    'ordinary navigation details are available at debug level');
+    wt.watcher.disable();
+}
+{
+    const wt = makeWatcher({bindings: {'gesture-swipe4-up': 'overview'}});
+    wt.swipe(4, [[0, -60]]);
+    eq(wt.info, ['completed swipe4-up -> overview'],
+        'a completed gesture emits one info line');
+    ok(wt.debug.length === 2, 'completed gesture begin and end are debug only');
+    wt.watcher.disable();
+}
 {
     const wt = makeWatcher();
     ok(wt.stage.handlers.length === 1 && wt.stage.disconnects === 0,

@@ -126,13 +126,14 @@ export function shellActions(main, meta, settings) {
  * tests can run the watcher without the shell's typelib path.
  */
 export class GestureWatcher {
-    constructor({settings, stage, actions, clutter, tracker, log = null}) {
+    constructor({settings, stage, actions, clutter, tracker, log = null, debug = null}) {
         this._settings = settings;
         this._stage = stage;
         this._actions = actions;
         this._clutter = clutter;
         this._tracker = tracker ?? new GestureTracker();
         this._log = log ?? (msg => console.log(`[tuf-gesture] ${msg}`));
+        this._debug = debug ?? (msg => console.debug(`[tuf-gesture] ${msg}`));
         this._handler = 0;
     }
 
@@ -177,14 +178,14 @@ export class GestureWatcher {
             ? this._tracker.pinch(phase, fingers, dx, dy)
             : this._tracker.swipe(phase, fingers, dx, dy);
         if (phase === PHASE_BEGIN || phase === PHASE_END)
-            this._log(`swipe fingers=${fingers} phase=${phase === PHASE_BEGIN ? 'begin' : 'end'}`);
+            this._debug(`swipe fingers=${fingers} phase=${phase === PHASE_BEGIN ? 'begin' : 'end'}`);
         if (gesture) {
             const ran = this._fire(gesture);
             this._log(`completed ${gesture} -> ${ran ?? 'no action bound'}`);
         } else if (phase === PHASE_END) {
-            this._log(`no gesture: dx=${before.dx} dy=${before.dy} ` +
-                      `(unaccelerated ${udx.toFixed(1)}/${udy.toFixed(1)}; ` +
-                      `needs ${SWIPE_DISTANCE}px on one axis, ${DOMINANCE}x the other)`);
+            this._debug(`no gesture: dx=${before.dx} dy=${before.dy} ` +
+                        `(unaccelerated ${udx.toFixed(1)}/${udy.toFixed(1)}; ` +
+                        `needs ${SWIPE_DISTANCE}px on one axis, ${DOMINANCE}x the other)`);
         }
         return this._clutter.EVENT_PROPAGATE;
     }

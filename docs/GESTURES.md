@@ -50,9 +50,9 @@ thresholds are fixed constants, not settings: a swipe must travel 50 logical px 
 dominant axis and carry 1.4× the other axis, a pinch must change its cumulative scale from 1.0 by 0.25
 (`gesture_logic.js`, `SWIPE_DISTANCE`, `DOMINANCE`, `PINCH_SCALE`; 50/1.4 was measured
 against the FX608JHR's touchpad, where a natural three-finger swipe accumulates ~73 px).
-Each gesture start, completion and non-gesture is logged to the journal under
-`[tuf-gesture]` (`journalctl -b 0 | grep tuf-gesture`), so a binding that does not fire
-says why.
+Completed gestures are logged once at the normal journal level under `[tuf-gesture]`.
+Gesture starts, ends and rejected movements are emitted only at debug level; enable
+GNOME Shell debug logging when diagnosing a binding (`journalctl -b 0 | grep tuf-gesture`).
 
 ## How it works
 
