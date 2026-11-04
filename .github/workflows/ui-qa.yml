@@ -1,0 +1,37 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) Hamza Gouda
+name: Full UI QA
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 4 * * 1'
+permissions:
+  contents: read
+concurrency:
+  group: full-ui-qa
+  cancel-in-progress: false
+jobs:
+  matrix:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install headless UI test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends mutter dbus-x11 python3-gi python3-gi-cairo python3-cairo python3-pil gir1.2-gtk-4.0 gir1.2-adw-1 gsettings-desktop-schemas libglib2.0-bin
+      - name: Start the memory-limited user scope manager
+        run: |
+          sudo loginctl enable-linger "$USER"
+          sudo systemctl start "user@$(id -u).service"
+          echo "XDG_RUNTIME_DIR=/run/user/$(id -u)" >> "$GITHUB_ENV"
+          echo "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus" >> "$GITHUB_ENV"
+      - name: Run every size, theme and stress mode with fake hardware
+        run: timeout -k 10 4800 python3 tests/ui/qa_lint.py --report tests/ui/qa_report.md
+      - name: Upload the complete QA report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-ui-qa-report
+          path: tests/ui/qa_report.md
+          if-no-files-found: error
