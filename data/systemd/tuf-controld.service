@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 [Unit]
 Description=TUF Control automation and keyboard effects
-Documentation=file://%h/.local/share/doc/tuf-control/AUTOMATION.md
+Documentation=https://github.com/hamza-gouda1/tuf-control/blob/main/docs/AUTOMATION.md
 PartOf=graphical-session.target
 After=graphical-session.target
 

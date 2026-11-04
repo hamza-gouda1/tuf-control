@@ -4,7 +4,7 @@
   "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
 <policyconfig>
   <vendor>Hamza Gouda</vendor>
-  <vendor_url>https://github.com/hamzagouda/tuf-control</vendor_url>
+  <vendor_url>https://github.com/hamza-gouda1/tuf-control</vendor_url>
   <action id="io.github.hamzagouda.tuf-control.write">
     <description>Change ASUS laptop hardware settings</description>
     <message>Authentication is required to change ASUS hardware settings (power, fans, battery, keyboard)</message>

@@ -10,3 +10,8 @@ build/
 dist/
 schemas/gschemas.compiled
 tests/ui/qa_report.md
+
+# Local tool configuration and credentials
+.aws/
+.agents/
+.codex/
