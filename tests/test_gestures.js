@@ -444,5 +444,41 @@ function makeWatcher({bindings = {}, enabled = true, overview = false,
     }
 }
 
+// Window cycling uses the same visible window types as GNOME's switcher.
+{
+    const originalGlobal = globalThis.global;
+    const types = {NORMAL: 0, DIALOG: 1, MODAL_DIALOG: 2, UTILITY: 3, DESKTOP: 4};
+    const win = (type, skip = false, minimized = false) => ({
+        skip_taskbar: skip, minimized, activated: 0,
+        get_window_type: () => type,
+        activate() { this.activated++; this.minimized = false; },
+    });
+    const normal = win(types.NORMAL), hidden = win(types.NORMAL, true);
+    const utility = win(types.UTILITY), desktop = win(types.DESKTOP);
+    const dialog = win(types.DIALOG, false, true), modal = win(types.MODAL_DIALOG);
+    const workspaces = [[normal, hidden, utility, desktop], [normal, dialog, modal]];
+    globalThis.global = {
+        workspace_manager: {
+            get_n_workspaces: () => workspaces.length,
+            get_workspace_by_index: i => ({list_windows: () => workspaces[i]}),
+        },
+        display: {focus_window: normal}, get_current_time: () => 1,
+    };
+    try {
+        const actions = G.shellActions({overview: {}}, {WindowType: types}, {});
+        actions['switch-windows']();
+        eq([dialog.activated, dialog.minimized, hidden.activated, utility.activated, desktop.activated],
+            [1, false, 0, 0, 0], 'cycling skips hidden and utility windows and keeps minimized dialogs');
+        globalThis.global.display.focus_window = dialog;
+        actions['switch-windows']();
+        eq(modal.activated, 1, 'cycling includes modal dialogs');
+        globalThis.global.display.focus_window = modal;
+        actions['switch-windows']();
+        eq(normal.activated, 1, 'sticky windows occur once and cycling wraps');
+    } finally {
+        globalThis.global = originalGlobal;
+    }
+}
+
 print(`${passed} passed, ${failed} failed`);
 System.exit(failed ? 1 : 0);

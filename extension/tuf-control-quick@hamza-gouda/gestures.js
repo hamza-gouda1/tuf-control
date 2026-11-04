@@ -44,9 +44,11 @@ export function shellActions(main, meta, settings) {
     // currently focused one, around the end of the list.
     const nextWindow = () => {
         const seen = new Set(), windows = [];
+        const switchable = new Set([meta.WindowType.NORMAL, meta.WindowType.DIALOG,
+            meta.WindowType.MODAL_DIALOG]);
         for (let i = 0; i < manager.get_n_workspaces(); i++) {
             for (const win of manager.get_workspace_by_index(i).list_windows()) {
-                if (!seen.has(win)) {
+                if (!seen.has(win) && !win.skip_taskbar && switchable.has(win.get_window_type())) {
                     seen.add(win);
                     windows.push(win);
                 }
