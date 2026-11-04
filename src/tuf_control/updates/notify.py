@@ -21,7 +21,11 @@ NOTIFY_ENV = "TUF_CONTROL_UPDATES_NOTIFY"  # "0" disables
 
 
 def decide(report: Report, state: dict | None) -> tuple[str | None, dict]:
-    """(notification text or None, new state). `state` is {"seen": [...], ...}."""
+    """(notification text or None, candidate state). `state` is {"seen": [...], ...}.
+
+    Persist the candidate only after delivery succeeds, or when the owner already
+    saw the report in the app (including intentionally suppressed notifications).
+    """
     state = dict(state or {})
     seen = list(state.get("seen") or [])
     have = set(seen)
@@ -84,6 +88,7 @@ class _ClickWatch:
         self.conn, self.nid = conn, nid
         self.stop = threading.Event()
         self.ready = threading.Event()
+        self._context = None
         self.thread = threading.Thread(target=self._run, name="tuf-update-notification",
                                        daemon=True)
         self.thread.start()
@@ -95,33 +100,45 @@ class _ClickWatch:
             return
         if name == "ActionInvoked" and len(value) > 1 and value[1] == "default":
             _launch_app()
-            self.stop.set()
+            self._request_stop()
         elif name == "NotificationClosed":
-            self.stop.set()
+            self._request_stop()
+
+    def _request_stop(self):
+        self.stop.set()
+        context = getattr(self, "_context", None)
+        if context is not None:
+            context.wakeup()
 
     def _run(self):
         from gi.repository import Gio, GLib
         context = GLib.MainContext.new()
+        self._context = context
         context.push_thread_default()
-        sub = None
+        sub = source = None
         try:
             sub = self.conn.signal_subscribe(
                 "org.freedesktop.Notifications", "org.freedesktop.Notifications", None,
                 "/org/freedesktop/Notifications", None, Gio.DBusSignalFlags.NONE,
                 self._signal)
-            self.ready.set()
             deadline = time.monotonic() + 24 * 3600
+            source = GLib.timeout_source_new_seconds(1)
+            source.set_callback(lambda *_: not self.stop.is_set() and time.monotonic() < deadline)
+            source.attach(context)
+            self.ready.set()
             while not self.stop.is_set() and time.monotonic() < deadline:
-                context.iteration(False)
-                self.stop.wait(0.05)
+                context.iteration(True)
         finally:
+            if source is not None:
+                source.destroy()
             if sub is not None:
                 self.conn.signal_unsubscribe(sub)
             context.pop_thread_default()
+            self._context = None
             self.ready.set()
 
     def close(self):
-        self.stop.set()
+        self._request_stop()
         if threading.current_thread() is not self.thread:
             self.thread.join(2.0)
 

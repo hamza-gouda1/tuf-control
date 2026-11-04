@@ -372,7 +372,7 @@ class SchedulerTests(FakeEnv):
         self.clock = [100_000.0]
         self.shown = []
         s = UpdateScheduler(clock=lambda: self.clock[0], runner=runner or self.runner,
-                            notifier=lambda t, b: self.shown.append(t),
+                            notifier=lambda t, b: self.shown.append(t) or 1,
                             metered=lambda: metered, first_delay_s=60)
         s.configure({"enabled": True, "interval_h": 6, "respect_metered": True,
                      "notify": True, **settings})

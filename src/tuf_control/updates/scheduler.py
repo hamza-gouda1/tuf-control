@@ -110,16 +110,23 @@ class UpdateScheduler:
                 _t, d["notify"] = notify_mod.decide(rep, d.get("notify"))
             update_cache(mark)
             return None
-        shown: dict = {}
-
-        def upd(d):
-            text, d["notify"] = notify_mod.decide(rep, d.get("notify"))
-            shown["text"] = text
         with self._lock:
-            update_cache(upd)
-            if shown.get("text"):
-                self.notifier(shown["text"], notify_mod.body_text(rep))
-        return shown.get("text")
+            text, _candidate = notify_mod.decide(rep, load_cache().get("notify"))
+            if text is None:
+                return None
+            try:
+                delivered = self.notifier(text, notify_mod.body_text(rep))
+            except Exception:
+                return None  # retry this set at the next check
+            if not delivered:
+                return None
+
+            def commit(d):
+                # Merge into the latest state: the GUI may have marked a different
+                # report seen while the notification was being delivered.
+                _text, d["notify"] = notify_mod.decide(rep, d.get("notify"))
+            update_cache(commit)
+        return text
 
     def _record_detected(self, rep: Report, old: Report | None) -> None:
         """Only installed-version changes prove an update happened elsewhere.
@@ -157,9 +164,12 @@ class UpdateScheduler:
                         "reboot": rep.reboot_required,
                         "summary": f"{len(items)} updated outside TUF Control", "items": items})
 
-    def _notify(self, summary: str, body: str) -> None:
+    def _notify(self, summary: str, body: str) -> int:
         # clicking the notification opens the app on the Updates page
-        self._notify_id = notify_mod.send(summary, body, self._notify_id, open_on_click=True)
+        nid = notify_mod.send(summary, body, self._notify_id, open_on_click=True)
+        if nid:
+            self._notify_id = nid
+        return nid
 
     def status(self, refresh: bool = False) -> dict:
         """For the daemon's status file; the cache is re-read only when asked (each tick)."""
