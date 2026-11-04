@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import http.client
 import ipaddress
 import os
 import re
@@ -23,12 +24,12 @@ import selectors
 import signal
 import shutil
 import socket
+import ssl
 import subprocess
 import tempfile
 import threading
 import time
 import urllib.parse
-import urllib.request
 from collections.abc import Callable
 from pathlib import Path
 
@@ -317,44 +318,83 @@ def firmware_url_ok(url: str) -> bool:
             and not u.username and not u.password and u.port is None and not u.fragment)
 
 
-class _NoRedirects(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        raise ActionError("the LVFS tried to redirect the download; refused")
+class _PinnedHTTPSConnection(http.client.HTTPSConnection):
+    """Connect only to vetted sockaddr values, while verifying the original hostname.
+
+    http.client does not consult proxy environment variables. Bypassing its ordinary
+    connect() also avoids a second DNS lookup between validation and the TLS handshake.
+    """
+
+    def __init__(self, host: str, addresses: list, *, timeout: float = 60) -> None:
+        super().__init__(host, timeout=timeout, context=ssl.create_default_context())
+        self.addresses = addresses
+
+    def connect(self) -> None:
+        last_error = None
+        for family, socktype, proto, _canonname, address in self.addresses:
+            raw = None
+            try:
+                raw = socket.socket(family, socktype, proto)
+                raw.settimeout(self.timeout)
+                raw.connect(address)
+                self.sock = self._context.wrap_socket(raw, server_hostname=self.host)
+                return
+            except OSError as exc:
+                if raw is not None:
+                    raw.close()
+                last_error = exc
+        if last_error is not None:
+            raise last_error
+        raise ActionError("the LVFS hostname has no usable public address")
 
 
 def _fetch_lvfs(url: str, watch: object | None = None) -> bytes:
     """Download an LVFS file and return it. The URL is validated here, next to the request:
     https, only the two LVFS hostnames, no credentials, port or fragment, the resolved
-    address must be public (no loopback, private or link-local range), and redirects are
-    refused. Integrity is checked by the caller against the signed metadata checksum."""
+    addresses must be public (no loopback, private or link-local range). The TLS socket
+    connects directly to a vetted address with hostname/SNI verification; proxies and
+    redirects are refused. Integrity is checked by the caller against the signed
+    metadata checksum."""
     u = urllib.parse.urlparse(url)
     if (u.scheme != "https" or (u.hostname or "") not in FIRMWARE_HOSTS or u.username
             or u.password or u.port is not None or u.fragment):
         raise ActionError("not a valid LVFS download location")
-    for _fam, _ty, _pr, _ca, sockaddr in socket.getaddrinfo(u.hostname, 443,
-                                                            proto=socket.IPPROTO_TCP):
-        if not ipaddress.ip_address(sockaddr[0]).is_global:
+    addresses = socket.getaddrinfo(u.hostname, 443, type=socket.SOCK_STREAM,
+                                   proto=socket.IPPROTO_TCP)
+    if not addresses:
+        raise ActionError("the LVFS hostname has no usable public address")
+    for family, _socktype, _proto, _canonname, address in addresses:
+        if family not in (socket.AF_INET, socket.AF_INET6) or not ipaddress.ip_address(
+                address[0]).is_global:
             raise ActionError("the LVFS hostname resolves to a non-public address")
     t0 = time.monotonic()
-    opener = urllib.request.build_opener(_NoRedirects)
-    req = urllib.request.Request(url, headers={"User-Agent": "tuf-control"})
+    conn = _PinnedHTTPSConnection(u.hostname, addresses, timeout=60)
+    target = urllib.parse.urlunparse(("", "", u.path or "/", u.params, u.query, ""))
     buf = bytearray()
-    with opener.open(req, timeout=60) as resp:
-        total = int(resp.headers.get("Content-Length") or 0)
-        if total > MAX_FIRMWARE_BYTES:
-            raise ActionError("Firmware cabinet exceeds the 256 MiB download limit")
-        while True:
-            chunk = resp.read(1 << 16)
-            if not chunk:
-                break
-            if len(buf) + len(chunk) > MAX_FIRMWARE_BYTES:
+    try:
+        conn.request("GET", target, headers={"User-Agent": "tuf-control"})
+        with conn.getresponse() as resp:
+            if 300 <= resp.status < 400:
+                raise ActionError("the LVFS tried to redirect the download; refused")
+            if resp.status != 200:
+                raise ActionError(f"LVFS download failed (HTTP {resp.status})")
+            total = int(resp.headers.get("Content-Length") or 0)
+            if total > MAX_FIRMWARE_BYTES:
                 raise ActionError("Firmware cabinet exceeds the 256 MiB download limit")
-            buf += chunk
-            if watch and total:
-                elapsed = max(0.001, time.monotonic() - t0)
-                watch.phase("Downloading", percent=100.0 * len(buf) / total,
-                            speed=len(buf) / elapsed,
-                            remaining_s=(total - len(buf)) * elapsed / len(buf))
+            while True:
+                chunk = resp.read(1 << 16)
+                if not chunk:
+                    break
+                if len(buf) + len(chunk) > MAX_FIRMWARE_BYTES:
+                    raise ActionError("Firmware cabinet exceeds the 256 MiB download limit")
+                buf += chunk
+                if watch and total:
+                    elapsed = max(0.001, time.monotonic() - t0)
+                    watch.phase("Downloading", percent=100.0 * len(buf) / total,
+                                speed=len(buf) / elapsed,
+                                remaining_s=(total - len(buf)) * elapsed / len(buf))
+    finally:
+        conn.close()
     return bytes(buf)
 
 
