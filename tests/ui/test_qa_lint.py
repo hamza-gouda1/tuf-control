@@ -182,5 +182,21 @@ class HeadlessRun(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stdout[-2000:] + proc.stderr[-1000:])
 
 
+class SnapshotTargetTests(unittest.TestCase):
+    def test_native_content_is_captured_without_scaling_or_offset_changes(self):
+        from types import SimpleNamespace
+        from qa_lint import snapshot_widget
+        content = SimpleNamespace(get_width=lambda: 360, get_height=lambda: 640)
+        window = SimpleNamespace(get_width=lambda: 360, get_height=lambda: 640,
+                                 get_content=lambda: content)
+        self.assertIs(snapshot_widget(window), content)
+        partial = SimpleNamespace(get_width=lambda: 340, get_height=lambda: 600)
+        window.get_content = lambda: partial
+        self.assertIs(snapshot_widget(window), window)
+        window.get_content = lambda: None
+        self.assertIs(snapshot_widget(window), window)
+        self.assertIs(snapshot_widget(content), content)
+
+
 if __name__ == "__main__":
     unittest.main()

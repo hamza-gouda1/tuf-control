@@ -67,6 +67,21 @@ MODE_SIZES = ("1280x720", "640x700")
 THEME_PAIR_PAGES = ("dashboard", "performance", "fans", "battery", "processes")  # not the keyboard: live colour
 
 
+def snapshot_widget(widget):
+    """Capture the client content when it fills a native window exactly.
+
+    GtkWindow's paintable can briefly expose only its cached background after a
+    surface invalidation, while its mapped client content has a complete render
+    node. Keep native coordinates by using content only when bounds match.
+    """
+    getter = getattr(widget, "get_content", None)
+    content = getter() if callable(getter) else None
+    if content is not None and (content.get_width(), content.get_height()) == (
+            widget.get_width(), widget.get_height()):
+        return content
+    return widget
+
+
 def combo_name(variant: str, size: str, mode: str = "") -> str:
     return f"{variant}@{size}" + (f"+{mode}" if mode else "")
 
@@ -353,7 +368,7 @@ def child(job: dict) -> int:
         snap = Gtk.Snapshot()
         bg = widget.get_style_context().lookup_color("window_bg_color")[1]
         snap.append_color(bg, Graphene.Rect().init(0, 0, ww, hh))
-        Gtk.WidgetPaintable(widget=widget).snapshot(snap, ww, hh)
+        Gtk.WidgetPaintable(widget=snapshot_widget(widget)).snapshot(snap, ww, hh)
         renderer = Gsk.CairoRenderer.new()
         renderer.realize_for_display(widget.get_display())
         try:
