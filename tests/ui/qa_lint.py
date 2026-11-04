@@ -68,17 +68,18 @@ THEME_PAIR_PAGES = ("dashboard", "performance", "fans", "battery", "processes") 
 
 
 def snapshot_widget(widget):
-    """Capture the client content when it fills a native window exactly.
+    """Capture a matching window child, including its dialog host and overlays.
 
     GtkWindow's paintable can briefly expose only its cached background after a
-    surface invalidation, while its mapped client content has a complete render
-    node. Keep native coordinates by using content only when bounds match.
+    surface invalidation. The direct child has the complete render node; unlike
+    AdwWindow.get_content(), it also contains presented Adw.Dialog widgets. Keep
+    native coordinates by selecting it only when both dimensions match.
     """
-    getter = getattr(widget, "get_content", None)
-    content = getter() if callable(getter) else None
-    if content is not None and (content.get_width(), content.get_height()) == (
+    getter = getattr(widget, "get_child", None)
+    child = getter() if callable(getter) else None
+    if child is not None and (child.get_width(), child.get_height()) == (
             widget.get_width(), widget.get_height()):
-        return content
+        return child
     return widget
 
 

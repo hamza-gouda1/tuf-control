@@ -183,17 +183,19 @@ class HeadlessRun(unittest.TestCase):
 
 
 class SnapshotTargetTests(unittest.TestCase):
-    def test_native_content_is_captured_without_scaling_or_offset_changes(self):
+    def test_native_child_includes_dialog_overlay_without_coordinate_changes(self):
         from types import SimpleNamespace
         from qa_lint import snapshot_widget
         content = SimpleNamespace(get_width=lambda: 360, get_height=lambda: 640)
+        dialog_host = SimpleNamespace(get_width=lambda: 360, get_height=lambda: 640)
         window = SimpleNamespace(get_width=lambda: 360, get_height=lambda: 640,
-                                 get_content=lambda: content)
-        self.assertIs(snapshot_widget(window), content)
+                                 get_content=lambda: content, get_child=lambda: dialog_host)
+        # Application content excludes Adw.Dialog; capture its enclosing host.
+        self.assertIs(snapshot_widget(window), dialog_host)
         partial = SimpleNamespace(get_width=lambda: 340, get_height=lambda: 600)
-        window.get_content = lambda: partial
+        window.get_child = lambda: partial
         self.assertIs(snapshot_widget(window), window)
-        window.get_content = lambda: None
+        window.get_child = lambda: None
         self.assertIs(snapshot_widget(window), window)
         self.assertIs(snapshot_widget(content), content)
 
