@@ -313,11 +313,13 @@ class NvidiaGpu:
                              "to recover it. GPU monitoring is paused.")
             info["dgpu"] = out
             return
-        if rs is not None and rs != "active":
+        if rs != "active":
             self.release()
             self._idle = 0
             self.procs = {}
-            out["state"] = "sleeping"
+            out["state"] = "unavailable" if rs is None else "sleeping"
+            if rs is None:
+                out["reason"] = "Runtime power-management state is unreadable; monitoring is paused."
             info["dgpu"] = out
             return
         if self.backend is None:

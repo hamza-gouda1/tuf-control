@@ -174,6 +174,27 @@ class GpuTests(unittest.TestCase):
             self.assertEqual(info["dgpu"]["power_state"], "D3cold")
             self.assertFalse(any(k.startswith("dgpu.") for k in vals))
 
+    def test_unreadable_runtime_state_never_queries_any_backend(self):
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as d:
+            root = build_fake_tree(Path(d) / "root")
+            (root / "sys/bus/pci/devices/0000:01:00.0/power/runtime_status").unlink()
+            for backend in ("nvml", "nvidia-smi", "fake"):
+                with self.subTest(backend=backend):
+                    gpu = NvidiaGpu(str(root), fake=True)
+                    gpu.backend = backend
+                    gpu.release = Mock()
+                    queries = [Mock(side_effect=AssertionError("GPU must not be queried"))
+                               for _ in range(3)]
+                    gpu._query_nvml, gpu._query_smi, gpu._query_fake = queries
+                    values, info = {}, {}
+                    gpu.sample(1.0, values, info)
+                    self.assertEqual(info["dgpu"]["state"], "unavailable")
+                    self.assertIn("unreadable", info["dgpu"]["reason"])
+                    self.assertEqual(values, {})
+                    for query in queries:
+                        query.assert_not_called()
+
     def test_idle_awake_dgpu_is_released(self):
         with tempfile.TemporaryDirectory() as d:
             root = build_fake_tree(Path(d) / "root")
