@@ -13,6 +13,7 @@ import GObject from 'gi://GObject';
 import Gio from 'gi://Gio';
 import Clutter from 'gi://Clutter';
 import Meta from 'gi://Meta';
+import St from 'gi://St';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
@@ -256,7 +257,16 @@ export default class TufControlQuickExtension extends Extension {
         this._gestures = new GestureWatcher({
             settings,
             stage: global.stage,
-            actions: shellActions(Main, Meta, settings),
+            actions: shellActions(Main, Meta, settings, {
+                fade: (actor, opacity, done) => {
+                    if (!St.Settings.get().enable_animations) {
+                        done();
+                        return;
+                    }
+                    actor.ease({opacity, duration: 160,
+                        mode: Clutter.AnimationMode.EASE_OUT_CUBIC, onComplete: done});
+                },
+            }),
             clutter: Clutter,
         });
         this._gestures.enable();

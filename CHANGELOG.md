@@ -4,6 +4,10 @@ All notable changes to this project. Format follows Keep a Changelog; versions f
 
 ## [Unreleased]
 
+- Smooth the gesture desktop toggle with a coordinated 160 ms fade, suppress duplicate
+  minimize effects, and wait for overview closure before restoring windows. Preserve
+  pre-minimized windows, original opacity and reduced-motion behavior.
+
 ## [0.1.1] - 2026-11-04
 
 ### Fixed

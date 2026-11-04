@@ -7,6 +7,7 @@ import System from 'system';
 import GLib from 'gi://GLib';
 import * as L from '../extension/tuf-control-quick@hamza-gouda/gesture_logic.js';
 import * as G from '../extension/tuf-control-quick@hamza-gouda/gestures.js';
+import {DesktopToggle} from '../extension/tuf-control-quick@hamza-gouda/desktop.js';
 
 let failed = 0, passed = 0;
 function ok(cond, msg) {
@@ -495,6 +496,87 @@ function makeWatcher({bindings = {}, enabled = true, overview = false,
         globalThis.global.display.focus_window = modal;
         actions['switch-windows']();
         eq(normal.activated, 1, 'sticky windows occur once and cycling wraps');
+    } finally {
+        globalThis.global = originalGlobal;
+    }
+}
+
+// Interrupted fades retain ownership and original opacity without extra actors.
+{
+    const make = minimized => ({minimized, opacity: 220, handlers: new Map(), serial: 0,
+        connect(_name, cb) { this.handlers.set(++this.serial, cb); return this.serial; },
+        disconnect(id) { this.handlers.delete(id); }});
+    const one = make(false), two = make(false), pre = make(true);
+    const pending = [];
+    let focused = null;
+    const desktop = new DesktopToggle({
+        windows: () => [one, two, pre], eligible: () => true, focus: () => one,
+        activate: w => { focused = w; }, getOpacity: w => w.opacity,
+        opacity: (w, value) => { w.opacity = value; }, cancel: () => {},
+        fade: (w, opacity, done) => {
+            const complete = () => { w.opacity = opacity; done(); };
+            complete.done = done;
+            pending.push(complete);
+        },
+        minimize: w => { w.minimized = true; }, unminimize: w => { w.minimized = false; },
+    });
+    desktop.toggle();
+    ok(desktop.canReturn && !one.minimized, 'hide owns windows while fade is pending');
+    const interrupted = pending.splice(0);
+    desktop.toggle();
+    // Real Clutter cancels transitions. Simulate a late completion without
+    // applying its already-cancelled visual value.
+    const later = pending.splice(0);
+    later.forEach(fn => fn());
+    interrupted.forEach(fn => fn.done());
+    eq([one.minimized, two.minimized, pre.minimized, one.opacity, focused === one],
+        [false, false, true, 220, true], 'restore preserves pre-minimized windows, opacity and focus');
+    desktop.toggle();
+    pending.splice(0).forEach(fn => fn());
+    eq([one.minimized, two.minimized], [true, true], 'fade completes before minimization');
+    desktop.toggle();
+    desktop.destroy();
+    eq([one.minimized, two.minimized, one.opacity, one.handlers.size, two.handlers.size],
+        [false, false, 220, 0, 0], 'disable cancels returning fades and restores exact actor state');
+    ok(interrupted.length === 2, 'one transition per owned window, no stagger queue');
+}
+{
+    const wt = makeWatcher({bindings: {'gesture-swipe3-down': 'show-desktop'}, overview: true});
+    const handle = wt.stage.handlers[0];
+    handle(null, ev(SWIPE, PHASE_BEGIN, 3, 0, 0));
+    wt.watcher._actions.overviewVisible = () => false;
+    handle(null, ev(SWIPE, PHASE_UPDATE, 3, 0, 90));
+    handle(null, ev(SWIPE, PHASE_END, 3, 0, 0));
+    eq(wt.fired, [], 'overview closing before END must not also hide windows');
+    wt.watcher.disable();
+}
+{
+    const originalGlobal = globalThis.global;
+    const handlers = new Map();
+    const overview = {visible: true, serial: 0,
+        connect(_name, cb) { handlers.set(++this.serial, cb); return this.serial; },
+        disconnect(id) { handlers.delete(id); }, hide() {},
+    };
+    const win = {minimized: false, skip_taskbar: false, can_minimize: () => true,
+        is_on_all_workspaces: () => false, connect: () => 1, disconnect() {}, activate() {},
+        minimize() { this.minimized = true; }, unminimize() { this.minimized = false; }};
+    globalThis.global = {display: {focus_window: win}, get_current_time: () => 1,
+        workspace_manager: {get_active_workspace: () => ({list_windows: () => [win]})}};
+    try {
+        const actions = G.shellActions({overview}, {}, {});
+        actions['show-desktop']();
+        ok(!win.minimized && handlers.size === 1, 'wait for overview hidden before desktop fade');
+        overview.visible = false;
+        [...handlers.values()][0]();
+        ok(win.minimized && handlers.size === 0, 'overview completion dispatches once and disconnects');
+        actions['show-desktop']();
+        overview.visible = true;
+        actions['show-desktop']();
+        const stale = [...handlers.values()][0];
+        actions.destroy();
+        ok(!win.minimized && handlers.size === 0, 'disable cancels deferred overview action');
+        // Disconnecting the signal prevents this callback from being dispatched.
+        ok(typeof stale === 'function', 'deferred callback exists only while connected');
     } finally {
         globalThis.global = originalGlobal;
     }

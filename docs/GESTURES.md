@@ -41,7 +41,7 @@ workspace and restores exactly those windows on repeat. Previously minimised win
 sticky windows stay as they were. Disabling the extension restores the surviving windows.
 This optional gesture integration defaults off and remains experimental: synthetic events
 prove recognition and lifecycle logic, while real touchpad delivery and competition with
-GNOME's swipe tracker require a live-session check. For the polished fade and a reliable
+GNOME's swipe tracker require a live-session check. For the keyboard shortcut and a reliable
 keybinding fallback, use Focus Keys from bordeaux-gnome.
 
 Every binding accepts one of: `none`, `overview`, `app-grid`, `show-desktop`,
@@ -64,8 +64,15 @@ accumulates swipe motion and keeps the latest pinch scale, deciding only at `END
 
 Every event returns `EVENT_PROPAGATE`. This avoids consuming the shell's own
 3-finger events, but cannot guarantee ordering against the overview tracker in a live session. The one overlap is deliberate: a 3-finger swipe
-down is bound only while the desktop is showing, because with the overview up the shell
-itself uses that gesture to close it, and the watcher skips its own action there.
+down checks whether the overview was open at gesture start, so closing it cannot
+also minimize the windows after the overview disappears. If our desktop toggle is
+returning windows, it waits for the overview's `hidden` signal first.
+
+Show desktop uses a synchronized 160 ms ease-out opacity transition on the existing
+window actors. Minimization and restoration skip their extra dock animation. There
+are no cloned windows, snapshot textures, stagger queues or permanent frame callbacks.
+A repeated swipe reverses the pending toggle safely; disabling the extension restores
+owned windows and their original opacity. GNOME's reduced-motion setting is respected.
 
 A completed gesture runs the action bound to it at that moment, read from GSettings as the
 gesture finishes. Changing a binding in the page therefore applies to the next gesture with

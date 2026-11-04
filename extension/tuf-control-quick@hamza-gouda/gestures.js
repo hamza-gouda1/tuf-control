@@ -12,6 +12,8 @@
 
 import Gio from 'gi://Gio';
 
+import {DesktopToggle} from './desktop.js';
+
 import {GestureTracker, PHASE_BEGIN, PHASE_END, SWIPE_DISTANCE, DOMINANCE,
         resolveAction} from './gesture_logic.js';
 
@@ -22,7 +24,7 @@ import {GestureTracker, PHASE_BEGIN, PHASE_END, SWIPE_DISTANCE, DOMINANCE,
  * `overviewVisible` is not an action but the check the watcher makes first for
  * 3-finger down, which the shell handles itself while the overview is up.
  */
-export function shellActions(main, meta, settings) {
+export function shellActions(main, meta, settings, motion = null) {
     const openApp = id => {
         if (!id)
             return;
@@ -64,51 +66,55 @@ export function shellActions(main, meta, settings) {
         .get_neighbor(step > 0 ? meta.MotionDirection.DOWN : meta.MotionDirection.UP)
         .activate(global.get_current_time());
 
-    // Only change visible, minimizable windows on the active workspace. Keep
-    // the exact set so a second invocation restores all of them, never windows
-    // the user had already minimized. Forget destroyed windows immediately.
-    let hidden = new Map();
-    let lastFocused = null;
-    const restoreDesktop = () => {
-        const windows = [...hidden.keys()];
-        for (const [win, id] of hidden) {
-            win.disconnect(id);
-            if (win.minimized)
-                win.unminimize();
+    const actor = w => w.get_compositor_private?.();
+    const desktop = new DesktopToggle({
+        windows: () => manager.get_active_workspace().list_windows(),
+        eligible: w => !w.skip_taskbar && w.can_minimize() && !w.is_on_all_workspaces()
+            && (!w.get_compositor_private || !!actor(w)),
+        focus: () => global.display.focus_window,
+        activate: w => w.activate(global.get_current_time()),
+        getOpacity: w => actor(w)?.opacity ?? 255,
+        opacity: (w, value) => { if (actor(w)) actor(w).opacity = value; },
+        cancel: w => actor(w)?.remove_transition('opacity'),
+        fade: (w, value, done) => {
+            if (motion && actor(w))
+                motion.fade(actor(w), value, done);
+            else
+                done();
+        },
+        minimize: w => { main.wm?.skipNextEffect(actor(w)); w.minimize(); },
+        unminimize: w => { main.wm?.skipNextEffect(actor(w)); w.unminimize(); },
+    });
+    let pending = 0;
+    const cancelPending = () => {
+        if (pending)
+            main.overview.disconnect(pending);
+        pending = 0;
+    };
+    const toggleDesktop = () => {
+        if (pending) {
+            cancelPending();
+            return;
         }
-        hidden.clear();
-        if (windows.includes(lastFocused))
-            lastFocused.activate(global.get_current_time());
-        lastFocused = null;
+        if (main.overview.visible || main.overview.animationInProgress) {
+            pending = main.overview.connect('hidden', () => {
+                cancelPending();
+                desktop.toggle();
+            });
+            main.overview.hide();
+        } else {
+            desktop.toggle();
+        }
     };
 
     return {
         overviewVisible: () => main.overview.visible,
         // the watcher consults this before returning the last app in the overview
-        showDesktopCanReturn: () => hidden.size > 0,
-        destroy: restoreDesktop,
+        showDesktopCanReturn: () => desktop.canReturn,
+        destroy: () => { cancelPending(); desktop.destroy(); },
         overview: () => main.overview.toggle(),
-        // The way the dash's show-apps button opens the app grid.
         'app-grid': () => main.overview.showApps(),
-        'show-desktop': () => {
-            if (hidden.size) {
-                restoreDesktop();
-                return;
-            }
-            lastFocused = global.display.focus_window;
-            for (const win of manager.get_active_workspace().list_windows()) {
-                if (win.minimized || win.skip_taskbar || !win.can_minimize()
-                        || win.is_on_all_workspaces())
-                    continue;
-                const id = win.connect('unmanaged', () => {
-                    hidden.delete(win);
-                    if (lastFocused === win)
-                        lastFocused = null;
-                });
-                hidden.set(win, id);
-                win.minimize();
-            }
-        },
+        'show-desktop': toggleDesktop,
         'switch-windows': nextWindow,
         'prev-workspace': () => switchWorkspace(-1),
         'next-workspace': () => switchWorkspace(1),
@@ -135,6 +141,7 @@ export class GestureWatcher {
         this._log = log ?? (msg => console.log(`[tuf-gesture] ${msg}`));
         this._debug = debug ?? (msg => console.debug(`[tuf-gesture] ${msg}`));
         this._handler = 0;
+        this._startedOverview = false;
     }
 
     enable() {
@@ -149,6 +156,7 @@ export class GestureWatcher {
             return;
         this._stage.disconnect(this._handler);
         this._handler = 0;
+        this._startedOverview = false;
         this._tracker.reset(); // forget a half-finished gesture
         this._actions.destroy?.();
     }
@@ -171,6 +179,8 @@ export class GestureWatcher {
         // Mutter 14 names it finger_count (get_touchpad_gesture_fingers does not exist)
         const fingers = event.get_touchpad_gesture_finger_count();
         const phase = event.get_gesture_phase();
+        if (phase === PHASE_BEGIN)
+            this._startedOverview = this._actions.overviewVisible();
         // snapshot before the END call: the tracker resets on END, so after it the
         // accumulated travel is gone (that blind spot cost us one diagnostic round)
         const before = phase === PHASE_END ? this._tracker.stats() : null;
@@ -195,7 +205,7 @@ export class GestureWatcher {
         // itself, and when "Show desktop" was the thing that minimised the app,
         // the same swipe brings it back — down reads as a toggle from either
         // side. Any other binding stays out of the shell's way.
-        if (gesture === 'swipe3-down' && this._actions.overviewVisible()) {
+        if (gesture === 'swipe3-down' && (this._startedOverview || this._actions.overviewVisible())) {
             if (resolveAction(this._settings, gesture) === 'show-desktop'
                     && this._actions.showDesktopCanReturn())
                 this._actions['show-desktop']();
