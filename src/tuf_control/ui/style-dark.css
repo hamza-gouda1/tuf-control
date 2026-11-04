@@ -40,7 +40,6 @@
 .dim-label, .subtitle, row.property > box.header > box.title > .title, .stat-unit, .mini-label, .about-version { opacity: 0.55; }
 .stat-caption { opacity: 0.64; }
 .stat-sub { opacity: 0.66; }
-.section-caption, .monitor-note, .sidebar-mode { opacity: 0.62; }
-.sidebar-section { opacity: 0.5; }
+.section-caption, .monitor-note { opacity: 0.62; }
 .profile-card .card-sub { opacity: 0.68; }
 entry > text > placeholder, searchentry > text > placeholder { opacity: 0.55; }
