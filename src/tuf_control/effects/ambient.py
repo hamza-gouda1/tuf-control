@@ -14,11 +14,14 @@ bus and a fake frame source; the real dialog has not been exercised by the test 
 """
 from __future__ import annotations
 
+import os
 import secrets
+import stat
 import threading
 from collections.abc import Callable
 from pathlib import Path
 
+from ..automation.config import _atomic_write
 from .colour import RGB, boost_saturation, clamp8
 
 PORTAL = "org.freedesktop.portal.Desktop"
@@ -28,6 +31,7 @@ REQUEST = "org.freedesktop.portal.Request"
 SOURCE_MONITOR = 1
 CURSOR_HIDDEN = 1
 PERSIST_UNTIL_REVOKED = 2
+MAX_TOKEN_BYTES = 64 * 1024
 
 
 class PortalError(Exception):
@@ -64,15 +68,20 @@ class TokenStore:
 
     def get(self) -> str | None:
         try:
-            return self.path.read_text().strip() or None
-        except OSError:
+            fd = os.open(self.path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
+            with os.fdopen(fd, "rb") as stream:
+                if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+                    return None
+                data = stream.read(MAX_TOKEN_BYTES + 1)
+            if len(data) > MAX_TOKEN_BYTES:
+                return None
+            return data.decode("utf-8").strip() or None
+        except (OSError, UnicodeError):
             return None
 
     def set(self, token: str | None) -> None:
         if token:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            self.path.write_text(token + "\n")
-            self.path.chmod(0o600)
+            _atomic_write(self.path, token + "\n")
         else:
             try:
                 self.path.unlink()

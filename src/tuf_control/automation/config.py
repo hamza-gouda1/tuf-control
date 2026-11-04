@@ -14,6 +14,7 @@ import copy
 import fcntl
 import json
 import os
+import stat
 import tempfile
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -151,11 +152,45 @@ def load_config(path: Path | None = None) -> dict:
     return validate_config(data)
 
 
+def prepare_private_parent(path: Path) -> None:
+    """Create private app directories without chmod-ing an existing custom parent.
+
+    Only standard XDG tuf-control directories are owned by the app. A caller may
+    place an individual config or state file in a shared directory, including /tmp.
+    """
+    directory = path.parent
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    config_base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
+    runtime_base = os.environ.get("XDG_RUNTIME_DIR") or f"{tempfile.gettempdir()}/tuf-control-{os.getuid()}"
+    app_directories = {Path(config_base) / "tuf-control", Path(runtime_base) / "tuf-control"}
+    fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        if directory in app_directories:
+            os.fchmod(fd, 0o700)
+    finally:
+        os.close(fd)
+
+
+def open_private_lock(path: Path) -> int:
+    """Return a 0600 regular-file lock fd without following the final symlink."""
+    prepare_private_parent(path)
+    fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK, 0o600)
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise OSError("lock must be a regular file")
+        os.fchmod(fd, 0o600)
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd
+
+
 def _atomic_write(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
+    prepare_private_parent(path)
     fd, tmp = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     try:
         with os.fdopen(fd, "w") as f:
+            os.fchmod(f.fileno(), 0o600)
             f.write(text)
             f.flush()
             os.fsync(f.fileno())
@@ -178,13 +213,15 @@ def write_json_atomic(path: Path, data) -> None:
 
 @contextlib.contextmanager
 def _locked(path: Path) -> Iterator[None]:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path.with_name(path.name + ".lock"), "a") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+    fd = open_private_lock(path.with_name(path.name + ".lock"))
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
         try:
             yield
         finally:
-            fcntl.flock(lock, fcntl.LOCK_UN)
+            fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
 
 
 def save_config(data: dict, path: Path | None = None) -> dict:

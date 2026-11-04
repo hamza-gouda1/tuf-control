@@ -37,6 +37,7 @@ from .automation.config import (
     ConfigWatcher,
     config_path,
     load_config,
+    open_private_lock,
     runtime_dir,
     write_json_atomic,
 )
@@ -200,8 +201,7 @@ def watch_upower(wake: threading.Event) -> None:  # pragma: no cover - needs the
 
 
 def acquire_lock(path: Path):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    f = open(path, "a+")
+    f = os.fdopen(open_private_lock(path), "a+")
     try:
         fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
