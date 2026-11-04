@@ -339,11 +339,11 @@ def child(job: dict) -> int:
         from tuf_control.telemetry.gpu_nvidia import NvidiaGpu
         original_sample = NvidiaGpu.sample
 
-        def lost_sample(gpu, now):
+        def lost_sample(gpu, now, vals, info):
             gpu.backend = None  # also exercise failed NVML initialization.
             (root / "sys/bus/pci/devices/0000:01:00.0/power/runtime_status").write_text(
                 "error\n")
-            return original_sample(gpu, now)
+            return original_sample(gpu, now, vals, info)
 
         NvidiaGpu.sample = lost_sample
     if not real:
