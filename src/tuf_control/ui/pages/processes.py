@@ -43,6 +43,16 @@ SORT_KEYS = {
 }
 
 
+def _attach_header_tooltip(header) -> None:
+    """Attach the explanatory column text to its visible title label."""
+    title = header.get_text().split("\n")[0]
+    for _key, column_title, _chars, tip in COLUMNS:
+        if column_title == title:
+            if tip:
+                header.set_tooltip_text(tip)
+            return
+
+
 SYSTEM_KEY = "__system__"
 
 
@@ -460,7 +470,9 @@ class ProcessesPage(MonitorPage):
             w = stack.pop()
             if isinstance(w, Gtk.Label) and any(
                     a.__gtype__.name == "GtkColumnViewTitle" for a in _ancestors(w)):
-                if w.get_text().split("\n")[0] != "Name":
+                title = w.get_text().split("\n")[0]
+                _attach_header_tooltip(w)
+                if title != "Name":
                     w.set_xalign(1.0)
                     w.set_justify(Gtk.Justification.RIGHT)
                     w.set_hexpand(True)
