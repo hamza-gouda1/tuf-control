@@ -76,6 +76,16 @@ def label_text(w) -> str:
     return ""
 
 
+def toast_rects(root, win):
+    """Mapped toasts occlude page text during their transient fade animation."""
+    if not root.get_mapped():
+        return []
+    if root.__gtype__.name == "AdwToastWidget":
+        rect = rect_in(root, win)
+        return [rect] if rect is not None else []
+    return [rect for child in children(root) for rect in toast_rects(child, win)]
+
+
 def desc(w) -> str:
     """A stable description: Type.css-classes 'text' (digits collapsed to #), with the
     nearest named ancestor so two identical-looking widgets can be told apart."""
@@ -409,7 +419,10 @@ class Auditor:
     def check_contrast(self, scope, labels, png) -> None:
         """`png` is a PIL image of the whole window (1 px = 1 logical px)."""
         W, H = png.size
+        occluders = toast_rects(self.win, self.win)
         for lab, r, vp in labels:
+            if any(overlap_area(r, box) > 0 for box in occluders):
+                continue  # this label is hidden by the transient toast surface
             if has_toast(lab):
                 continue  # toasts fade in and out: mid-animation the surface is
                           # translucent and pixel sampling measures the blend, not

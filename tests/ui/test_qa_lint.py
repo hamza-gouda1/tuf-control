@@ -215,5 +215,21 @@ class SnapshotTargetTests(unittest.TestCase):
         factory.return_value.snapshot.assert_called_once_with(snapshot, 360, 640)
 
 
+class ToastOcclusionTests(unittest.TestCase):
+    def test_only_mapped_toasts_supply_occluding_bounds(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from qa_audit import toast_rects
+        toast = SimpleNamespace(get_mapped=lambda: True,
+                                __gtype__=SimpleNamespace(name="AdwToastWidget"))
+        root = SimpleNamespace(get_mapped=lambda: True,
+                               __gtype__=SimpleNamespace(name="GtkBox"))
+        with patch("qa_audit.children", return_value=[toast]), patch(
+                "qa_audit.rect_in", return_value=(10, 20, 100, 40)):
+            self.assertEqual(toast_rects(root, root), [(10, 20, 100, 40)])
+            toast.get_mapped = lambda: False
+            self.assertEqual(toast_rects(root, root), [])
+
+
 if __name__ == "__main__":
     unittest.main()
