@@ -10,7 +10,7 @@ from pathlib import Path
 
 from .model import SourceResult, UpdateItem
 
-DEFAULT_REPOS = ["~/projects/tuf-control", "~/projects/bordeaux-gnome"]
+DEFAULT_REPOS: list[str] = []
 
 
 def _git(path: Path, *args: str) -> str:
