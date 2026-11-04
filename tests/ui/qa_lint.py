@@ -375,6 +375,22 @@ def child(job: dict) -> int:
 
     # -- rendering ------------------------------------------------------------------------
     def render_png(widget, path: Path) -> "Image.Image":
+        # Size probes and asynchronous row updates can queue a new allocation.
+        # Wait for its paint phase before asking the parent to snapshot its child.
+        clock = widget.get_frame_clock()
+        if clock is not None:
+            painted = []
+            handler = clock.connect_after("after-paint", lambda *_: painted.append(True))
+            try:
+                widget.queue_draw()
+                clock.request_phase(Gdk.FrameClockPhase.LAYOUT | Gdk.FrameClockPhase.PAINT)
+                deadline = time.monotonic() + 0.25
+                context = GLib.MainContext.default()
+                while not painted and time.monotonic() < deadline:
+                    context.iteration(False)
+                    time.sleep(0.001)
+            finally:
+                clock.disconnect(handler)
         ww, hh = widget.get_width(), widget.get_height()
         snap = Gtk.Snapshot()
         bg = widget.get_style_context().lookup_color("window_bg_color")[1]
