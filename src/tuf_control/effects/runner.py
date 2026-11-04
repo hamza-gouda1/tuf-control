@@ -6,11 +6,13 @@ hardware mode back when effects stop."""
 from __future__ import annotations
 
 import dataclasses
+import json
 import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
 
+from ..automation.config import config_dir, write_json_atomic
 from ..core import Capability, KbdEffect, TufControlError
 from .base import EffectStack, Inputs
 from .colour import RGB, Smoother, distance, rgb_to_hex
@@ -22,7 +24,8 @@ RESTORE_CONFIG = "__config__"
 class KbdWriter:
     def __init__(self, ctl, *, max_hz: float = 10.0, min_delta: float = 4.0,
                  keepalive_s: float = 5.0, brightness_every_s: float = 2.0,
-                 clock: Callable[[], float] = time.monotonic) -> None:
+                 clock: Callable[[], float] = time.monotonic,
+                 recovery_path: Path | None = None) -> None:
         self.ctl, self.max_hz, self.min_delta = ctl, max_hz, min_delta
         self.keepalive, self.bri_every, self.clock = keepalive_s, brightness_every_s, clock
         self.saved: KbdEffect | None = None
@@ -32,6 +35,9 @@ class KbdWriter:
         self.last_bri_check = -1e9
         self.backlight_off = False
         self.writes = 0
+        self.recovery_path = recovery_path
+        self._recovery_checked = False
+        self._frames: list[KbdEffect] = []
 
     @staticmethod
     def _effect(data: dict) -> KbdEffect:
@@ -40,7 +46,76 @@ class KbdWriter:
                          tuple(data.get("colour2", (0, 0, 0))),
                          int(data.get("speed", 1)), int(data.get("direction", 0)))
 
+    @staticmethod
+    def _stored_effect(data) -> KbdEffect:
+        if not isinstance(data, dict) or set(data) != {f.name for f in dataclasses.fields(KbdEffect)}:
+            raise ValueError("invalid saved keyboard effect")
+        return KbdEffect(**{**data, "colour1": tuple(data["colour1"]),
+                            "colour2": tuple(data["colour2"])}).validate()
+
+    def _discard_recovery(self) -> None:
+        if self.recovery_path is not None:
+            try:
+                self.recovery_path.unlink(missing_ok=True)
+            except OSError as exc:
+                raise TufControlError(f"cannot clear keyboard recovery state: {exc}") from exc
+
+    def recover(self) -> None:
+        if self._recovery_checked or self.recovery_path is None:
+            return
+        try:
+            if self.recovery_path.stat().st_size > 16384:
+                raise ValueError("keyboard recovery state is too large")
+            data = json.loads(self.recovery_path.read_text())
+            if not isinstance(data, dict) or data.get("version") != 1:
+                raise ValueError("unknown keyboard recovery state version")
+            saved = self._stored_effect(data["saved"])
+            static = (self._stored_effect(data["saved_static"])
+                      if data["saved_static"] is not None else None)
+            frames = [self._stored_effect(frame) for frame in data["frames"]]
+            if not 1 <= len(frames) <= 2:
+                raise ValueError("invalid keyboard recovery frames")
+        except FileNotFoundError:
+            self._recovery_checked = True
+            return
+        except (OSError, ValueError, TypeError, KeyError):
+            # Corrupt or incomplete data is never a hardware write instruction.
+            self._discard_recovery()
+            self._recovery_checked = True
+            return
+        current = self._effect((self.ctl.get_kbd_rgb()[0] or {}).get("mode_data") or {})
+        self._recovery_checked = True
+        if current in frames:
+            self.saved, self.saved_static = saved, static
+            self._frames = [current]
+            self.writes = 1  # recovered frames also changed Static's stored colour
+        else:
+            # The user picked another hardware mode after the daemon died.
+            self._discard_recovery()
+
+    def _journal(self, frame: KbdEffect | None = None) -> None:
+        if self.recovery_path is None:
+            return
+        frames = self._frames[-1:] + ([frame] if frame is not None else [])
+        try:
+            write_json_atomic(self.recovery_path, {
+                "version": 1, "saved": dataclasses.asdict(self.saved),
+                "saved_static": dataclasses.asdict(self.saved_static) if self.saved_static else None,
+                "frames": [dataclasses.asdict(value) for value in frames],
+            })
+        except OSError as exc:
+            raise TufControlError(f"cannot save keyboard recovery state: {exc}") from exc
+
+    def _write(self, frame: KbdEffect) -> None:
+        # Write ahead: recovery accepts both sides of a crash during the D-Bus call.
+        self._journal(frame)
+        self.ctl.set_kbd_effect(frame)
+        self._frames = [frame]
+
     def save(self) -> None:
+        if self.saved is not None:
+            return
+        self.recover()
         if self.saved is not None:
             return
         info = self.ctl.get_kbd_rgb()[0] or {}
@@ -49,14 +124,18 @@ class KbdWriter:
         # remember it so a Breathe/Pulse user gets their Static colour back too
         static = (info.get("builtins") or {}).get(0)
         self.saved_static = self._effect(static) if static and self.saved.mode != 0 else None
+        self._frames = [self.saved]
+        self._journal()
 
     def restore(self) -> None:
+        self.recover()
         if self.saved is not None:
-            saved, self.saved = self.saved, None
-            static, self.saved_static = self.saved_static, None
-            if static is not None and self.writes:
-                self.ctl.set_kbd_effect(static)
-            self.ctl.set_kbd_effect(saved)
+            if self.saved_static is not None and self.writes:
+                self._write(self.saved_static)
+            self._write(self.saved)
+            self._discard_recovery()
+            self.saved = self.saved_static = None
+            self._frames = []
         self.last_rgb = None
 
     def push(self, rgb: RGB) -> bool:
@@ -74,8 +153,9 @@ class KbdWriter:
                 self.backlight_off = False
         if self.backlight_off:
             return False
-        base = self.saved or KbdEffect(0)
-        self.ctl.set_kbd_effect(dataclasses.replace(base, mode=0, colour1=tuple(rgb)))
+        if self.saved is None:
+            self.save()
+        self._write(dataclasses.replace(self.saved, mode=0, colour1=tuple(rgb)))
         self.last_rgb, self.last_write = tuple(rgb), now
         self.writes += 1
         return True
@@ -102,11 +182,12 @@ class _Cached:
 class EffectsRunner:
     def __init__(self, ctl, *, clock: Callable[[], float] = time.monotonic,
                  sources: dict | None = None, token_path: Path | None = None,
-                 writer: KbdWriter | None = None) -> None:
+                 writer: KbdWriter | None = None, recovery_path: Path | None = None) -> None:
         self.ctl, self.clock = ctl, clock
         self.sources = dict(sources or {})
         self.token_path = token_path
-        self.writer = writer or KbdWriter(ctl, clock=clock)
+        self.writer = writer or KbdWriter(ctl, clock=clock, recovery_path=(
+            recovery_path or config_dir() / "keyboard-effect-state.json"))
         self.cfg: dict = {"active": None, "params": {}, "fps": 30, "max_write_hz": 10.0,
                           "smoothing_s": 0.25, "notifications": {"enabled": False}}
         self.override: object = RESTORE_CONFIG
@@ -147,6 +228,8 @@ class EffectsRunner:
         with self._lock:
             if self.writer.saved is not None:
                 self.writer.saved = effect
+                if effect.mode == 0:
+                    self.writer.saved_static = None
                 self.writer.last_rgb = None  # repaint over it on the next frame
 
     def get_override(self):

@@ -11,9 +11,10 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
+from tuf_control.automation.config import CONFIG_DIR_ENV
 from tuf_control.backends.fake import FakeBackend, build_fake_tree
 from tuf_control.controller import FAKE_ROOT_ENV, Controller
-from tuf_control.core import ValidationError
+from tuf_control.core import KbdEffect, TufControlError, ValidationError
 from tuf_control.effects import audio as A
 from tuf_control.effects.ambient import (
     PortalDenied,
@@ -263,6 +264,9 @@ class RunnerTests(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.root = build_fake_tree(Path(tmp.name) / "root")
+        os.environ[CONFIG_DIR_ENV] = str(Path(tmp.name) / "cfg")
+        self.addCleanup(os.environ.pop, CONFIG_DIR_ENV, None)
+        self.recovery = Path(tmp.name) / "cfg/keyboard-effect-state.json"
         os.environ[FAKE_ROOT_ENV] = str(self.root)
         self.addCleanup(os.environ.pop, FAKE_ROOT_ENV, None)
         self.ctl = Controller([FakeBackend(self.root)])
@@ -270,6 +274,86 @@ class RunnerTests(unittest.TestCase):
 
     def aura(self):
         return json.loads((self.root / "fake/aura.json").read_text())
+
+    def test_crashed_runner_recovers_original_mode_and_static_builtin(self):
+        static = KbdEffect(0, colour1=(1, 2, 3))
+        original = KbdEffect(1, zone=2, colour1=(20, 30, 40), colour2=(40, 50, 60), speed=2,
+                             direction=1)
+        self.ctl.set_kbd_effect(static)
+        self.ctl.set_kbd_effect(original)
+        first = EffectsRunner(self.ctl, clock=self.clock, sources={"theme": lambda: None})
+        first.configure({"active": "accent", "params": {}, "smoothing_s": 0})
+        first.step(0.1)
+        self.assertEqual(self.recovery.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(self.aura()["mode"], 0)
+        # Drop the runner without shutdown, then start with effects disabled.
+        restarted = EffectsRunner(self.ctl, clock=self.clock)
+        restarted.step(0.1)
+        self.assertEqual(restarted.writer.saved, None)
+        self.assertEqual(self.aura()["mode"], original.mode)
+        self.assertEqual(self.aura()["colour1"], list(original.colour1))
+        self.assertEqual(self.aura()["builtins"]["0"]["colour1"], list(static.colour1))
+        self.assertFalse(self.recovery.exists())
+
+    def test_restart_continues_frames_without_recapturing_them_as_original(self):
+        original = KbdEffect(1, colour1=(20, 30, 40))
+        self.ctl.set_kbd_effect(original)
+        first = KbdWriter(self.ctl, clock=self.clock, recovery_path=self.recovery)
+        first.push((100, 20, 30))
+        # Journal the next frame, then crash before its D-Bus write: the previous
+        # live frame still belongs to this effect and must recover the same original.
+        first._journal(KbdEffect(0, colour1=(200, 40, 60)))
+        restarted = KbdWriter(self.ctl, clock=self.clock, recovery_path=self.recovery)
+        restarted.push((0, 0, 255))
+        self.assertEqual(restarted.saved, original)
+        restarted.restore()
+        self.assertEqual(self.aura()["mode"], original.mode)
+        self.assertEqual(self.aura()["colour1"], list(original.colour1))
+
+    def test_recovery_retries_after_temporary_keyboard_read_failure(self):
+        from unittest.mock import patch
+        original = KbdEffect(1, colour1=(20, 30, 40))
+        self.ctl.set_kbd_effect(original)
+        first = KbdWriter(self.ctl, clock=self.clock, recovery_path=self.recovery)
+        first.push((100, 20, 30))
+        restarted = KbdWriter(self.ctl, clock=self.clock, recovery_path=self.recovery)
+        with patch.object(self.ctl, "get_kbd_rgb", side_effect=TufControlError("offline")):
+            with self.assertRaises(TufControlError):
+                restarted.save()
+        restarted.save()
+        self.assertEqual(restarted.saved, original)
+        restarted.restore()
+
+    def test_recovery_keeps_external_user_mode(self):
+        first = EffectsRunner(self.ctl, clock=self.clock, sources={"theme": lambda: None})
+        first.configure({"active": "accent", "params": {}, "smoothing_s": 0})
+        first.step(0.1)
+        selected = KbdEffect(2, colour1=(5, 8, 13))
+        self.ctl.set_kbd_effect(selected)
+        restarted = EffectsRunner(self.ctl, clock=self.clock)
+        restarted.step(0.1)
+        self.assertEqual(self.aura()["mode"], selected.mode)
+        self.assertEqual(self.aura()["colour1"], list(selected.colour1))
+        self.assertFalse(self.recovery.exists())
+
+    def test_corrupt_recovery_does_not_write_hardware(self):
+        self.recovery.parent.mkdir()
+        for content in ('{broken', '[]', '"invalid"', '{"version":1,"saved":{"mode":-1}}'):
+            self.recovery.write_text(content)
+            original = self.aura()
+            restarted = EffectsRunner(self.ctl, clock=self.clock)
+            restarted.step(0.1)
+            self.assertEqual(self.aura(), original)
+            self.assertFalse(self.recovery.exists())
+
+    def test_failed_recovery_save_prevents_effect_write(self):
+        from unittest.mock import patch
+        writer = KbdWriter(self.ctl, clock=self.clock, recovery_path=self.recovery)
+        original = self.aura()
+        with patch("tuf_control.effects.runner.write_json_atomic", side_effect=OSError("full")):
+            with self.assertRaisesRegex(TufControlError, "recovery state"):
+                writer.push((0, 255, 0))
+        self.assertEqual(self.aura(), original)
 
     def test_rate_limit_delta_and_backlight_pause(self):
         w = KbdWriter(self.ctl, max_hz=5, min_delta=4, clock=self.clock)

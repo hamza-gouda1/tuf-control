@@ -65,7 +65,9 @@ class Daemon:
         self.status_file = status_file or runtime_dir() / STATUS_NAME
         self.effects = effects or EffectsRunner(self.ctl, clock=clock,
                                                 token_path=self.config_file.parent /
-                                                "screencast-token")
+                                                "screencast-token",
+                                                recovery_path=self.config_file.parent /
+                                                "keyboard-effect-state.json")
         sink = ControllerSink(self.ctl, effect_get=self.effects.get_override,
                               effect_set=self.effects.set_override,
                               kbd_changed=self.effects.hardware_mode_changed,
