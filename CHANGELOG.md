@@ -4,6 +4,12 @@ All notable changes to this project. Format follows Keep a Changelog; versions f
 
 ## [Unreleased]
 
+### Fixed
+- Bind approvals to server sessions, retain important audit events, recover original keyboard
+  lighting after daemon crashes, refresh late backend capabilities and protect thermal services.
+
+## [0.1.0] - 2026-11-02
+
 ### Added
 - Touchpad & gestures: a Control page for the touchpad (on/off with the
   turn-off-when-a-mouse-is-connected option, tap to click, natural scrolling, speed slider
@@ -99,5 +105,4 @@ All notable changes to this project. Format follows Keep a Changelog; versions f
   `SetFanCurve` takes `(u, (s, (yyyyyyyy), (yyyyyyyy), b))`, not byte arrays;
   aura `LedModeData` is `(uu(yyy)(yyy)ss)` with speed/direction as names, not integers.
 
-## [0.1.0]
 - Core models, D-Bus / sysfs / asusctl backends, controller, CLI and GTK 4 / Libadwaita UI.

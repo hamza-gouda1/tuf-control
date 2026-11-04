@@ -24,3 +24,10 @@ Real authenticated PackageKit/fwupd installations, physical shortcut mappings,
 physical gesture feel and support on other laptop models remain unverified.
 The earlier single-machine footprint measurements are documented in PERFORMANCE.md;
 they are not a controlled comparison with another application.
+
+## Cutting a release
+
+Before tagging, move shipped changes from `[Unreleased]` to a dated version section in
+`CHANGELOG.md` and update the AppStream `<releases>` version/date to the publication date.
+Keep new development under `[Unreleased]`. Run the complete gates on the exact commit to
+be tagged, then use a new annotated tag; published tags and archives remain immutable.
