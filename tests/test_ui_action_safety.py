@@ -15,6 +15,15 @@ from tuf_control.ui.pages.keyboard_effects import EffectsSection  # noqa: E402
 
 
 class ActionSafetyTests(unittest.TestCase):
+    def test_effect_picker_tooltip_tracks_the_full_selected_title(self):
+        section = Mock(selected="temperature")
+        section.param_rows = []
+        EffectsSection._picked(section)
+        section.pick.set_tooltip_text.assert_called_with("Temperature")
+        section.selected = None
+        EffectsSection._picked(section)
+        section.pick.set_tooltip_text.assert_called_with("Off")
+
     def section(self, running):
         return SimpleNamespace(status={"running": running}, client=Mock(), win=Mock())
 

@@ -211,6 +211,7 @@ class EffectsSection(Adw.PreferencesGroup):
 
     def _picked(self) -> None:
         name = self.selected
+        self.pick.set_tooltip_text(EFFECTS[name].title if name else "Off")
         self._clear_params()
         if name:
             cls = EFFECTS[name]

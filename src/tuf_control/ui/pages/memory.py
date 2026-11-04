@@ -30,7 +30,7 @@ class MemoryPage(MonitorPage):
         self.bar_caption = Gtk.Box(spacing=18)
         self.bar_labels = {}
         for k in ("in_use", "reclaimable", "free"):
-            lab = Gtk.Label(xalign=0)
+            lab = Gtk.Label(xalign=0, wrap=True)
             lab.add_css_class("numeric")
             lab.add_css_class("stat-sub")
             self.bar_caption.append(lab)

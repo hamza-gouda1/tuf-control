@@ -531,6 +531,7 @@ class UpdatesPage(Page):
         items = src.items
         n_upd = sum(1 for i in items if i.counts)
         g = Adw.PreferencesGroup(title=esc(src.title), description=esc(source_caption(src)))
+        g.set_tooltip_text(src.title)
         head = Gtk.Box(spacing=8, valign=Gtk.Align.CENTER)
         if n_upd:
             head.append(pill(str(n_upd), "accent"))
