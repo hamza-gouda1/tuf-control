@@ -142,13 +142,18 @@ class Tile(Gtk.Box):
             self.badge.add_css_class(css)
 
 
+FAN_CURVE_KEYBOARD_HELP = ("Move between points with [ and ] (or , and .). "
+                           "Arrow keys nudge the selected point.")
+
+
 class FanCurveCanvas(Gtk.DrawingArea):
     """Drag the 8 points of a FanCurveModel. Calls on_change() after each edit."""
 
-    def __init__(self, on_change=None) -> None:
+    def __init__(self, on_change=None, on_select=None) -> None:
         super().__init__()
         self.model: FanCurveModel | None = None
         self.on_change = on_change
+        self.on_select = on_select
         self.active: int | None = None
         self.hover: int | None = None
         self.live_temp: float | None = None
@@ -169,11 +174,24 @@ class FanCurveCanvas(Gtk.DrawingArea):
         keys.connect("key-pressed", self._key)
         self.add_controller(keys)
         self._origin = (0.0, 0.0)
+        self.set_tooltip_text(FAN_CURVE_KEYBOARD_HELP)
+        self._announce()
 
     def set_model(self, model: FanCurveModel | None) -> None:
         self.model = model
         self.active = 0 if model else None
+        self._announce()
         self.queue_draw()
+
+    def _announce(self):
+        if self.model is not None and self.active is not None:
+            temp, pwm = self.model.points[self.active]
+            text = (f"Fan curve, point {self.active + 1} of {len(self.model.points)}, "
+                    f"{temp}°C at {pwm_to_pct(pwm):.0f}%")
+        else:
+            text = "Fan curve, no curve available"
+        self.update_property([Gtk.AccessibleProperty.LABEL, Gtk.AccessibleProperty.DESCRIPTION],
+                             [text, FAN_CURVE_KEYBOARD_HELP])
 
     def geometry(self) -> CurveGeometry:
         return CurveGeometry(self.get_width(), self.get_height())
@@ -201,6 +219,9 @@ class FanCurveCanvas(Gtk.DrawingArea):
             return
         self.grab_focus()
         self.active = idx
+        self._announce()
+        if self.on_select:
+            self.on_select()
         self._origin = (x, y)
         self.set_cursor_from_name("grabbing")
         self.queue_draw()
@@ -211,6 +232,7 @@ class FanCurveCanvas(Gtk.DrawingArea):
         g = self.geometry()
         t, p = g.to_data(self._origin[0] + dx, self._origin[1] + dy)
         self.model.drag(self.active, t, p)
+        self._announce()
         self.queue_draw()
         if self.on_change:
             self.on_change()
@@ -234,10 +256,16 @@ class FanCurveCanvas(Gtk.DrawingArea):
         elif keyval in moves:
             dt, dp = moves[keyval]
             self.model.drag(self.active, t + dt, p + dp)
+            self._announce()
             if self.on_change:
                 self.on_change()
+            self.queue_draw()
+            return True
         else:
             return False
+        self._announce()
+        if self.on_select:
+            self.on_select()
         self.queue_draw()
         return True
 

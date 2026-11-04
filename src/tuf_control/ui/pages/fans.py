@@ -7,12 +7,12 @@ from gi.repository import Adw, Gtk
 from ...core import Profile
 from ..tasks import run_bg
 from ..viewmodels import PROFILE_INFO, PROFILE_ORDER, FanCurveModel, fmt_rpm, pwm_to_pct
-from ..widgets import FanCurveCanvas, label
+from ..widgets import FAN_CURVE_KEYBOARD_HELP, FanCurveCanvas, label
 from .base import Page, button, info_row, prefs_page
 
 
 class FansPage(Page):
-    key, title = "fans", "Fans"
+    key, title = "fans", "Fan curves"
 
     def __init__(self, win) -> None:
         super().__init__(win)
@@ -25,7 +25,7 @@ class FansPage(Page):
         self.group = Adw.PreferencesGroup(
             title="Fan curve",
             description="Drag a point to change fan speed at that temperature. "
-                        "Arrow keys nudge the selected point.")
+                        + FAN_CURVE_KEYBOARD_HELP)
         self.switcher = Gtk.Box(spacing=0, valign=Gtk.Align.CENTER)
         self.switcher.add_css_class("linked")
         self.fan_buttons = {}
@@ -54,7 +54,7 @@ class FansPage(Page):
         frame.add_css_class("curve-frame")
         self.readout = label("", ("curve-readout", "numeric"), margin_start=16, margin_top=12)
         frame.append(self.readout)
-        self.canvas = FanCurveCanvas(on_change=self._changed)
+        self.canvas = FanCurveCanvas(on_change=self._changed, on_select=self._selected)
         self.canvas.set_margin_end(4)
         frame.append(self.canvas)
         self.status = info_row("Fan curves unavailable", "")
@@ -181,10 +181,13 @@ class FansPage(Page):
             self._changed()
 
     def _changed(self):
-        m = self.models.get(self.fan)
         dirty = any(x.dirty for x in self.models.values())
         self.apply_btn.set_sensitive(dirty)
         self.revert_btn.set_sensitive(dirty)
+        self._selected()
+
+    def _selected(self):
+        m = self.models.get(self.fan)
         if m and self.canvas.active is not None:
             t, p = m.points[self.canvas.active]
             self.readout.set_label(f"Point {self.canvas.active + 1}  ·  {t} °C  ·  "

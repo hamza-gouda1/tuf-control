@@ -19,7 +19,7 @@ from .base import Page, a11y_name, button, info_row, pill, prefs_page, value_row
 
 
 class GpuPage(Page):
-    key, title = "gpu", "Graphics"
+    key, title = "gpu", "GPU mode"
 
     def __init__(self, win) -> None:
         super().__init__(win)

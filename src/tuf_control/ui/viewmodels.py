@@ -29,20 +29,6 @@ from ..core import (
 
 DASH = "–"
 
-# -- pages ------------------------------------------------------------------
-
-PAGES: list[tuple[str, str, str]] = [
-    ("dashboard", "Dashboard", "view-grid-symbolic"),
-    ("performance", "Performance", "power-profile-performance-symbolic"),
-    ("fans", "Fans", "weather-windy-symbolic"),
-    ("gpu", "Graphics", "application-x-firmware-symbolic"),
-    ("display", "Display", "preferences-desktop-display-symbolic"),
-    ("battery", "Battery", "battery-level-80-symbolic"),
-    ("keyboard", "Keyboard", "input-keyboard-symbolic"),
-    ("automation", "Automation", "media-playlist-repeat-symbolic"),
-    ("about", "About", "help-about-symbolic"),
-]
-
 # -- formatting ---------------------------------------------------------------
 
 

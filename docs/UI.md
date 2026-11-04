@@ -38,8 +38,11 @@ otherwise the system preference is followed.
   max; otherwise the reason from `Controller.capabilities()` is shown (on a TUF with
   `EnablePptGroup` off that is "no PPT values (-1)").
 - Confirmation dialogs guard the risky writes: power limits, fan curves (apply and factory
-  reset) and GPU mode (with a restart warning for MUX changes). Profile, charge limit,
-  keyboard and refresh rate apply directly with a toast (refresh rate has Undo).
+  reset), GPU mode (with a restart warning for MUX changes), update installation
+  (including firmware warnings), restart requests and high-risk agent approvals.
+  Rule deletion and stopping the shared service from Keyboard also ask for confirmation.
+  Profile, charge limit, keyboard and refresh rate apply directly with a toast
+  (refresh rate has Undo).
 - Every write ends in a toast with the result or the real error (`humanize_error`).
 - With `TUF_CONTROL_FAKE_ROOT` set, only the fake backend and a fake display config exist.
   Dialogs and toasts say so.
@@ -87,8 +90,9 @@ total, temperatures 20 to 100 degrees, fans 0 to 7k rpm; the rest (rates, clocks
 from a generous minimum span and only ever widen. The time axis is fixed (-120 s to now).
 
 Control: Performance (profile cards,
-power limits), Fans (8-point curve per fan and profile; drag or arrow keys; Apply / Revert /
-Factory), Graphics (Integrated / Hybrid / Ultimate via supergfxd; pending-restart banner),
+power limits), Fan curves (8-point curve per fan and profile; drag or arrow keys;
+Apply / Revert / Factory), GPU mode (Integrated / Hybrid / Ultimate via supergfxd;
+pending-restart banner),
 Display (refresh rate, panel overdrive, VRR note), Touchpad & gestures (touchpad
 send-events, tap to click, natural scrolling, speed, click method; swipe and pinch bindings
 for the Quick Settings extension's gestures, off by default; see [GESTURES.md](GESTURES.md)),
@@ -96,14 +100,19 @@ Battery (charge limit 20–100 with 60/80/100 presets, one-shot full charge, hea
 software effects: picker, parameters, simulated preview, service status; see
 [EFFECTS.md](EFFECTS.md)), Automation (tuf-controld service, rules with enable switches and an
 "Active" badge, add/edit dialog with a dry-run Test, suggestions, recent activity; see
-[AUTOMATION.md](AUTOMATION.md)), About (support table per capability).
+[AUTOMATION.md](AUTOMATION.md)), Agent access (access levels, standing approval for
+permitted lower-risk changes, pending one-time approvals, high-risk confirmation,
+Revoke all and audit log; see [AGENT_API.md](AGENT_API.md)), Updates (source status,
+software and firmware items, confirmation before installation, live progress,
+installed-version verification, transaction history and a restart banner; see
+[UPDATES.md](UPDATES.md)), About (support table per capability).
 
 ## Controller additions used by the UI
 
 `get/set_kbd_brightness`, `get_kbd_rgb`, `set_kbd_effect`, `get_fan_curves(profile)`,
 `set_fan_curve`, `reset_fan_curves`, `get_gpu_status`, `set_gpu_mode` (returns the required
 user action), `get_attributes`, `set_attribute`, `one_shot_full_charge`. The sysfs backend
-can only read and write the active profile's fan curve; the Fans page follows the active
+can only read and write the active profile's fan curve; the Fan curves page follows the active
 profile and says so when another one is picked.
 
 D-Bus names and signatures were verified by read-only introspection of asusd 6.3.5 and
