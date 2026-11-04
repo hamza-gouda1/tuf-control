@@ -535,9 +535,16 @@ class RuleDialog(Adw.Dialog):
         self.close()
 
     def _delete(self) -> None:
-        if self.rule:
-            self.page.delete_rule(self.rule.id)
-        self.close()
+        if not self.rule:
+            return
+        rule = self.rule
+
+        def go():
+            self.page.delete_rule(rule.id)
+            self.close()
+
+        self.page.win.confirm("Delete rule?", f"Delete “{rule.name}”? This cannot be undone.",
+                              "Delete", go, destructive=True)
 
     def run_test(self) -> None:
         rule = self._validate()

@@ -113,7 +113,8 @@ class EffectsSection(Adw.PreferencesGroup):
             self.prev_row.add_suffix(w)
         self.add(self.prev_row)
 
-        self.svc_row = Adw.ActionRow(title="Background service", subtitle="Checking…")
+        self.svc_row = Adw.ActionRow(title="Background service", subtitle=
+                                     "Checking… Runs effects, automation rules and update checks.")
         self.svc_row.add_prefix(Gtk.Image.new_from_icon_name("system-run-symbolic"))
         self.svc_pill = pill("Stopped")
         self.svc_btn = button("Start", on_click=self._toggle_service)
@@ -168,7 +169,8 @@ class EffectsSection(Adw.PreferencesGroup):
             self.win.toast_error(BackendError(f"Software effect: {err}"))
         self._last_error = err
         if not run:
-            sub = "Stopped. Effects need the service; Apply starts it."
+            sub = ("Stopped. Effects, automation rules and update checks are paused; "
+                   "Apply starts the service.")
         elif err:
             sub = ("The effect stopped on an error and is paused; it retries on its own. "
                    "If it stays off, switch the effect Off and back on.")
@@ -183,6 +185,8 @@ class EffectsSection(Adw.PreferencesGroup):
                 sub += " · paused, backlight off"
         else:
             sub = "Running · keyboard in hardware mode"
+        if run:
+            sub += ". Stop also pauses automation rules and background update checks."
         self.svc_row.set_subtitle(GLib.markup_escape_text(sub))
         hw = HW_NOTE
         if run and fx.get("running") and fx.get("effect") == "gradient" and self.page.form.blend:
@@ -439,8 +443,17 @@ class EffectsSection(Adw.PreferencesGroup):
 
     def _toggle_service(self) -> None:
         run = self.status.get("running")
-        run_bg(self.client.stop if run else self.client.start,
-               done=lambda _m: (self.win.toast("Service stopped" if run else "Service started"),
-                                GLib.timeout_add(700, lambda: (self.poll_status(), False)[1])),
-               error=self.win.toast_error)
 
+        def go():
+            run_bg(self.client.stop if run else self.client.start,
+                   done=lambda _m: (self.win.toast("Service stopped" if run else "Service started"),
+                                    GLib.timeout_add(700, lambda: (self.poll_status(), False)[1])),
+                   error=self.win.toast_error)
+
+        if run:
+            self.win.confirm("Stop background service?",
+                             "Stopping the service pauses keyboard effects, automation rules "
+                             "and background update checks. To stop only keyboard effects, "
+                             "choose Off and Apply.", "Stop", go, destructive=True)
+        else:
+            go()
