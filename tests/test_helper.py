@@ -3,6 +3,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from tuf_control import helper
 from tuf_control.backends.util import FallbackWriter, RecordingWriter
@@ -71,6 +72,79 @@ class HelperTests(unittest.TestCase):
         with self.assertRaises(helper.Rejected):
             self.w("/sys/class/firmware-attributes/asus-armoury/attributes/evil/current_value", "1")
         self.assertEqual((self.root / "etc/passwd").read_text(), "root")
+
+    def test_preexisting_class_symlink_resolves_to_allowed_device(self):
+        device = self.root / "sys/devices/virtual/power_supply/BAT0"
+        device.mkdir(parents=True)
+        target = device / "charge_control_end_threshold"
+        target.write_text("90")
+        link = self.root / "sys/class/power_supply/BAT0"
+        (link / target.name).unlink()
+        link.rmdir()
+        link.symlink_to(device, target_is_directory=True)
+        path = "/sys/class/power_supply/BAT0/charge_control_end_threshold"
+        self.assertEqual(helper.validate(path, "80", self.root), target)
+        self.w(path, "80")
+        self.assertEqual(target.read_text(), "80")
+
+    def test_sink_rechecks_containment(self):
+        outside = self.root / "etc/passwd"
+        with mock.patch.object(helper, "_validate", return_value=(outside, outside.stat())):
+            with self.assertRaisesRegex(helper.Rejected, "not under /sys"):
+                self.w(self.attr, "60")
+        self.assertEqual(outside.read_text(), "root")
+
+    def test_intermediate_symlink_swap_after_validation_cannot_escape(self):
+        path = "/sys/class/power_supply/BAT0/charge_control_end_threshold"
+        parent = self.root / "sys/class/power_supply/BAT0"
+        saved = parent.with_name("BAT0-saved")
+        outside = mk(self.root, "etc/charge_control_end_threshold", "private")
+        original_open = helper._open_attribute
+
+        def swap(real):
+            parent.rename(saved)
+            parent.symlink_to(outside.parent, target_is_directory=True)
+            return original_open(real)
+
+        with mock.patch.object(helper, "_open_attribute", side_effect=swap):
+            with self.assertRaises((OSError, helper.Rejected)):
+                self.w(path, "80")
+        self.assertEqual(outside.read_text(), "private")
+        self.assertEqual((saved / outside.name).read_text(), "100")
+
+    def test_intermediate_directory_replacement_rejects_new_inode(self):
+        path = "/sys/class/power_supply/BAT0/charge_control_end_threshold"
+        parent = self.root / "sys/class/power_supply/BAT0"
+        original_open = helper._open_attribute
+        saved = parent.with_name("BAT0-saved")
+
+        def swap(real):
+            parent.rename(saved)
+            parent.mkdir()
+            (parent / real.name).write_text("private")
+            return original_open(real)
+
+        with mock.patch.object(helper, "_open_attribute", side_effect=swap):
+            with self.assertRaisesRegex(helper.Rejected, "changed after validation"):
+                self.w(path, "80")
+        self.assertEqual((parent / "charge_control_end_threshold").read_text(), "private")
+        self.assertEqual((saved / "charge_control_end_threshold").read_text(), "100")
+
+    def test_attribute_replacement_rejects_new_inode(self):
+        path = "/sys/class/power_supply/BAT0/charge_control_end_threshold"
+        target = self.root / path[1:]
+        original_open = helper._open_attribute
+
+        def swap(real):
+            # Keep the old inode alive so the filesystem cannot immediately reuse it.
+            target.rename(target.with_name("old"))
+            target.write_text("private")
+            return original_open(real)
+
+        with mock.patch.object(helper, "_open_attribute", side_effect=swap):
+            with self.assertRaisesRegex(helper.Rejected, "changed after validation"):
+                self.w(path, "80")
+        self.assertEqual(target.read_text(), "private")
 
     def test_value_charset_and_fan(self):
         with self.assertRaises(helper.Rejected):

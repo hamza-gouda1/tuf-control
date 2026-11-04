@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import os
 import re
+import stat
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -124,8 +125,8 @@ RULES: list[tuple[re.Pattern[str], Callable[[Path, str], None]]] = [
 ]
 
 
-def validate(path: str, value: str, root: str | Path = "/") -> Path:
-    """Return the resolved path if (path, value) is allowed, else raise Rejected."""
+def _validate(path: str, value: str, root: str | Path) -> tuple[Path, os.stat_result]:
+    """Validate the value and retain the identity of the attribute being checked."""
     if not isinstance(path, str) or not isinstance(value, str):
         raise Rejected("bad arguments")
     if "\x00" in path or "\x00" in value or not path.startswith("/"):
@@ -149,23 +150,54 @@ def validate(path: str, value: str, root: str | Path = "/") -> Path:
     candidates = {str(rel), lexical}
     for pattern, check in RULES:
         if any(pattern.fullmatch(c) for c in candidates):
-            if not asked.is_file():
+            try:
+                identity = asked.stat(follow_symlinks=False)
+            except OSError:
+                raise Rejected("no such attribute") from None
+            if not stat.S_ISREG(identity.st_mode):
                 raise Rejected("no such attribute")
             check(asked, value)
-            return asked
+            return asked, identity
     raise Rejected("path is not on the allow-list")
 
 
+def validate(path: str, value: str, root: str | Path = "/") -> Path:
+    """Return the resolved path if (path, value) is allowed, else raise Rejected."""
+    return _validate(path, value, root)[0]
+
+
+def _open_attribute(real: Path) -> int:
+    """Walk the resolved path without following a symlink at any component.
+
+    Class symlinks were already resolved during validation. Directory descriptors
+    keep the walk anchored even if a parent directory is replaced concurrently.
+    """
+    flags = os.O_PATH | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    parent = os.open(real.anchor, flags)
+    try:
+        for part in real.parts[1:-1]:
+            child = os.open(part, flags, dir_fd=parent)
+            os.close(parent)
+            parent = child
+        return os.open(real.name, os.O_WRONLY | os.O_NOFOLLOW | os.O_CLOEXEC |
+                       os.O_NONBLOCK, dir_fd=parent)
+    finally:
+        os.close(parent)
+
+
 def write(path: str, value: str, root: str | Path = "/") -> None:
-    real = validate(path, value, root)
+    real, validated = _validate(path, value, root)
     # defence in depth, right at the sink: validate() already resolved and allow-listed
     # the path; this second containment check on the resolved value makes the guarantee
     # local to the open() call
     base = Path(os.path.realpath(root))
     if not real.is_relative_to(base / "sys"):
         raise Rejected("path is not under /sys")
-    fd = os.open(real, os.O_WRONLY | os.O_NOFOLLOW)
+    fd = _open_attribute(real)
     try:
+        opened = os.fstat(fd)
+        if (opened.st_dev, opened.st_ino) != (validated.st_dev, validated.st_ino):
+            raise Rejected("attribute changed after validation")
         os.write(fd, value.encode())
     finally:
         os.close(fd)
