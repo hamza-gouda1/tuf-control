@@ -1,0 +1,22 @@
+{
+  "packages": [
+    {"name": "held-driver", "current": "1", "candidate": "2", "hold": true},
+    {"name": "phased-tool", "current": "1", "candidate": "2", "record": "Package: phased-tool\nPhased-Update-Percentage: 30\n"},
+    {"name": "kept-tool", "current": "1", "candidate": "2"},
+    {"name": "new-runtime", "current": null, "candidate": "1"},
+    {"name": "obsolete-runtime", "current": "1", "candidate": "1"},
+    {"name": "up-to-date", "current": "2", "candidate": "2"},
+    {"name": "downgrade", "current": "3", "candidate": "2"},
+    {"name": "no-candidate", "current": "1", "candidate": null},
+    {"name": "normal-update", "current": "1", "candidate": "2", "safe_upgrade": true,
+     "archive": "noble-security", "origin": "Ubuntu", "arch": "amd64", "size": 4096,
+     "description": "A security update"},
+    {"name": "marked-install", "current": "1", "candidate": "2", "safe_install": true}
+  ],
+  "simulations": {
+    "held-driver": {},
+    "phased-tool": {},
+    "kept-tool": {"install": ["new-runtime"], "upgrade": ["held-driver"],
+                  "remove": ["obsolete-runtime"], "broken": 1}
+  }
+}
