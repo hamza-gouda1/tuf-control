@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parent.parent
@@ -157,6 +158,39 @@ class GestureKeys(unittest.TestCase):
         schema = ext_source().lookup(touchpad.EXTENSION_SCHEMA, False)
         for key in touchpad.GESTURE_KEYS:
             self.assertIsNotNone(schema.get_key(key), key)
+
+    def test_new_gestures_and_actions_are_registered_and_allowed(self):
+        schema = ext_source().lookup(touchpad.EXTENSION_SCHEMA, False)
+        expected = {
+            "gesture-swipe3-left": "prev-window",
+            "gesture-swipe3-right": "next-window",
+            "gesture-swipe4-up": "volume-up",
+            "gesture-swipe4-down": "volume-down",
+            "gesture-hold4": "play-pause",
+        }
+        for key, action in expected.items():
+            self.assertIn(key, touchpad.GESTURE_KEYS)
+            self.assertIn(action, touchpad.GESTURE_ACTIONS)
+            self.assertIn(action, schema.get_key(key).get_range()[1])
+
+    def test_older_extension_schema_excludes_new_gestures_and_actions(self):
+        with tempfile.TemporaryDirectory() as folder:
+            tree = ET.parse(_EXT_XML)
+            schema = tree.getroot().find("schema")
+            for key in list(schema):
+                if key.get("name") in ("gesture-hold4", "gesture-swipe3-left", "gesture-swipe3-right"):
+                    schema.remove(key)
+            choices = schema.find("key[@name='gesture-swipe4-up']/choices")
+            choices.remove(choices.find("choice[@value='volume-up']"))
+            tree.write(Path(folder) / _EXT_XML.name)
+            subprocess.run(["glib-compile-schemas", "--strict", folder], check=True)
+            source = Gio.SettingsSchemaSource.new_from_directory(folder, None, False)
+            older = touchpad.GestureSettings(source=source)
+            self.assertEqual(older.binding_choices("gesture-hold4"), ())
+            self.assertEqual(older.binding("gesture-hold4"), "none")
+            self.assertIn("overview", older.binding_choices("gesture-swipe4-up"))
+            self.assertNotIn("volume-up", older.binding_choices("gesture-swipe4-up"))
+            self.assertRaises(ValueError, older.set_binding, "gesture-swipe4-up", "volume-up")
 
     def test_hide_power_mode_when_the_installed_schema_is_older(self):
         """The app can be newer than the installed extension: its compiled schema then

@@ -13,7 +13,6 @@ import GObject from 'gi://GObject';
 import Gio from 'gi://Gio';
 import Clutter from 'gi://Clutter';
 import Meta from 'gi://Meta';
-import St from 'gi://St';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
@@ -22,6 +21,7 @@ import {QuickMenuToggle, SystemIndicator} from 'resource:///org/gnome/shell/ui/q
 
 import {AsusdProfileSource, GpuModeSource, PpdProfileSource} from './dbus.js';
 import {GestureWatcher, shellActions} from './gestures.js';
+import {createGestureInput} from './gesture_input.js';
 import {
     ICONS, LABELS, PROFILES, ProfileAnnouncer, ProfileModel, chargeLabel, gpuModeName, subtitleFor,
 } from './profiles.js';
@@ -254,20 +254,17 @@ export default class TufControlQuickExtension extends Extension {
         // pre-gestures metadata (without "settings-schema") would otherwise hand
         // getSettings() an undefined id here.
         const settings = this.getSettings('org.gnome.shell.extensions.tuf-control-quick');
+        this._gestureInput = createGestureInput(Main);
         this._gestures = new GestureWatcher({
             settings,
             stage: global.stage,
-            actions: shellActions(Main, Meta, settings, {
-                fade: (actor, opacity, done) => {
-                    if (!St.Settings.get().enable_animations) {
-                        done();
-                        return;
-                    }
-                    actor.ease({opacity, duration: 160,
-                        mode: Clutter.AnimationMode.EASE_OUT_CUBIC, onComplete: done});
-                },
-            }),
+            actions: shellActions(Main, Meta, settings, this._gestureInput),
+            input: this._gestureInput,
             clutter: Clutter,
+        });
+        this._overviewGestureId = Main.overview.connect('showing', () => {
+            this._gestures.cancel();
+            this._gestureInput.prepareOverview();
         });
         this._gestures.enable();
         // one Power Mode selector is enough: ours (asusd, ppd fallback) replaces the
@@ -280,7 +277,12 @@ export default class TufControlQuickExtension extends Extension {
     disable() {
         this._hider?.destroy();
         this._hider = null;
+        if (this._overviewGestureId)
+            Main.overview.disconnect(this._overviewGestureId);
+        this._overviewGestureId = 0;
         this._gestures?.disable();
+        this._gestureInput?.destroy();
+        this._gestureInput = null;
         this._gestures = null;
         this._announcer?.destroy();
         this._announcer = null;

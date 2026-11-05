@@ -23,6 +23,9 @@ CLICK_METHODS = ("default", "none", "areas", "fingers")
 
 GESTURE_KEYS = (
     "gesture-swipe3-down",
+    "gesture-swipe3-left",
+    "gesture-swipe3-right",
+    "gesture-hold4",
     "gesture-swipe4-up",
     "gesture-swipe4-down",
     "gesture-swipe4-left",
@@ -39,6 +42,11 @@ GESTURE_ACTIONS = (
     "prev-workspace",
     "next-workspace",
     "launch-app",
+    "prev-window",
+    "next-window",
+    "volume-up",
+    "volume-down",
+    "play-pause",
 )
 
 
@@ -158,6 +166,7 @@ class GestureSettings:
             chained = extension_source()
             schema = (schema_lookup(schema_id) or
                       (schema_lookup(schema_id, chained) if chained else None))
+        self._schema = schema
         self.available = schema is not None
         self.settings = Gio.Settings.new_full(schema, None, None) if schema else None
 
@@ -177,14 +186,22 @@ class GestureSettings:
     def set_enabled(self, on: bool) -> None:
         self._require().set_boolean("gesture-enabled", bool(on))
 
-    def binding(self, key: str) -> str:
+    def binding_choices(self, key: str) -> tuple[str, ...]:
         self._check_key(key)
+        self._require()
+        if not self._schema.has_key(key):
+            return ()
+        kind, values = self._schema.get_key(key).get_range()
+        return tuple(action for action in values if action in GESTURE_ACTIONS) if kind == "enum" else ()
+
+    def binding(self, key: str) -> str:
+        if not self.binding_choices(key):
+            return "none"
         return self._require().get_string(key)
 
     def set_binding(self, key: str, action: str) -> None:
-        self._check_key(key)
-        if action not in GESTURE_ACTIONS:
-            raise ValueError(f"unknown gesture action: {action!r}")
+        if action not in self.binding_choices(key):
+            raise ValueError(f"unsupported action {action!r} for gesture {key!r}")
         self._require().set_string(key, action)
 
     def launch_app(self) -> str:

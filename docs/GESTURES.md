@@ -24,69 +24,42 @@ The choices are read from the installed schema rather than hardcoded, so the cli
 dropdown follows whatever the desktop allows. If the schema cannot be read, the touchpad
 rows are disabled and the page explains why instead.
 
-Gesture bindings live in the extension's own schema
-`org.gnome.shell.extensions.tuf-control-quick` (`extension/tuf-control-quick@hamza-gouda/
-schemas/…gschema.xml`, wrapped by `GestureSettings` in `touchpad.py`). `gesture-enabled`
-(default off) switches the whole thing, each of the seven gestures maps to one action, and
-`gesture-launch-app` holds the desktop file id used by the launch-an-app action:
+Gesture bindings live in the extension's `org.gnome.shell.extensions.tuf-control-quick`
+schema. Enable gestures in **Touchpad & gestures**, then choose the actions you want.
+The extension defaults to off, and the bindings default to None.
 
-| Gesture | Setting | Default |
+| Gesture | Setting | Action for this layout |
 | --- | --- | --- |
-| Three-finger swipe down | `gesture-swipe3-down` | `none` |
-| Four-finger swipe up / down / left / right | `gesture-swipe4-up` / `-down` / `-left` / `-right` | `none` |
-| Pinch in / pinch out | `gesture-pinch-in` / `gesture-pinch-out` | `none` |
+| Three fingers down | `gesture-swipe3-down` | Show desktop, then restore on the next swipe |
+| Three fingers left | `gesture-swipe3-left` | Next app |
+| Three fingers right | `gesture-swipe3-right` | Previous app |
+| Four fingers up or down | `gesture-swipe4-up`, `gesture-swipe4-down` | Volume up or down |
+| Four fingers held and released | `gesture-hold4` | Play or pause |
+| Four fingers left or right | `gesture-swipe4-left`, `gesture-swipe4-right` | Configurable |
+| Pinch in or out | `gesture-pinch-in`, `gesture-pinch-out` | Configurable |
 
-**Show desktop is a toggle.** It minimises visible, minimisable windows on the active
-workspace and restores exactly those windows on repeat. Previously minimised windows and
-sticky windows stay as they were. Disabling the extension restores the surviving windows.
-This optional gesture integration defaults off and remains experimental: synthetic events
-prove recognition and lifecycle logic, while real touchpad delivery and competition with
-GNOME's swipe tracker require a live-session check. For the keyboard shortcut and a reliable
-keybinding fallback, use Focus Keys from bordeaux-gnome.
+**Show desktop** moves windows down as your fingers move. The next down swipe
+brings those windows back. An incomplete swipe settles back to where it began.
+Only windows owned by the toggle are restored, so windows you minimized separately
+stay minimized. App switching previews the next or previous application on the
+focused monitor and active workspace, with one window per app.
 
-Every binding accepts one of: `none`, `overview`, `app-grid`, `show-desktop`,
-`switch-windows`, `prev-workspace`, `next-workspace`, `launch-app`. The recognition
-thresholds are fixed constants, not settings: a swipe must travel 50 logical px on its
-dominant axis and carry 1.4× the other axis, a pinch must change its cumulative scale from 1.0 by 0.25
-(`gesture_logic.js`, `SWIPE_DISTANCE`, `DOMINANCE`, `PINCH_SCALE`; 50/1.4 was measured
-against the FX608JHR's touchpad, where a natural three-finger swipe accumulates ~73 px).
-Completed gestures are logged once at the normal journal level under `[tuf-gesture]`.
-Gesture starts, ends and rejected movements are emitted only at debug level; enable
-GNOME Shell debug logging when diagnosing a binding (`journalctl -b 0 | grep tuf-gesture`).
+The extension uses a Clutter event filter to route configured swipes before GNOME's
+workspace and overview handlers. Three fingers up still opens GNOME's overview.
+Once it opens, GNOME handles its own navigation. Entering it resets any gesture
+transforms so the overview can lay out the previews using the original geometry.
 
-## How it works
+The preview moves the existing compositor actors. Release uses a short ease-out
+transition, and GNOME's reduced-motion setting makes the committed action immediate.
+Volume changes in steps during travel through GNOME's media keys. A stationary
+four-finger hold triggers play/pause on release, with a 100–1500 ms window after
+Mutter reports the hold. Moving into a swipe cancels the hold. The libinput tapping
+interface supports up to three fingers, which is why the playback gesture uses a hold.
 
-The extension connects to `captured-event` on the shell stage (`gestures.js`,
-`GestureWatcher.enable()`) and watches only `TOUCHPAD_SWIPE` and `TOUCHPAD_PINCH` events.
-Clutter delivers per-event motion for swipes and cumulative scale for pinches. The tracker
-accumulates swipe motion and keeps the latest pinch scale, deciding only at `END`: BEGIN starts a gesture from zero, a mid-gesture finger change or
-`CANCEL` drops it, and END answers with the gesture name — or nothing — and resets.
-
-Every event returns `EVENT_PROPAGATE`. This avoids consuming the shell's own
-3-finger events, but cannot guarantee ordering against the overview tracker in a live session. The one overlap is deliberate: a 3-finger swipe
-down checks whether the overview was open at gesture start, so closing it cannot
-also minimize the windows after the overview disappears. If our desktop toggle is
-returning windows, it waits for the overview's `hidden` signal first.
-
-Show desktop uses a synchronized 160 ms ease-out opacity transition on the existing
-window actors. Minimization and restoration skip their extra dock animation. There
-are no cloned windows, snapshot textures, stagger queues or permanent frame callbacks.
-A repeated swipe reverses the pending toggle safely; disabling the extension restores
-owned windows and their original opacity. GNOME's reduced-motion setting is respected.
-
-A completed gesture runs the action bound to it at that moment, read from GSettings as the
-gesture finishes. Changing a binding in the page therefore applies to the next gesture with
-no restart — as long as the extension is enabled, since the extension is the one reading
-the settings. The actions, all in `shellActions()`:
-
-| Action | What it does |
-| --- | --- |
-| `overview` | toggles the shell overview |
-| `app-grid` | opens the app grid (the dash's show-apps behaviour) |
-| `show-desktop` | toggles the visible windows on the active workspace, preserving pre-minimised windows |
-| `switch-windows` | activates the next window across all workspaces, wrapping |
-| `prev-workspace` / `next-workspace` | activates the neighbouring workspace |
-| `launch-app` | launches the app from `gesture-launch-app`; nothing if it is empty, a notification if it is not installed |
+Other bindings include Overview, App grid, Switch window, Previous or Next workspace
+and Launch an app. Use **App to launch** to choose the target for the last action.
+The installed schema supplies the available choices, including when an older version
+of the extension is present.
 
 The page writes both schemas directly (`touchpad.py`); GSettings reads and writes are
 fast, so nothing goes through the background worker.

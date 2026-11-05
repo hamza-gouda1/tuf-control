@@ -10,9 +10,9 @@ transactions; no package updates, firmware flashes or hardware writes were perfo
   The matrix combines sequential bounded runs and affected-case reruns after fixes.
 - Installer: temporary-home round trips, original asset/service restoration, and
   literal paths containing shell-special characters pass.
-- Extension logic: 36 profile assertions and 160 gesture assertions pass.
-- Focused Shell animation QA passes desktop hide/restore, rapid reversal, overview
-  handoff and reduced motion, with no additional window actors during the fade.
+- Extension logic: 36 profile assertions and 293 gesture assertions pass.
+- Focused Shell QA covers reversible desktop travel, app switching, overview handoff,
+  reduced motion and media dispatch, using existing window actors.
 - Desktop entry and AppStream metadata validate; extension schemas validate.
 - ShellCheck and Python syntax checks pass. Ruff is unavailable locally; its CI
   job must pass after publishing before a release is announced.

@@ -8,6 +8,9 @@ import GLib from 'gi://GLib';
 import * as L from '../extension/tuf-control-quick@hamza-gouda/gesture_logic.js';
 import * as G from '../extension/tuf-control-quick@hamza-gouda/gestures.js';
 import {DesktopToggle} from '../extension/tuf-control-quick@hamza-gouda/desktop.js';
+import './test_desktop_drag.js';
+import './test_app_drag.js';
+import './test_gesture_session.js';
 
 let failed = 0, passed = 0;
 function ok(cond, msg) {
@@ -24,11 +27,12 @@ const {PHASE_BEGIN, PHASE_UPDATE, PHASE_END, PHASE_CANCEL} = L;
 
 // --- tables -------------------------------------------------------------------
 eq(L.GESTURES,
-    ['swipe3-down', 'swipe4-up', 'swipe4-down', 'swipe4-left', 'swipe4-right',
-        'pinch-in', 'pinch-out'], 'gestures');
+    ['swipe3-down', 'swipe3-left', 'swipe3-right', 'swipe4-up', 'swipe4-down', 'swipe4-left', 'swipe4-right',
+        'pinch-in', 'pinch-out', 'hold4'], 'gestures');
 eq(L.ACTIONS,
     ['none', 'overview', 'app-grid', 'show-desktop', 'switch-windows',
-        'prev-workspace', 'next-workspace', 'launch-app'], 'actions');
+        'prev-workspace', 'next-workspace', 'launch-app',
+        'prev-window', 'next-window', 'volume-up', 'volume-down', 'play-pause'], 'actions');
 eq([L.SWIPE_DISTANCE, L.PINCH_SCALE, L.DOMINANCE], [50, 0.25, 1.4], 'thresholds');
 
 // --- Clutter constants ------------------------------------------------------------

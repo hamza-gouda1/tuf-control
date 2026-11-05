@@ -5,7 +5,7 @@
     <key name="gesture-enabled" type="b">
       <default>false</default>
       <summary>Enable touchpad gestures</summary>
-      <description>Watch touchpad swipes and pinches and run the action each completed gesture is bound to. The shell keeps handling its own gestures; nothing here ever blocks an event.</description>
+      <description>Watch configured touchpad gestures and run their bound actions. Configured swipes may take ownership of their input so the shell does not handle the same gesture at the same time.</description>
     </key>
     <key name="gesture-swipe3-down" type="s">
       <default>'none'</default>
@@ -18,9 +18,74 @@
         <choice value='prev-workspace'/>
         <choice value='next-workspace'/>
         <choice value='launch-app'/>
+        <choice value='prev-window'/>
+        <choice value='next-window'/>
+        <choice value='volume-up'/>
+        <choice value='volume-down'/>
+        <choice value='play-pause'/>
       </choices>
       <summary>Action for a three-finger swipe down</summary>
       <description>Only fires on the desktop: while the overview is up the shell uses the gesture itself to close it again. One of none, overview, app-grid, show-desktop, switch-windows, prev-workspace, next-workspace or launch-app.</description>
+    </key>
+    <key name="gesture-swipe3-left" type="s">
+      <default>'none'</default>
+      <choices>
+        <choice value='none'/>
+        <choice value='overview'/>
+        <choice value='app-grid'/>
+        <choice value='show-desktop'/>
+        <choice value='switch-windows'/>
+        <choice value='prev-workspace'/>
+        <choice value='next-workspace'/>
+        <choice value='launch-app'/>
+        <choice value='prev-window'/>
+        <choice value='next-window'/>
+        <choice value='volume-up'/>
+        <choice value='volume-down'/>
+        <choice value='play-pause'/>
+      </choices>
+      <summary>Action for a three-finger swipe left</summary>
+      <description>One of the supported gesture actions.</description>
+    </key>
+    <key name="gesture-swipe3-right" type="s">
+      <default>'none'</default>
+      <choices>
+        <choice value='none'/>
+        <choice value='overview'/>
+        <choice value='app-grid'/>
+        <choice value='show-desktop'/>
+        <choice value='switch-windows'/>
+        <choice value='prev-workspace'/>
+        <choice value='next-workspace'/>
+        <choice value='launch-app'/>
+        <choice value='prev-window'/>
+        <choice value='next-window'/>
+        <choice value='volume-up'/>
+        <choice value='volume-down'/>
+        <choice value='play-pause'/>
+      </choices>
+      <summary>Action for a three-finger swipe right</summary>
+      <description>One of the supported gesture actions.</description>
+    </key>
+    <key name="gesture-hold4" type="s">
+      <default>'none'</default>
+      <choices>
+        <choice value='none'/>
+        <choice value='overview'/>
+        <choice value='app-grid'/>
+        <choice value='show-desktop'/>
+        <choice value='switch-windows'/>
+        <choice value='prev-workspace'/>
+        <choice value='next-workspace'/>
+        <choice value='launch-app'/>
+        <choice value='prev-window'/>
+        <choice value='next-window'/>
+        <choice value='volume-up'/>
+        <choice value='volume-down'/>
+        <choice value='play-pause'/>
+      </choices>
+      <summary>Action after holding and releasing four fingers</summary>
+      <description>Runs when four fingers are lifted after a hold.</description>
     </key>
     <key name="gesture-swipe4-up" type="s">
       <default>'none'</default>
@@ -33,6 +98,11 @@
         <choice value='prev-workspace'/>
         <choice value='next-workspace'/>
         <choice value='launch-app'/>
+        <choice value='prev-window'/>
+        <choice value='next-window'/>
+        <choice value='volume-up'/>
+        <choice value='volume-down'/>
+        <choice value='play-pause'/>
       </choices>
       <summary>Action for a four-finger swipe up</summary>
       <description>One of none, overview, app-grid, show-desktop, switch-windows, prev-workspace, next-workspace or launch-app.</description>
@@ -48,6 +118,11 @@
         <choice value='prev-workspace'/>
         <choice value='next-workspace'/>
         <choice value='launch-app'/>
+        <choice value='prev-window'/>
+        <choice value='next-window'/>
+        <choice value='volume-up'/>
+        <choice value='volume-down'/>
+        <choice value='play-pause'/>
       </choices>
       <summary>Action for a four-finger swipe down</summary>
       <description>One of none, overview, app-grid, show-desktop, switch-windows, prev-workspace, next-workspace or launch-app.</description>
@@ -63,6 +138,11 @@
         <choice value='prev-workspace'/>
         <choice value='next-workspace'/>
         <choice value='launch-app'/>
+        <choice value='prev-window'/>
+        <choice value='next-window'/>
+        <choice value='volume-up'/>
+        <choice value='volume-down'/>
+        <choice value='play-pause'/>
       </choices>
       <summary>Action for a four-finger swipe left</summary>
       <description>One of none, overview, app-grid, show-desktop, switch-windows, prev-workspace, next-workspace or launch-app.</description>
@@ -78,6 +158,11 @@
         <choice value='prev-workspace'/>
         <choice value='next-workspace'/>
         <choice value='launch-app'/>
+        <choice value='prev-window'/>
+        <choice value='next-window'/>
+        <choice value='volume-up'/>
+        <choice value='volume-down'/>
+        <choice value='play-pause'/>
       </choices>
       <summary>Action for a four-finger swipe right</summary>
       <description>One of none, overview, app-grid, show-desktop, switch-windows, prev-workspace, next-workspace or launch-app.</description>
@@ -93,6 +178,11 @@
         <choice value='prev-workspace'/>
         <choice value='next-workspace'/>
         <choice value='launch-app'/>
+        <choice value='prev-window'/>
+        <choice value='next-window'/>
+        <choice value='volume-up'/>
+        <choice value='volume-down'/>
+        <choice value='play-pause'/>
       </choices>
       <summary>Action for pinching in</summary>
       <description>Fingers drawn together, the pinch shrinking. One of none, overview, app-grid, show-desktop, switch-windows, prev-workspace, next-workspace or launch-app.</description>
@@ -108,6 +198,11 @@
         <choice value='prev-workspace'/>
         <choice value='next-workspace'/>
         <choice value='launch-app'/>
+        <choice value='prev-window'/>
+        <choice value='next-window'/>
+        <choice value='volume-up'/>
+        <choice value='volume-down'/>
+        <choice value='play-pause'/>
       </choices>
       <summary>Action for pinching out</summary>
       <description>Fingers spread apart, the pinch growing. One of none, overview, app-grid, show-desktop, switch-windows, prev-workspace, next-workspace or launch-app.</description>

@@ -17,6 +17,11 @@ ACTION_LABELS = {
     "prev-workspace": "Previous workspace",
     "next-workspace": "Next workspace",
     "launch-app": "Launch an app",
+    "prev-window": "Previous app",
+    "next-window": "Next app",
+    "volume-up": "Volume up",
+    "volume-down": "Volume down",
+    "play-pause": "Play or pause",
 }
 
 CLICK_LABELS = {"default": "Default", "none": "None", "areas": "Areas", "fingers": "Fingers"}
@@ -26,6 +31,10 @@ CLICK_LABELS = {"default": "Default", "none": "None", "areas": "Areas", "fingers
 GESTURE_ROWS = (
     ("gesture-swipe3-down", "Three-finger swipe down",
      "Only fires on the desktop: while the overview is up the shell closes it itself"),
+    ("gesture-swipe3-left", "Three-finger swipe left", None),
+    ("gesture-swipe3-right", "Three-finger swipe right", None),
+    ("gesture-hold4", "Four-finger hold",
+     "Hold four fingers on the touchpad, then lift them to run the action"),
     ("gesture-swipe4-up", "Four-finger swipe up", None),
     ("gesture-swipe4-down", "Four-finger swipe down", None),
     ("gesture-swipe4-left", "Four-finger swipe left", None),
@@ -99,20 +108,24 @@ class GesturesPage(Page):
         # -- gestures ------------------------------------------------------------------------
         self.gestures = Adw.PreferencesGroup(
             title="Gestures",
-            description="Swipes and pinches the shell extension runs actions for; the "
-                        "shell keeps its own three-finger gestures, nothing is consumed")
+            description="Bind swipes, pinches, and a four-finger hold. Configured "
+                        "swipes may take ownership of touchpad input.")
         self.ext_row, self.ext_val = value_row("Shell extension",
                                                "Quick-settings tile that runs the gestures")
         self.enabled_row = Adw.SwitchRow(
             title="Gestures enabled",
-            subtitle="Run the action each completed swipe or pinch is bound to")
+            subtitle="Run the selected action after each configured gesture")
         self.enabled_row.connect("notify::active", self._gest_enabled)
         self.gestures.add(self.ext_row)
         self.gestures.add(self.enabled_row)
         self.gesture_rows: dict[str, Adw.ComboRow] = {}
-        actions = Gtk.StringList.new([ACTION_LABELS[a] for a in touchpad.GESTURE_ACTIONS])
+        self._binding_choices: dict[str, tuple[str, ...]] = {}
         for key, title, sub in GESTURE_ROWS:
-            row = Adw.ComboRow(title=title, model=actions)
+            choices = self.gest.binding_choices(key) if self.gest.available else ()
+            if not choices:
+                continue
+            self._binding_choices[key] = choices
+            row = Adw.ComboRow(title=title, model=Gtk.StringList.new([ACTION_LABELS[a] for a in choices]))
             if sub:
                 row.set_subtitle(sub)
             row.connect("notify::selected", self._gesture, key)
@@ -171,7 +184,9 @@ class GesturesPage(Page):
             self.ext_val.set_label("Installed")
             self.enabled_row.set_active(self.gest.enabled())
             for key, row in self.gesture_rows.items():
-                row.set_selected(self._action_index(self.gest.binding(key)))
+                choices = self._binding_choices[key]
+                action = self.gest.binding(key)
+                row.set_selected(choices.index(action) if action in choices else 0)
             app_id = self.gest.launch_app()
             self.app_row.set_selected(next((i for i, (aid, _n) in enumerate(self._apps)
                                             if aid == app_id), 0))
@@ -208,10 +223,6 @@ class GesturesPage(Page):
         self._apps = apps
         self.app_row.set_model(Gtk.StringList.new([name for _i, name in apps]))
         _combo_tip(self.app_row)
-
-    def _action_index(self, action: str) -> int:
-        return (touchpad.GESTURE_ACTIONS.index(action)
-                if action in touchpad.GESTURE_ACTIONS else 0)
 
     @staticmethod
     def _speed_text(v: float) -> str:
@@ -310,8 +321,8 @@ class GesturesPage(Page):
         if self._quiet or not self.gest.available:
             return
         i = row.get_selected()
-        action = (touchpad.GESTURE_ACTIONS[i] if 0 <= i < len(touchpad.GESTURE_ACTIONS)
-                  else "none")
+        choices = self._binding_choices[key]
+        action = choices[i] if 0 <= i < len(choices) else "none"
         self._write_gest(lambda: self.gest.set_binding(key, action),
                          f"{row.get_title()} set to {ACTION_LABELS[action]}")
 

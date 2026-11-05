@@ -4,14 +4,15 @@
 //
 // Touchpad gestures: a watcher on the stage that sees the shell's touchpad
 // swipes and pinches go by and runs the action each completed gesture is bound
-// to in the settings. Nothing is ever consumed — every event propagates, so
-// the shell's own 3-finger swipes keep working; we only observe. The decision
+// to in the settings. GestureSession owns configured interactive gestures
+// and passes the remaining input to the shell. The decision
 // maths lives in gesture_logic.js (pure, tested with gjs -m). The shell side
 // takes Main, Meta and Clutter through parameters, so this module also loads
 // outside the shell (tests).
 
 import Gio from 'gi://Gio';
 
+import {GestureSession} from './gesture_session.js';
 import {DesktopToggle} from './desktop.js';
 
 import {GestureTracker, PHASE_BEGIN, PHASE_END, SWIPE_DISTANCE, DOMINANCE,
@@ -67,7 +68,7 @@ export function shellActions(main, meta, settings, motion = null) {
         .activate(global.get_current_time());
 
     const actor = w => w.get_compositor_private?.();
-    const desktop = new DesktopToggle({
+    const desktop = motion?.desktop ?? new DesktopToggle({
         windows: () => manager.get_active_workspace().list_windows(),
         eligible: w => !w.skip_taskbar && w.can_minimize() && !w.is_on_all_workspaces()
             && (!w.get_compositor_private || !!actor(w)),
@@ -77,10 +78,7 @@ export function shellActions(main, meta, settings, motion = null) {
         opacity: (w, value) => { if (actor(w)) actor(w).opacity = value; },
         cancel: w => actor(w)?.remove_transition('opacity'),
         fade: (w, value, done) => {
-            if (motion && actor(w))
-                motion.fade(actor(w), value, done);
-            else
-                done();
+            done();
         },
         minimize: w => { main.wm?.skipNextEffect(actor(w)); w.minimize(); },
         unminimize: w => { main.wm?.skipNextEffect(actor(w)); w.unminimize(); },
@@ -92,6 +90,7 @@ export function shellActions(main, meta, settings, motion = null) {
         pending = 0;
     };
     const toggleDesktop = () => {
+        motion?.apps.cancel();
         if (pending) {
             cancelPending();
             return;
@@ -111,7 +110,12 @@ export function shellActions(main, meta, settings, motion = null) {
         overviewVisible: () => main.overview.visible,
         // the watcher consults this before returning the last app in the overview
         showDesktopCanReturn: () => desktop.canReturn,
-        destroy: () => { cancelPending(); desktop.destroy(); },
+        destroy: () => { cancelPending(); motion?.apps.destroy(); desktop.destroy(); },
+        'prev-window': () => motion?.switchApp(-1),
+        'next-window': () => motion?.switchApp(1),
+        'volume-up': () => motion?.media('volume-up'),
+        'volume-down': () => motion?.media('volume-down'),
+        'play-pause': () => motion?.media('play-pause'),
         overview: () => main.overview.toggle(),
         'app-grid': () => main.overview.showApps(),
         'show-desktop': toggleDesktop,
@@ -122,22 +126,15 @@ export function shellActions(main, meta, settings, motion = null) {
     };
 }
 
-/**
- * Watches touchpad swipes and pinches on `stage` (global.stage) and runs the
- * action each completed gesture is bound to in `settings`. The settings are
- * read when a gesture completes, so changing a binding applies at once.
- *
- * With 'gesture-enabled' off the handler does nothing at all, and disable()
- * removes it again. `clutter` is the Clutter namespace; a parameter only so
- * tests can run the watcher without the shell's typelib path.
- */
+/** Routes configured swipes and holds, and dispatches discrete swipe/pinch actions. */
 export class GestureWatcher {
-    constructor({settings, stage, actions, clutter, tracker, log = null, debug = null}) {
+    constructor({settings, stage, actions, clutter, tracker, input = null, log = null, debug = null}) {
         this._settings = settings;
         this._stage = stage;
         this._actions = actions;
         this._clutter = clutter;
         this._tracker = tracker ?? new GestureTracker();
+        this._session = input ? new GestureSession(settings, actions, input) : null;
         this._log = log ?? (msg => console.log(`[tuf-gesture] ${msg}`));
         this._debug = debug ?? (msg => console.debug(`[tuf-gesture] ${msg}`));
         this._handler = 0;
@@ -147,35 +144,53 @@ export class GestureWatcher {
     enable() {
         if (this._handler)
             return;
-        this._handler = this._stage.connect('captured-event',
-            (stage, event) => this._event(event));
+        if (this._session) {
+            // The filter precedes Shell's own captured-event swipe handlers.
+            this._handler = this._clutter.Event.add_filter(this._stage, event => this._event(event));
+        } else {
+            this._handler = this._stage.connect('captured-event', (stage, event) => this._event(event));
+        }
     }
 
     disable() {
         if (!this._handler)
             return;
-        this._stage.disconnect(this._handler);
+        if (this._session)
+            this._clutter.Event.remove_filter(this._handler);
+        else
+            this._stage.disconnect(this._handler);
         this._handler = 0;
-        this._startedOverview = false;
-        this._tracker.reset(); // forget a half-finished gesture
+        this.cancel();
         this._actions.destroy?.();
     }
 
-    _event(event) {
-        // Switched off: do nothing at all, not even track.
-        if (!this._settings.get_boolean('gesture-enabled'))
-            return this._clutter.EVENT_PROPAGATE;
+    cancel() {
+        this._startedOverview = false;
+        this._tracker.reset();
+        this._session?.cancel();
+    }
 
+    _event(event) {
         const type = event.type();
+        const hold = this._session && type === this._clutter.EventType.TOUCHPAD_HOLD;
         const pinch = type === this._clutter.EventType.TOUCHPAD_PINCH;
-        if (type !== this._clutter.EventType.TOUCHPAD_SWIPE && !pinch)
+        if (!hold && !pinch && type !== this._clutter.EventType.TOUCHPAD_SWIPE)
             return this._clutter.EVENT_PROPAGATE;
+        if (!this._settings.get_boolean('gesture-enabled')) {
+            this._session?.cancel();
+            return this._clutter.EVENT_PROPAGATE;
+        }
+        if (hold) {
+            const handled = this._session.hold(event.get_gesture_phase(),
+                event.get_touchpad_gesture_finger_count(), event.get_time());
+            return handled ? this._clutter.EVENT_STOP : this._clutter.EVENT_PROPAGATE;
+        }
 
         const [dx, dy] = pinch
             ? [event.get_gesture_pinch_angle_delta(), event.get_gesture_pinch_scale()]
             : event.get_gesture_motion_delta();
         // not every surface reports an unaccelerated delta; tests' fakes do not either
-        const [udx, udy] = event.get_gesture_motion_delta_unaccelerated?.() ?? [0, 0];
+        const [udx, udy] = event.get_gesture_motion_delta_unaccelerated?.() ?? [dx, dy];
         // Mutter 14 names it finger_count (get_touchpad_gesture_fingers does not exist)
         const fingers = event.get_touchpad_gesture_finger_count();
         const phase = event.get_gesture_phase();
@@ -189,6 +204,13 @@ export class GestureWatcher {
             : this._tracker.swipe(phase, fingers, dx, dy);
         if (phase === PHASE_BEGIN || phase === PHASE_END)
             this._debug(`swipe fingers=${fingers} phase=${phase === PHASE_BEGIN ? 'begin' : 'end'}`);
+        if (this._session) {
+            if (pinch && phase === PHASE_BEGIN)
+                this._session.cancel();
+            if (!pinch && this._session.swipe(phase, fingers, udx, udy,
+                event.get_time()))
+                return this._clutter.EVENT_STOP;
+        }
         if (gesture) {
             const ran = this._fire(gesture);
             this._log(`completed ${gesture} -> ${ran ?? 'no action bound'}`);
@@ -205,6 +227,9 @@ export class GestureWatcher {
         // itself, and when "Show desktop" was the thing that minimised the app,
         // the same swipe brings it back — down reads as a toggle from either
         // side. Any other binding stays out of the shell's way.
+        if (this._session && gesture === 'swipe3-down' &&
+            resolveAction(this._settings, gesture) === 'show-desktop')
+            return null; // the interactive owner handles this only in desktop mode
         if (gesture === 'swipe3-down' && (this._startedOverview || this._actions.overviewVisible())) {
             if (resolveAction(this._settings, gesture) === 'show-desktop'
                     && this._actions.showDesktopCanReturn())

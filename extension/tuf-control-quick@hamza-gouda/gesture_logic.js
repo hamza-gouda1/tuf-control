@@ -10,8 +10,8 @@
 // Tested with gjs -m.
 
 export const GESTURES = [
-    'swipe3-down', 'swipe4-up', 'swipe4-down', 'swipe4-left', 'swipe4-right',
-    'pinch-in', 'pinch-out',
+    'swipe3-down', 'swipe3-left', 'swipe3-right', 'swipe4-up', 'swipe4-down', 'swipe4-left', 'swipe4-right',
+    'pinch-in', 'pinch-out', 'hold4',
 ];
 
 // Everything a gesture can be bound to; 'none' disables it. These are the
@@ -19,6 +19,7 @@ export const GESTURES = [
 export const ACTIONS = [
     'none', 'overview', 'app-grid', 'show-desktop', 'switch-windows',
     'prev-workspace', 'next-workspace', 'launch-app',
+    'prev-window', 'next-window', 'volume-up', 'volume-down', 'play-pause',
 ];
 
 // Measured on the owner's FX608JHR: a natural three-finger swipe down accumulates
