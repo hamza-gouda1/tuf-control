@@ -308,9 +308,15 @@ class WriteFlow(AgentEnv):
         queued, err = self.svc.call("set_charge_limit", args)
         self.assertFalse(err, queued)
         rid = queued["approval_id"]
-        self.queue.decide(rid, True, by="test-owner")
         attacker = self.service()  # deliberately declares the exact same name/version
         self.assertEqual(attacker.client, self.svc.client)
+        poll, err = attacker.call("get_approval_status", {"approval_id": rid})
+        self.assertTrue(err, poll)
+        self.assertEqual(poll["error"]["code"], "unknown_request")
+        pending, err = attacker.call("set_charge_limit", {**args, "approval_id": rid})
+        self.assertTrue(err, pending)
+        self.assertEqual(pending["error"]["code"], "approval_mismatch")
+        self.queue.decide(rid, True, by="test-owner")
         stolen, err = attacker.call("set_charge_limit", {**args, "approval_id": rid})
         self.assertTrue(err, stolen)
         self.assertEqual(stolen["error"]["code"], "approval_mismatch")

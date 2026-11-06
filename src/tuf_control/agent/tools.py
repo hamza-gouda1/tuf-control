@@ -632,8 +632,8 @@ def _explain_cap(svc: AgentService, cap: str) -> dict:
 
 def t_get_approval_status(svc: AgentService, a: dict) -> dict:
     e = svc.queue.get(a["approval_id"])
-    if e is None:
-        raise ToolError("unknown_request", "no request with that id (it may have been pruned)")
+    if e is None or e.get("session") != svc._session:
+        raise ToolError("unknown_request", "no request with that id in this session")
     nxt = {"pending": "wait; the owner has not decided",
            "approved": "repeat the identical call with dry_run: false and this approval_id "
                        "before use_by",
@@ -912,7 +912,7 @@ _T = [
              "description": "A capability name or a tool name."}}, ["feature"]),
          t_explain_unavailable, rate=30),
     Tool("get_approval_status", "Approval status",
-         "Status of a write request waiting for the owner: pending, approved (repeat the "
+         "Status of a write request from this session: pending, approved (repeat the "
          "identical call with approval_id), denied, used, expired or cancelled.",
          "read", obj({"approval_id": WRITE_PROPS["approval_id"]}, ["approval_id"]),
          t_get_approval_status, rate=60),

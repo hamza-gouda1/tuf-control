@@ -4,6 +4,8 @@ All notable changes to this project. Format follows Keep a Changelog; versions f
 
 ## [Unreleased]
 
+- Keep the MCP session open after malformed input and restrict approval polling to
+  the server session that requested it.
 - Tuck windows toward the bottom of their monitor and restore them along the same
   path. Both directions follow the touchpad until release.
 - Track finger movement directly in the desktop toggle and previous/next app previews.

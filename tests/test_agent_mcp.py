@@ -195,6 +195,17 @@ class Protocol(Env):
         self.assertEqual(frames[0]["error"]["code"], -32700)
         self.assertEqual(frames[1]["id"], 2)
 
+    def test_bad_frames_do_not_end_the_stdio_session(self):
+        ping = json.dumps(req(8, "ping"))
+        bad = (ping.encode("utf-16-le"),
+               b'{"jsonrpc":"2.0","id":6,"method":"ping","params":{"number":NaN}}',
+               b"[" * 100_000 + b"0" + b"]" * 100_000)
+        out = io.BytesIO()
+        serve(self.svc, stdin=io.BytesIO(b"\n".join((*bad, ping.encode()))), stdout=out)
+        frames = [json.loads(line) for line in out.getvalue().splitlines()]
+        self.assertEqual([f["error"]["code"] for f in frames[:-1]], [-32700] * len(bad))
+        self.assertEqual(frames[-1], {"jsonrpc": "2.0", "id": 8, "result": {}})
+
 
 class JsonCli(Env):
     def run_cli(self, *argv):

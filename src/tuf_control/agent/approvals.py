@@ -157,6 +157,9 @@ class ApprovalQueue:
             for x in items:
                 if x["id"] != rid:
                     continue
+                if x["client"] != client or x.get("session") != session:
+                    raise ApprovalError("approval_mismatch", "this approval belongs to "
+                                        "another client or server session")
                 st = x["status"]
                 if st == "pending":
                     raise ApprovalError("still_pending", "the owner has not decided yet; "
@@ -166,9 +169,6 @@ class ApprovalQueue:
                 if x["tool"] != tool or x["params_hash"] != h:
                     raise ApprovalError("approval_mismatch", "this approval was given for "
                                         "a different tool or different parameters")
-                if x["client"] != client or x.get("session") != session:
-                    raise ApprovalError("approval_mismatch", "this approval belongs to "
-                                        "another client or server session")
                 x.update(status="used", used_at=now)
                 return dict(x), True
             raise ApprovalError("unknown_request", f"no request with id {rid}")

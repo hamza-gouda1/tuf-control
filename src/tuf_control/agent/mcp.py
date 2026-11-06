@@ -53,8 +53,8 @@ SAFETY_DOC = """# TUF Control agent access: safety model
 - A real write (`dry_run: false`) needs an approval: a standing grant with an expiry
   (control-basic tools only), or a per-call approval. Without one the request is queued,
   the owner sees it in the app (and a desktop notification), and you get an
-  `approval_id`. Poll `get_approval_status`; once approved, repeat the identical call
-  with `approval_id`. An approval is bound to the tool, the exact parameters and this
+  `approval_id`. Poll `get_approval_status` from the requesting session. Once approved,
+  repeat the identical call with `approval_id`. An approval is bound to the tool, the exact parameters and this
   server session, works once, and expires. Restarting the server requires a fresh
   approval. The client name is self-declared and informational, not authentication;
   approval and audit records include the OS-reported parent PID and executable.
@@ -131,6 +131,10 @@ PROMPTS = {
 }
 
 
+def _reject_non_json_constant(value: str) -> None:
+    raise ValueError(f"{value} is not a JSON literal")
+
+
 class McpServer:
     """Transport-free core: handle(message) -> response dict or None."""
 
@@ -153,8 +157,10 @@ class McpServer:
 
     def handle_line(self, line: bytes | str) -> dict | None:
         try:
-            msg = json.loads(line)
-        except (ValueError, UnicodeDecodeError):
+            if isinstance(line, bytes):
+                line = line.decode("utf-8")
+            msg = json.loads(line, parse_constant=_reject_non_json_constant)
+        except (ValueError, RecursionError):
             return self._err(None, PARSE_ERROR, "Parse error")
         return self.handle(msg)
 

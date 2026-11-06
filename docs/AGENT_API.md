@@ -11,6 +11,7 @@ and explain, not change. Every change is a dry run first and needs the owner's a
 
     tuf-control mcp --print-config          # paste the output into your MCP client's config
     tuf-control agent status                # read-only by default
+    tuf-control agent schema                # inspect tool schemas without accessing hardware
     tuf-control agent grant control-basic   # allow profile, charge limit and keyboard requests
 
 `--print-config` prints the installed launcher, so the snippet works from any directory:
@@ -48,7 +49,7 @@ are a closed object (`additionalProperties: false`) with ranges, enums and patte
 | `get_updates` | read | the cached update check: what needs an update per source, what is held back and why; never checks or installs | read-only |
 | `get_update_history` | read | past update runs from the persistent history (installed, pending with the reason, failed, installed outside the app); `since` like `7d` | read-only |
 | `explain_unavailable` | read | `feature`: a capability or a tool; why it is missing or refused, what would change it | read-only |
-| `get_approval_status` | read | `approval_id`: pending, approved, used, denied, expired or cancelled | read-only |
+| `get_approval_status` | read | `approval_id` from this session: pending, approved, used, denied, expired or cancelled | read-only |
 | `set_platform_profile` | control-basic | `profile`: quiet / balanced / performance | write, idempotent |
 | `set_charge_limit` | control-basic | `percent`: 20-100 | write, idempotent |
 | `set_keyboard_effect` | control-basic | `mode` (only modes the keyboard supports), `colour`, `colour2`, `speed`, `direction` | write, idempotent |
