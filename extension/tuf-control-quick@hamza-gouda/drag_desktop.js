@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) Hamza Gouda
 
+const POSE_PROPERTIES = ['translation_x', 'translation_y', 'scale_x', 'scale_y', 'opacity'];
+const TUCK_SCALE = 0.20;
+
 /** Own only the windows involved in the current desktop toggle. */
 export class DesktopDrag {
     constructor(deps) {
@@ -49,7 +52,7 @@ export class DesktopDrag {
                 const actor = this._d.actor(window);
                 if (!actor)
                     continue;
-                const record = {actor, opacity: actor.opacity, y: actor.translation_y};
+                const record = {actor, pose: null, offset: null};
                 record.signal = window.connect('unmanaged', () => {
                     this._forget(window, record);
                     if (window === this._focus)
@@ -64,7 +67,14 @@ export class DesktopDrag {
         if (!this._windows.size)
             return false;
         const animated = this._d.animationsEnabled();
-        this._gesture = {returning, animated, progress: 0, distance: this._d.height() * 0.18};
+        this._gesture = {returning, animated, progress: 0};
+        if (animated) {
+            for (const [window, record] of this._windows) {
+                const {actor} = record;
+                record.pose = Object.fromEntries(POSE_PROPERTIES.map(key => [key, actor[key]]));
+                record.offset = this._d.tuckOffset(window, actor);
+            }
+        }
         if (returning && animated) {
             this.update(0);
             for (const [window, {actor}] of this._windows) {
@@ -77,9 +87,16 @@ export class DesktopDrag {
 
     _target(record, gesture, progress) {
         const hiddenAmount = gesture.returning ? 1 - progress : progress;
+        const scale = 1 - (1 - TUCK_SCALE) * hiddenAmount;
+        const {pose, offset} = record;
+        // Contract the whole layout toward the same point on each monitor.
+        // Using the same pose for hide and return preserves the path and stacking.
         return {
-            opacity: Math.round(record.opacity * (1 - hiddenAmount)),
-            translation_y: record.y + (gesture.returning ? -1 : 1) * gesture.distance * hiddenAmount,
+            translation_x: pose.translation_x + offset.x * (1 - scale),
+            translation_y: pose.translation_y + offset.y * (1 - scale),
+            scale_x: pose.scale_x * scale,
+            scale_y: pose.scale_y * scale,
+            opacity: Math.round(pose.opacity * (1 - hiddenAmount ** 2)),
         };
     }
 
@@ -88,14 +105,9 @@ export class DesktopDrag {
         if (!gesture)
             return;
         gesture.progress = Math.max(0, Math.min(1, Number(progress) || 0));
-        if (gesture.animated) {
-            const amount = gesture.returning ? 1 - gesture.progress : gesture.progress;
-            const offset = (gesture.returning ? -1 : 1) * gesture.distance * amount;
-            for (const record of this._windows.values()) {
-                record.actor.translation_y = record.y + offset;
-                record.actor.opacity = Math.round(record.opacity * (1 - amount));
-            }
-        }
+        if (gesture.animated)
+            for (const record of this._windows.values())
+                Object.assign(record.actor, this._target(record, gesture, gesture.progress));
     }
 
     end(commit, animate = true) {
@@ -110,7 +122,12 @@ export class DesktopDrag {
             return;
         }
         const progress = commit ? 1 : 0;
-        const duration = Math.round(90 + 70 * Math.abs(progress - gesture.progress));
+        const remaining = Math.abs(progress - gesture.progress);
+        if (remaining === 0) {
+            this._apply(hidden, focus);
+            return;
+        }
+        const duration = Math.round(65 + 95 * remaining);
         const settle = {hidden, focus, remaining: new Set(this._windows.keys())};
         this._settle = settle;
         for (const [window, record] of this._windows) {
@@ -124,8 +141,9 @@ export class DesktopDrag {
     _apply(hidden, focus) {
         for (const [window, record] of this._windows) {
             const {actor} = record;
-            actor.remove_transition('opacity');
-            actor.remove_transition('translation-y');
+            if (record.pose)
+                for (const key of POSE_PROPERTIES)
+                    actor.remove_transition(key.replace('_', '-'));
             if (hidden !== window.minimized) {
                 this._d.skipEffect(actor);
                 if (hidden)
@@ -133,8 +151,11 @@ export class DesktopDrag {
                 else
                     window.unminimize();
             }
-            actor.translation_y = record.y;
-            actor.opacity = record.opacity;
+            if (record.pose) {
+                Object.assign(actor, record.pose);
+                record.pose = null;
+                record.offset = null;
+            }
             if (!hidden)
                 this._forget(window, record);
         }

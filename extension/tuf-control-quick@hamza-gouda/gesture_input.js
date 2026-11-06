@@ -49,7 +49,14 @@ export function createGestureInput(main) {
     };
     const desktop = new DesktopDrag({...shared, windows,
         eligible: window => eligible(window) && window.can_minimize() && !window.is_on_all_workspaces(),
-        height: () => monitor()?.height ?? global.screen_height,
+        tuckOffset: (window, windowActor) => {
+            const box = main.layoutManager.monitors[window.get_monitor()] ?? main.layoutManager.primaryMonitor;
+            const [px, py] = windowActor.get_pivot_point();
+            return {
+                x: box.x + box.width / 2 - (windowActor.x + windowActor.translation_x + px * windowActor.width),
+                y: box.y + box.height - 48 - (windowActor.y + windowActor.translation_y + py * windowActor.height),
+            };
+        },
     });
     const group = global.window_group;
     const apps = new AppDrag({...shared,
