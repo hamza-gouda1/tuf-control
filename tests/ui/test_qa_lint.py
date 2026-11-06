@@ -24,6 +24,16 @@ sys.path.insert(0, str(HERE))
 import qa_core as q  # noqa: E402
 
 
+class PageSelectionTests(unittest.TestCase):
+    def test_unknown_page_cannot_silently_reduce_coverage(self):
+        cmd = [sys.executable, str(HERE / "qa_lint.py"), "--list", "--pages"]
+        bad = subprocess.run([*cmd, "dashboard,agent-access"], capture_output=True, text=True)
+        self.assertEqual(bad.returncode, 2)
+        self.assertIn("unknown QA page(s): 'agent-access'", bad.stderr)
+        good = subprocess.run([*cmd, "dashboard,agent"], capture_output=True, text=True)
+        self.assertEqual(good.returncode, 0, good.stderr)
+
+
 class ContrastTests(unittest.TestCase):
     def test_extremes_and_symmetry(self):
         self.assertAlmostEqual(q.contrast_ratio((0, 0, 0), (255, 255, 255)), 21.0, places=1)

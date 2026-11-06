@@ -990,6 +990,10 @@ def main() -> int:
     args = p.parse_args()
     if os.environ.get("TUF_QA_JOB") and args.child:
         return child(json.loads(os.environ["TUF_QA_JOB"]))
+    if args.pages:
+        unknown = set(args.pages.split(",")) - set(PAGES)
+        if unknown:
+            p.error(f"unknown QA page(s): {', '.join(repr(page) for page in sorted(unknown))}")
     if args.quick:
         args.sizes, args.variants, args.modes = "1280x720,360x640", "dark,light", ""
     if args.list:
