@@ -38,10 +38,11 @@ The extension defaults to off, and the bindings default to None.
 | Four fingers left or right | `gesture-swipe4-left`, `gesture-swipe4-right` | Configurable |
 | Pinch in or out | `gesture-pinch-in`, `gesture-pinch-out` | Configurable |
 
-**Show desktop** moves windows down as your fingers move. The next down swipe
-brings those windows back. An incomplete swipe settles back to where it began.
-Only windows owned by the toggle are restored, so windows you minimized separately
-stay minimized. App switching previews the next or previous application on the
+**Show desktop** tucks windows toward the bottom centre of each monitor as your
+fingers move. The next down swipe brings them back along the same path. An incomplete
+swipe settles back to where it began. Only windows hidden by the toggle are restored.
+Switching workspaces resets the gesture and restores the previous workspace's windows
+in the background. App switching previews the next or previous application on the
 focused monitor and active workspace, with one window per app.
 
 The extension uses a Clutter event filter to route configured swipes before GNOME's
@@ -94,10 +95,10 @@ the page is never instantiated.
 
 ## Limitations (honest)
 
-- GNOME binds the 3-finger up and horizontal swipes itself; only 3-finger down is ours, and
-  the tracker rejects 3-finger swipes in the shell's own directions.
-- Taps are not available as gestures: the touchpad reports taps as button clicks, and the
-  watcher only sees swipe and pinch events.
+- A configured three-finger horizontal binding takes priority over GNOME's workspace
+  swipe. Leave it set to None to keep GNOME's workspace switching in that direction.
+- The playback binding uses a four-finger hold and release. Mutter does not report a
+  four-finger tap as a gesture.
 - Bindings apply live only while the extension is enabled — it is the extension that reads
   them per gesture. With the extension off or not installed nothing listens, and after
   installing it on Wayland a log-out and log-in is needed before it can be enabled.

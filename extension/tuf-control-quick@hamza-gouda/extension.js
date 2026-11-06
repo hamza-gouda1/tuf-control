@@ -262,10 +262,13 @@ export default class TufControlQuickExtension extends Extension {
             input: this._gestureInput,
             clutter: Clutter,
         });
-        this._overviewGestureId = Main.overview.connect('showing', () => {
+        const resetGestureMotion = () => {
             this._gestures.cancel();
             this._gestureInput.prepareOverview();
-        });
+        };
+        this._overviewGestureId = Main.overview.connect('showing', resetGestureMotion);
+        this._workspaceGestureId = global.workspace_manager.connect(
+            'active-workspace-changed', resetGestureMotion);
         this._gestures.enable();
         // one Power Mode selector is enough: ours (asusd, ppd fallback) replaces the
         // shell's own tile while this extension runs; a switch on the Touchpad &
@@ -280,6 +283,9 @@ export default class TufControlQuickExtension extends Extension {
         if (this._overviewGestureId)
             Main.overview.disconnect(this._overviewGestureId);
         this._overviewGestureId = 0;
+        if (this._workspaceGestureId)
+            global.workspace_manager.disconnect(this._workspaceGestureId);
+        this._workspaceGestureId = 0;
         this._gestures?.disable();
         this._gestureInput?.destroy();
         this._gestureInput = null;
