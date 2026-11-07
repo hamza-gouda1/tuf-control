@@ -100,8 +100,18 @@ export class GestureSession {
                 return true;
             swipe.direction = x > y ? (swipe.dx < 0 ? 'left' : 'right')
                 : (swipe.dy < 0 ? 'up' : 'down');
-            swipe.action = swipe.bindings[swipe.direction];
-            if (fingers === 3 && !swipe.action) {
+            const desktopSwipe = fingers === 3 && swipe.bindings.down === 'show-desktop' &&
+                (swipe.direction === 'up' || swipe.direction === 'down');
+            swipe.action = desktopSwipe ? null : swipe.bindings[swipe.direction];
+            if (desktopSwipe) {
+                this._input.apps.cancel();
+                if (this._input.desktop.begin(swipe.direction === 'up'))
+                    swipe.drag = this._input.desktop;
+            }
+            // A second down swipe leaves the desktop showing. Up goes to GNOME
+            // unless the extension has windows to restore.
+            if (fingers === 3 && !swipe.action && !swipe.drag &&
+                    !(desktopSwipe && swipe.direction === 'down')) {
                 this._swipe = null;
                 this._input.prepareOverview();
                 return false;
@@ -110,11 +120,7 @@ export class GestureSession {
                 this._swipe = null;
                 return false;
             }
-            if (swipe.action === 'show-desktop' && swipe.direction === 'down') {
-                this._input.apps.cancel();
-                swipe.drag = this._input.desktop;
-                swipe.drag.begin();
-            } else if (['prev-window', 'next-window'].includes(swipe.action)) {
+            if (['prev-window', 'next-window'].includes(swipe.action)) {
                 this._input.desktop.restore();
                 this._input.apps.cancel();
                 swipe.drag = this._input.apps;

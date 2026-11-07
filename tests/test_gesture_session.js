@@ -12,7 +12,7 @@ function equal(got, want, message) {
     passed++;
 }
 
-function fixture() {
+function fixture(desktopHidden = false) {
     const calls = [];
     const bindings = {'swipe3-down': 'show-desktop', 'swipe3-left': 'next-window',
         'swipe3-right': 'prev-window', 'swipe4-up': 'volume-up', 'swipe4-down': 'volume-down',
@@ -28,7 +28,15 @@ function fixture() {
         prepareOverview: () => calls.push('prepare-overview'),
         dragAllowed: () => true,
         mediaAllowed: () => true,
-        desktop: drag('desktop'),
+        desktop: {
+            ...drag('desktop'),
+            begin: returning => {
+                if (returning !== desktopHidden)
+                    return false;
+                calls.push(['desktop', 'begin', returning]);
+                return true;
+            },
+        },
         apps: drag('apps'),
     };
     const settings = {get_boolean: () => true, get_string: key => bindings[key.slice(8)] ?? 'none'};
@@ -43,7 +51,7 @@ function fixture() {
     session.swipe(UPDATE, 3, 0, 80, 100);
     session.swipe(UPDATE, 3, 0, -40, 170);
     session.swipe(END, 3, 0, 0, 300);
-    equal(calls, [['desktop', 'begin', null], ['desktop', 'progress', 0.4],
+    equal(calls, [['desktop', 'begin', false], ['desktop', 'progress', 0.4],
         ['desktop', 'progress', 0.2], ['desktop', 'end', false]],
     'desktop tracks reversal before release and cancels below threshold');
 }
@@ -67,6 +75,19 @@ function fixture() {
     equal(session.swipe(UPDATE, 3, 0, -40, 40), false, 'up movement propagates to GNOME');
     equal(calls, ['prepare-overview'], 'up forwards its first movement to the native overview');
     equal(session.swipe(END, 3, 0, 0, 80), false, 'up release belongs to GNOME');
+}
+{
+    const {session, calls} = fixture(true);
+    session.swipe(BEGIN, 3, 0, 0, 0);
+    equal(session.swipe(UPDATE, 3, 0, 120, 100), true, 'down is consumed on the tucked desktop');
+    session.swipe(END, 3, 0, 0, 110);
+    equal(calls, [], 'a second down does not reopen windows');
+
+    session.swipe(BEGIN, 3, 0, 0, 200);
+    equal(session.swipe(UPDATE, 3, 0, -120, 300), true, 'up restores instead of opening Overview');
+    equal(session.swipe(END, 3, 0, 0, 310), true, 'the return gesture owns its release');
+    equal(calls, [['desktop', 'begin', true], ['desktop', 'progress', 0.6],
+        ['desktop', 'end', true]], 'up commits a return along the tuck path');
 }
 {
     const {session, calls, input} = fixture();

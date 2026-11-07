@@ -32,7 +32,7 @@ export class DesktopDrag {
         }
     }
 
-    begin() {
+    begin(expectedReturning = null) {
         if (this._destroyed)
             return false;
         this._finishSettle();
@@ -43,6 +43,8 @@ export class DesktopDrag {
                 this._forget(window, record);
         }
         const returning = this.canReturn;
+        if (expectedReturning !== null && returning !== expectedReturning)
+            return false;
         if (!returning) {
             this._hidden = false;
             this._focus = this._d.focus();

@@ -114,7 +114,7 @@ so this table can be filled in with real results.
 
 ## Install
 
-    git clone --branch v0.1.1 --depth 1 https://github.com/hamza-gouda1/tuf-control.git
+    git clone --branch v0.1.2 --depth 1 https://github.com/hamza-gouda1/tuf-control.git
     cd tuf-control
     ./install.sh --dry-run
     ./install.sh

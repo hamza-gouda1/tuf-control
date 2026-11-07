@@ -4,8 +4,12 @@ All notable changes to this project. Format follows Keep a Changelog; versions f
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-11-07
+
 - Keep the MCP session open after malformed input and restrict approval polling to
   the server session that requested it.
+- Use three fingers down to show the desktop and up to restore the previous window.
+  An up swipe still opens GNOME Overview when there are no tucked windows.
 - Tuck windows toward the bottom of their monitor and restore them along the same
   path. Both directions follow the touchpad until release, and switching workspaces
   clears the preview without pulling focus back to the previous workspace.

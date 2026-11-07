@@ -7,5 +7,5 @@
   ],
   "url": "https://github.com/hamza-gouda1/tuf-control",
   "settings-schema": "org.gnome.shell.extensions.tuf-control-quick",
-  "version": 5
+  "version": 6
 }

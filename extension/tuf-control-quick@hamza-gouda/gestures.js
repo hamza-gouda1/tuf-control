@@ -223,10 +223,8 @@ export class GestureWatcher {
     }
 
     _fire(gesture) {
-        // 3-finger down while the overview is up: the shell closes the overview
-        // itself, and when "Show desktop" was the thing that minimised the app,
-        // the same swipe brings it back — down reads as a toggle from either
-        // side. Any other binding stays out of the shell's way.
+        // The interactive session owns the directional desktop gestures.
+        // The discrete fallback lets GNOME close its own overview first.
         if (this._session && gesture === 'swipe3-down' &&
             resolveAction(this._settings, gesture) === 'show-desktop')
             return null; // the interactive owner handles this only in desktop mode

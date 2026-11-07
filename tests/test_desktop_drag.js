@@ -80,15 +80,18 @@ const halfway = [158, 52, 103, 0.75, 0.45];
 
 // A new gesture resolves an old settle first; stale completion cannot mutate it.
 {
-    const {d, wins, q} = rig(); const w = wins[0], a = w.actor;
-    d.begin(); d.update(.4); d.end(true);
+    const {d, wins, q, activated} = rig(); const w = wins[0], a = w.actor;
+    ok(!d.begin(true), 'up with no tucked windows does not start a hide');
+    d.begin(false); d.update(.4); d.end(true);
     const stale = q[0].done;
-    ok(d.begin(), 'rapid begin starts return after settling hide');
+    ok(!d.begin(false) && w.minimized, 'second down finishes the hide without reopening');
+    ok(d.begin(true), 'rapid up starts return after settling hide');
     ok(w.minimized === false, 'rapid begin sees hidden state and starts restore');
     stale(); eq(pose(a), tucked, 'stale callback leaves the return pose alone');
     d.update(.5); d.end(true); complete(q, 1);
     eq(pose(a), open, 'new settle completes restore');
     ok(!w.minimized, 'return leaves the window visible');
+    eq(activated.map(window => window.name), ['a'], 'return refocuses the previous window');
 }
 
 // Immediate disable restores owned windows, preserves pre-minimized windows, and cleans signals.

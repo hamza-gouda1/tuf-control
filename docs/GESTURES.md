@@ -30,7 +30,8 @@ The extension defaults to off, and the bindings default to None.
 
 | Gesture | Setting | Action for this layout |
 | --- | --- | --- |
-| Three fingers down | `gesture-swipe3-down` | Show desktop, then restore on the next swipe |
+| Three fingers down | `gesture-swipe3-down` | Show desktop |
+| Three fingers up | Paired with Show desktop | Restore tucked windows, or open GNOME Overview |
 | Three fingers left | `gesture-swipe3-left` | Next app |
 | Three fingers right | `gesture-swipe3-right` | Previous app |
 | Four fingers up or down | `gesture-swipe4-up`, `gesture-swipe4-down` | Volume up or down |
@@ -39,14 +40,16 @@ The extension defaults to off, and the bindings default to None.
 | Pinch in or out | `gesture-pinch-in`, `gesture-pinch-out` | Configurable |
 
 **Show desktop** tucks windows toward the bottom centre of each monitor as your
-fingers move. The next down swipe brings them back along the same path. An incomplete
-swipe settles back to where it began. Only windows hidden by the toggle are restored.
+fingers move. An up swipe brings them back along the same path and refocuses the
+previous window. A second down swipe keeps the desktop visible. An incomplete swipe
+settles back to where it began. Only windows hidden by Show desktop are restored.
 Switching workspaces resets the gesture and restores the previous workspace's windows
 in the background. App switching previews the next or previous application on the
 focused monitor and active workspace, with one window per app.
 
 The extension uses a Clutter event filter to route configured swipes before GNOME's
-workspace and overview handlers. Three fingers up still opens GNOME's overview.
+workspace and overview handlers. With no tucked windows, three fingers up opens
+GNOME Overview.
 Once it opens, GNOME handles its own navigation. Entering it resets any gesture
 transforms so the overview can lay out the previews using the original geometry.
 
