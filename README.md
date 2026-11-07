@@ -14,6 +14,8 @@ in a GTK 4 / Libadwaita interface, a CLI, and a GNOME Quick Settings toggle.
   <img src="docs/screenshots/performance-dark.png" alt="Performance" width="48%">
 </p>
 
+[Two-minute hardware-free quickstart](docs/QUICKSTART.md) · [Animated app walkthrough](docs/demo/quickstart.gif)
+
 ## Features
 
 - **Performance**: Quiet / Balanced / Performance profile; PPT power limits when the
@@ -113,6 +115,8 @@ so this table can be filled in with real results.
 - GNOME Shell 46 is the only version the Quick Settings extension declares.
 
 ## Install
+
+Try the released GUI with simulated data first: [two-minute hardware-free quickstart](docs/QUICKSTART.md).
 
     git clone --branch v0.1.2 --depth 1 https://github.com/hamza-gouda1/tuf-control.git
     cd tuf-control
