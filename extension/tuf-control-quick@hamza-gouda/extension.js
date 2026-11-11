@@ -27,83 +27,72 @@ import {
 } from './profiles.js';
 
 const APP_DESKTOP_ID = 'io.github.hamzagouda.TufControl.desktop';
-// GNOME 46's built-in Power Mode tile is PowerProfilesToggle (status/powerProfiles.js);
-// PowerModeToggle covers older/newer namings. Matched by GObject class name, not by any
-// private QuickSettings attribute, and restored on disable().
-const POWER_MODE_TOGGLES = ['PowerProfilesToggle', 'PowerModeToggle'];
 
 
 /**
  * Hide GNOME's built-in Power Mode tile while ours runs: the two switch the same
- * platform profile, so the shell's one is redundant. Cosmetic only — the profile
- * itself keeps working everywhere else. Matched by GObject class name rather than
- * any private QuickSettings attribute, and restored on disable().
+ * platform profile. GNOME 46 puts the tile in the menu rather than under the
+ * panel button, and updates its visibility whenever the power profile changes.
  */
 class PowerModeHider {
     constructor(settings) {
         this._settings = settings;
-        this._original = new Map();
-        this._id = settings.connect('changed::hide-power-mode', () => this._apply());
+        this._quickSettings = Main.panel.statusArea.quickSettings;
+        this._toggle = null;
+        this._hideIdleId = 0;
     }
 
     enable() {
+        this._settingsId = this._settings.connect('changed::hide-power-mode', () => this._apply());
+        // GNOME builds the stock indicators asynchronously during startup.
+        this._indicatorAddedId = this._quickSettings._indicators.connect(
+            'child-added', () => this._apply());
         this._apply();
-        if (this._settings.get_boolean('hide-power-mode') && this._find().length === 0) {
-            // the panel is built before extensions load, so one deferred pass is
-            // enough; it costs nothing when the first pass already found it
-            this._retry = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1000, () => {
-                this._apply();
-                this._retry = null;
-                return GLib.SOURCE_REMOVE;
-            });
-            GLib.Source.set_name_by_id(this._retry, '[tuf-control-quick] power-mode hide');
-        }
     }
 
     _apply() {
-        const want = this._settings.get_boolean('hide-power-mode');
-        for (const toggle of this._find()) {
-            if (want) {
-                if (!this._original.has(toggle))
-                    this._original.set(toggle, toggle.visible);
-                toggle.visible = false;
-            } else if (this._original.has(toggle)) {
-                toggle.visible = this._original.get(toggle);
-                this._original.delete(toggle);
-            }
+        if (!this._settings.get_boolean('hide-power-mode')) {
+            this._restore();
+            return;
         }
+
+        const toggle = this._quickSettings._powerProfiles?.quickSettingsItems[0];
+        if (!toggle || this._toggle)
+            return;
+
+        this._toggle = toggle;
+        this._visibilityId = toggle.connect('notify::visible', () => {
+            if (!toggle.visible || this._hideIdleId)
+                return;
+
+            // Let GNOME finish syncing the profile before hiding the tile again.
+            this._hideIdleId = GLib.idle_add(GLib.PRIORITY_HIGH_IDLE, () => {
+                this._hideIdleId = 0;
+                toggle.hide();
+                return GLib.SOURCE_REMOVE;
+            });
+        });
+        toggle.hide();
     }
 
-    _find() {
-        // a fresh walk each time: actors can be replaced or destroyed between calls,
-        // and the panel is small enough that walking it is cheaper than caching.
-        // first_child/next_sibling rather than get_children(): the latter is the
-        // deprecated Clutter API and is gone in newer shells
-        const out = [];
-        const walk = actor => {
-            for (let child = actor.get_first_child(); child !== null;
-                 child = child.get_next_sibling()) {
-                if (POWER_MODE_TOGGLES.includes(child.constructor?.name))
-                    out.push(child);
-                walk(child);
-            }
-        };
-        walk(Main.panel.statusArea.quickSettings);
-        return out;
+    _restore() {
+        if (!this._toggle)
+            return;
+
+        if (this._hideIdleId) {
+            GLib.source_remove(this._hideIdleId);
+            this._hideIdleId = 0;
+        }
+        this._toggle.disconnect(this._visibilityId);
+        // Let the stock tile recompute visibility from the current daemon state.
+        this._toggle._sync();
+        this._toggle = null;
     }
 
     destroy() {
-        if (this._retry) {
-            GLib.source_remove(this._retry);
-            this._retry = null;
-        }
-        const live = new Set(this._find());
-        for (const [toggle, visible] of this._original) {
-            if (live.has(toggle))
-                toggle.visible = visible;
-        }
-        this._original.clear();
-        this._settings.disconnect(this._id);
+        this._quickSettings._indicators.disconnect(this._indicatorAddedId);
+        this._settings.disconnect(this._settingsId);
+        this._restore();
     }
 }
 
