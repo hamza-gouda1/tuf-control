@@ -8,6 +8,7 @@ import http.server
 import io
 import json
 import os
+import re
 import socketserver
 import tempfile
 import threading
@@ -16,14 +17,14 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from tuf_control import cli
-from tuf_control.automation.config import CONFIG_DIR_ENV, ConfigError, validate_config
-from tuf_control.controller import FAKE_ROOT_ENV
-from tuf_control.updates import actions, apt, check, firmware, flatpak, notify, repos, snap, \
+from asusius import cli
+from asusius.automation.config import CONFIG_DIR_ENV, ConfigError, validate_config
+from asusius.controller import FAKE_ROOT_ENV
+from asusius.updates import actions, apt, check, firmware, flatpak, notify, repos, snap, \
     system
-from tuf_control.updates.model import Report, SourceResult, UpdateItem, age_text, human_size
-from tuf_control.updates.scheduler import UpdateScheduler, mark_seen
-from tuf_control.updates.settings import validate_updates_section
+from asusius.updates.model import Report, SourceResult, UpdateItem, age_text, human_size
+from asusius.updates.scheduler import UpdateScheduler, mark_seen
+from asusius.updates.settings import validate_updates_section
 
 FIX = Path(__file__).resolve().parent / "fixtures" / "updates"
 
@@ -99,6 +100,47 @@ class AptTests(unittest.TestCase):
         self.assertEqual(apt.classify("vim"), ("package", False))
 
 
+class SnapdStub:
+    """A stand-in snapd on a private socket: GETs are answered by a callable and recorded,
+    so tests can feed the REST path errors and successes without touching a real snapd."""
+
+    def __init__(self, answer):
+        self.hits = []
+        self.answer = answer
+        d = tempfile.mkdtemp()
+        self.sock = Path(d) / "snapd.socket"
+        outer = self
+
+        class H(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def _send(self, doc):
+                body = json.dumps(doc).encode()
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def do_GET(self):
+                outer.hits.append(self.path)
+                self._send(outer.answer(self.path))
+
+        class S(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
+            daemon_threads = True
+
+            def get_request(self):
+                req, _ = super().get_request()
+                return req, ("local", 0)
+
+        self.srv = S(str(self.sock), H)
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+
+    def close(self):
+        self.srv.shutdown()
+        self.srv.server_close()
+
+
 class SnapTests(unittest.TestCase):
     def test_parse_refresh(self):
         items = snap.parse_refresh(json.loads(fx("snap_installed.json"))["result"],
@@ -169,6 +211,75 @@ class SnapTests(unittest.TestCase):
     def test_missing_socket(self):
         res = snap.check(Path("/nonexistent/snapd.socket"))
         self.assertFalse(res.available)
+
+    STORE_ERR = {"type": "error", "status-code": 504, "result": {
+        "message": 'Get "https://api.snapcraft.io/v2/find?select=refresh": context deadline '
+                   "exceeded"}}
+
+    def test_rest_error_then_cli_fallback(self):
+        """The store call keeps failing but the CLI still works: items, no error."""
+        stub = SnapdStub(lambda p: self.STORE_ERR if p.startswith("/v2/find")
+                         else json.loads(fx("snap_installed.json")))
+        self.addCleanup(stub.close)
+        cli = mock.Mock(returncode=0, stdout=fx("snap_refresh_list.txt"), stderr="")
+        with mock.patch.object(snap.subprocess, "run", return_value=cli), \
+                mock.patch.object(snap.time, "sleep") as slept:
+            res = snap.check(stub.sock)
+        finds = [h for h in stub.hits if h.startswith("/v2/find")]
+        self.assertEqual(len(finds), snap.FIND_TRIES)
+        self.assertEqual([m.args[0] for m in slept.call_args_list], [2.0, 4.0])  # backoff
+        self.assertEqual(res.error, "")
+        self.assertEqual([i.name for i in res.items], ["core22"])
+        self.assertEqual(res.info["method"], "snap refresh --list")
+        self.assertIn("api.snapcraft.io", res.info["rest_error"])
+        # and when the CLI's answer is genuinely "no updates", that is not an error either
+        cli.stdout = "All snaps up to date.\n"
+        with mock.patch.object(snap.subprocess, "run", return_value=cli), \
+                mock.patch.object(snap.time, "sleep"):
+            res2 = snap.check(stub.sock)
+        self.assertEqual(res2.items, [])
+        self.assertEqual(res2.error, "")
+        self.assertEqual(res2.info["method"], "snap refresh --list")
+
+    def test_rest_and_cli_both_fail_sets_error(self):
+        """Store dead and the CLI dead too: the error names both; this is not 'up to date'."""
+        stub = SnapdStub(lambda p: self.STORE_ERR if p.startswith("/v2/find")
+                         else json.loads(fx("snap_installed.json")))
+        self.addCleanup(stub.close)
+        cli = mock.Mock(returncode=1, stdout="", stderr="error: cannot reach the store")
+        with mock.patch.object(snap.subprocess, "run", return_value=cli), \
+                mock.patch.object(snap.time, "sleep") as slept:
+            res = snap.check(stub.sock)
+        finds = [h for h in stub.hits if h.startswith("/v2/find")]
+        self.assertEqual(len(finds), snap.FIND_TRIES)
+        self.assertEqual([m.args[0] for m in slept.call_args_list], [2.0, 4.0])
+        self.assertIn("api.snapcraft.io", res.error)
+        self.assertIn("'snap refresh --list' also failed", res.error)
+        self.assertIn("cannot reach the store", res.error)
+        self.assertEqual(res.items, [])
+
+    def test_transient_store_error_retries_and_succeeds(self):
+        """One dropped store reply: the retry gets the list; no error, no CLI fallback."""
+        ref = json.loads(fx("snap_refresh.json"))
+        finds = []
+
+        def answer(path):
+            if path == "/v2/snaps":
+                return json.loads(fx("snap_installed.json"))
+            finds.append(1)
+            return self.STORE_ERR if len(finds) == 1 else ref
+
+        stub = SnapdStub(answer)
+        self.addCleanup(stub.close)
+        with mock.patch.object(snap.subprocess, "run") as run, \
+                mock.patch.object(snap.time, "sleep") as slept:
+            res = snap.check(stub.sock)
+        run.assert_not_called()          # the fallback never had to run
+        self.assertEqual(len(finds), 2)  # failed once, asked again
+        self.assertEqual([m.args[0] for m in slept.call_args_list], [2.0])
+        self.assertEqual(res.error, "")
+        self.assertEqual(res.info["method"], "snapd REST")
+        self.assertEqual([i.name for i in res.items], ["core22", "firefox"])
 
 
 class FlatpakTests(unittest.TestCase):
@@ -302,11 +413,11 @@ class ReposTests(unittest.TestCase):
                    ("rev-list", "--count", "HEAD..@{u}"): "3",
                    ("rev-parse", "--short", "HEAD"): "67fe971",
                    ("rev-parse", "--short", "@{u}"): "a1b2c3d"}
-        it = repos.repo_item(Path("/x/tuf-control"), lambda p, *a: answers[a])
+        it = repos.repo_item(Path("/x/asusius"), lambda p, *a: answers[a])
         self.assertEqual((it.name, it.current, it.available, it.extra["behind"]),
-                         ("tuf-control", "67fe971", "a1b2c3d", 3))
+                         ("asusius", "67fe971", "a1b2c3d", 3))
         answers[("rev-list", "--count", "HEAD..@{u}")] = "0"
-        self.assertIsNone(repos.repo_item(Path("/x/tuf-control"), lambda p, *a: answers[a]))
+        self.assertIsNone(repos.repo_item(Path("/x/asusius"), lambda p, *a: answers[a]))
 
 
 # -- report, notifications, scheduler -----------------------------------------------------------
@@ -396,7 +507,7 @@ class SchedulerTests(FakeEnv):
         self.assertIn("updates available", self.shown[0])
         # the cache says "checked just now" (wall clock): not due for 6 hours
         s.last_ts = self.clock[0]
-        with mock.patch("tuf_control.updates.scheduler.load_cache", return_value={}):
+        with mock.patch("asusius.updates.scheduler.load_cache", return_value={}):
             self.clock[0] += 3600
             self.assertFalse(s.due())
             self.clock[0] += 5 * 3600
@@ -447,6 +558,12 @@ class SchedulerTests(FakeEnv):
         s = self.make()
         self.assertIsNone(s.after_check(rep))
 
+    def test_worker_thread_is_named_after_the_current_brand(self):
+        s = self.make()
+        self.clock[0] += 61
+        self.assertTrue(self.run_tick(s))
+        self.assertEqual(s.worker.name, "asusius-updates")
+
 
 # -- check, cache, actions, settings, CLI -----------------------------------------------------------
 class CheckTests(FakeEnv):
@@ -458,8 +575,8 @@ class CheckTests(FakeEnv):
         self.assertEqual(len(rep.waiting()), 1)   # libnvidia-gl-580 is on a dpkg hold
         self.assertTrue(rep.reboot_required)
         self.assertEqual(check.load_report().signature(), rep.signature())
-        os.environ["TUF_CONTROL_FAKE_UPDATES"] = "none"
-        self.addCleanup(os.environ.pop, "TUF_CONTROL_FAKE_UPDATES", None)
+        os.environ["ASUSIUS_FAKE_UPDATES"] = "none"
+        self.addCleanup(os.environ.pop, "ASUSIUS_FAKE_UPDATES", None)
         self.assertEqual(check.run_check().summary(), "Everything is up to date")
 
     def test_child_process(self):
@@ -552,10 +669,10 @@ class CliTests(FakeEnv):
 
 class AgentToolTests(FakeEnv):
     def test_get_updates(self):
-        from tuf_control.agent.store import STATE_DIR_ENV
+        from asusius.agent.store import STATE_DIR_ENV
         os.environ[STATE_DIR_ENV] = str(self.tmp / "state")
         self.addCleanup(os.environ.pop, STATE_DIR_ENV, None)
-        from tuf_control.agent.tools import TOOLS, AgentService
+        from asusius.agent.tools import TOOLS, AgentService
         self.assertEqual(TOOLS["get_updates"].tier, "read")
         svc = AgentService()
         res, err = svc.call("get_updates", {})
@@ -574,10 +691,10 @@ if __name__ == "__main__":
 
 class DaemonIntegrationTests(unittest.TestCase):
     def test_daemon_configures_and_reports_the_scheduler(self):
-        from tuf_control.automation.config import RUNTIME_DIR_ENV, update_config
-        from tuf_control.backends.fake import FakeBackend, build_fake_tree
-        from tuf_control.controller import Controller
-        from tuf_control.daemon import Daemon
+        from asusius.automation.config import RUNTIME_DIR_ENV, update_config
+        from asusius.backends.fake import FakeBackend, build_fake_tree
+        from asusius.controller import Controller
+        from asusius.daemon import Daemon
         tmp = Path(tempfile.mkdtemp())
         self.addCleanup(lambda: __import__("shutil").rmtree(tmp))
         root = build_fake_tree(tmp / "root")
@@ -601,3 +718,17 @@ class DaemonIntegrationTests(unittest.TestCase):
         self.assertEqual(sched.status(refresh=True)["total"], 8)
         self.assertFalse(sched.tick())  # just checked: not due for 12 hours
         d.engine.shutdown()
+
+
+class RebrandTests(unittest.TestCase):
+    """The TUF Control → Asusius rename left no old-brand identifiers in the
+    updates area: temp-file prefixes, thread names, user agents, cache paths."""
+
+    def test_updates_sources_have_no_tuf_identifiers(self):
+        updates_pkg = Path(actions.__file__).parent
+        files = sorted(updates_pkg.glob("*.py")) + [updates_pkg.parent / "ui/pages/updates.py"]
+        for path in files:
+            with self.subTest(file=str(path.relative_to(updates_pkg.parent.parent))):
+                text = path.read_text(encoding="utf-8")
+                self.assertIsNone(re.search(r"tuf", text, re.IGNORECASE),
+                                  f"{path} still mentions the old brand")
