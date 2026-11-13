@@ -4,6 +4,35 @@ All notable changes to this project. Format follows Keep a Changelog; versions f
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-12
+
+### Changed
+- The touchpad gesture for play/pause media is now a four-finger tap; it replaces the
+  hold-and-release gesture from 0.1.2.
+
+### Added
+- Media next/previous song actions are available as touchpad gestures.
+- GNOME's Night Light tile is hidden while the Quick Settings extension runs, next to
+  the Power Mode tile it already hides.
+
+### Fixed
+- The snap update check is resilient: a snapd failure no longer breaks the update flow.
+
+### Rebrand — TUF Control is now Asusius
+- Full rename of the project, binaries, service, extension and paths:
+  `tuf-control`/`tuf-control-gui`/`tuf-controld`/`tuf-control-mcp` →
+  `asusius`/`asusius-gui`/`asusiusd`/`asusius-mcp`;
+  `tuf-controld.service` → `asusiusd.service`;
+  `tuf-control-quick@hamza-gouda` → `asusius-quick@hamza-gouda`;
+  `~/.local/share/tuf-control` → `~/.local/share/asusius`;
+  `~/.local/state/tuf-control` → `~/.local/state/asusius`.
+- Migration: the installer writes only the new names; TUF Control 0.1.x files are not
+  removed automatically. Uninstall the old version first (`./install.sh --uninstall`
+  from a 0.1.x checkout) or remove the old launchers in `~/.local/bin`, the old
+  extension folder and `~/.config/systemd/user/tuf-controld.service` by hand. Data
+  under `~/.local/state/tuf-control` is not migrated; copy it to
+  `~/.local/state/asusius` to keep update history and backups.
+
 ## [0.1.2] - 2026-11-07
 
 - Keep the MCP session open after malformed input and restrict approval polling to
