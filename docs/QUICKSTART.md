@@ -23,7 +23,7 @@ when you close the demo window.
   set -eu
   demo_dir=$(mktemp -d)
   trap 'rm -r -- "$demo_dir"' EXIT
-  git clone --branch v0.1.2 --depth 1 https://github.com/hamza-gouda1/tuf-control.git "$demo_dir/asusius"
+  git clone --branch v0.2.0 --depth 1 https://github.com/hamza-gouda1/asusius.git "$demo_dir/asusius"
   export HOME="$demo_dir/home"
   export XDG_CONFIG_HOME="$HOME/.config"
   export XDG_DATA_HOME="$HOME/.local/share"

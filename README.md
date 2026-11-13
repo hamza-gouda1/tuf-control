@@ -1,6 +1,6 @@
 # Asusius
 
-[![ci](https://github.com/hamza-gouda1/tuf-control/actions/workflows/ci.yml/badge.svg)](https://github.com/hamza-gouda1/tuf-control/actions/workflows/ci.yml)
+[![ci](https://github.com/hamza-gouda1/asusius/actions/workflows/ci.yml/badge.svg)](https://github.com/hamza-gouda1/asusius/actions/workflows/ci.yml)
 ![Python 3.12](https://img.shields.io/badge/python-3.12-3776ab)
 ![GTK 4 + Libadwaita](https://img.shields.io/badge/GTK%204-Libadwaita-4a86cf)
 ![License](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)
@@ -118,14 +118,14 @@ so this table can be filled in with real results.
 
 Try the released GUI with simulated data first: [two-minute hardware-free quickstart](docs/QUICKSTART.md).
 
-    git clone --branch v0.1.2 --depth 1 https://github.com/hamza-gouda1/tuf-control.git
-    cd tuf-control
+    git clone --branch v0.2.0 --depth 1 https://github.com/hamza-gouda1/asusius.git
+    cd asusius
     ./install.sh --dry-run
     ./install.sh
     gnome-extensions enable asusius-quick@hamza-gouda
 
 Install instructions pin the tested release tag. Contributors can clone `main` with
-`git clone --branch main https://github.com/hamza-gouda1/tuf-control.git`; see [CONTRIBUTING.md](CONTRIBUTING.md).
+`git clone --branch main https://github.com/hamza-gouda1/asusius.git`; see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 See [docs/INSTALL.md](docs/INSTALL.md). User-level, no root, no downloads. The optional polkit
 helper is printed with `./install.sh --system` and never run for you.
