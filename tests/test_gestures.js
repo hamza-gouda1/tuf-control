@@ -5,9 +5,9 @@
 
 import System from 'system';
 import GLib from 'gi://GLib';
-import * as L from '../extension/tuf-control-quick@hamza-gouda/gesture_logic.js';
-import * as G from '../extension/tuf-control-quick@hamza-gouda/gestures.js';
-import {DesktopToggle} from '../extension/tuf-control-quick@hamza-gouda/desktop.js';
+import * as L from '../extension/asusius-quick@hamza-gouda/gesture_logic.js';
+import * as G from '../extension/asusius-quick@hamza-gouda/gestures.js';
+import {DesktopToggle} from '../extension/asusius-quick@hamza-gouda/desktop.js';
 import './test_desktop_drag.js';
 import './test_app_drag.js';
 import './test_gesture_session.js';
@@ -32,7 +32,8 @@ eq(L.GESTURES,
 eq(L.ACTIONS,
     ['none', 'overview', 'app-grid', 'show-desktop', 'switch-windows',
         'prev-workspace', 'next-workspace', 'launch-app',
-        'prev-window', 'next-window', 'volume-up', 'volume-down', 'play-pause'], 'actions');
+        'prev-window', 'next-window', 'volume-up', 'volume-down', 'play-pause',
+        'media-next', 'media-prev'], 'actions');
 eq([L.SWIPE_DISTANCE, L.PINCH_SCALE, L.DOMINANCE], [50, 0.25, 1.4], 'thresholds');
 
 // --- Clutter constants ------------------------------------------------------------
@@ -70,8 +71,8 @@ const CT = Clutter ?? FALLBACK;
 print(`  clutter: ${Clutter ? 'typelib loaded, constants checked' : 'not on the default path, mutter 46 values stand in'}`);
 
 // --- the gschema matches the logic --------------------------------------------------
-const SCHEMA = 'extension/tuf-control-quick@hamza-gouda/schemas/'
-    + 'org.gnome.shell.extensions.tuf-control-quick.gschema.xml';
+const SCHEMA = 'extension/asusius-quick@hamza-gouda/schemas/'
+    + 'org.gnome.shell.extensions.asusius-quick.gschema.xml';
 const [xmlOk, raw] = GLib.file_get_contents(SCHEMA);
 ok(xmlOk, 'gschema found (run from the repo root)');
 const xml = typeof raw === 'string' ? raw : new TextDecoder().decode(raw);
@@ -246,6 +247,30 @@ eq(L.resolveAction(fakeSettings({'gesture-pinch-out': 'bogus'}), 'pinch-out'), n
     'unknown action values are ignored');
 eq(L.resolveAction(fakeSettings({'gesture-pinch-in': 'launch-app'}), 'pinch-in'),
     'launch-app', 'launch-app is an action like the rest');
+eq(L.resolveAction(fakeSettings({'gesture-hold4': 'media-next'}), 'hold4'), 'media-next',
+    'media-next is a binding the resolver accepts');
+eq(L.resolveAction(fakeSettings({'gesture-swipe3-left': 'media-prev'}), 'swipe3-left'), 'media-prev',
+    'media-prev is a binding the resolver accepts');
+
+// Media actions ride the same virtual media keys as play-pause (motion.media()).
+{
+    const originalGlobal = globalThis.global;
+    globalThis.global = {get_current_time: () => 1};
+    try {
+        const fired = [];
+        const actions = G.shellActions({overview: {}}, {}, {}, {media: action => fired.push(action)});
+        ok(typeof actions['play-pause'] === 'function' && typeof actions['media-next'] === 'function'
+            && typeof actions['media-prev'] === 'function',
+        'media-next and media-prev are resolvable like play-pause');
+        actions['play-pause']();
+        actions['media-next']();
+        actions['media-prev']();
+        eq(fired, ['play-pause', 'media-next', 'media-prev'],
+            'next and previous dispatch through motion.media()');
+    } finally {
+        globalThis.global = originalGlobal;
+    }
+}
 
 // --- the watcher: fake stage, fake events, real tracker ---------------------------------------------
 const SWIPE = CT.EventType.TOUCHPAD_SWIPE;
@@ -322,6 +347,13 @@ function makeWatcher({bindings = {}, enabled = true, overview = false,
         'a completed gesture emits one info line');
     ok(wt.debug.length === 2, 'completed gesture begin and end are debug only');
     wt.watcher.disable();
+}
+{
+    // Rebrand regression: the default journal tag (used when no log/debug is
+    // injected) must be Asusius-branded so grepping the journal for 'asusius'
+    // finds gesture entries (it used the pre-rebrand tag before).
+    ok(G.LOG_TAG === 'asusius-gesture' && !/tuf/i.test(G.LOG_TAG),
+        'default journal tag is asusius-branded');
 }
 {
     const wt = makeWatcher();

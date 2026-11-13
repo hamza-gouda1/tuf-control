@@ -27,8 +27,8 @@ os.environ["XDG_DATA_HOME"] = str(_DATA)
 os.environ["GSETTINGS_BACKEND"] = "keyfile"  # the real dconf is never touched
 
 # the extension's schema, compiled the way install.sh does it (test_install.sh:114-133)
-_EXT_XML = (_ROOT / "extension" / "tuf-control-quick@hamza-gouda" / "schemas" /
-            "org.gnome.shell.extensions.tuf-control-quick.gschema.xml")
+_EXT_XML = (_ROOT / "extension" / "asusius-quick@hamza-gouda" / "schemas" /
+            "org.gnome.shell.extensions.asusius-quick.gschema.xml")
 _EXT_SCHEMAS = _TMP / "ext-schemas"
 _OTHER_SCHEMAS = _TMP / "other-schemas"  # schemas, but not the extension's: "not installed"
 for _d in (_EXT_SCHEMAS, _OTHER_SCHEMAS):
@@ -43,11 +43,11 @@ for _d in (_EXT_SCHEMAS, _OTHER_SCHEMAS):
 
 from gi.repository import Gio  # noqa: E402  (only once the environment is in place)
 
-from tuf_control import touchpad  # noqa: E402
+from asusius import touchpad  # noqa: E402
 
 TOUCHPAD_KEYS = ("send-events", "tap-to-click", "natural-scroll", "speed", "click-method")
 GESTURE_KEYS = touchpad.GESTURE_KEYS + ("gesture-enabled", "gesture-launch-app")
-OWN_APP_ID = "io.github.hamzagouda.TufControl.desktop"
+OWN_APP_ID = "io.github.hamzagouda.Asusius.desktop"
 
 
 def ext_source():
@@ -58,7 +58,7 @@ def ext_source():
 
 def other_source():
     """A schema source that has schemas but not the extension's: how a machine without
-    tuf-control-quick looks."""
+    asusius-quick looks."""
     return Gio.SettingsSchemaSource.new_from_directory(str(_OTHER_SCHEMAS), None, False)
 
 
@@ -198,7 +198,7 @@ class GestureKeys(unittest.TestCase):
         must answer None / refuse instead (the page hides the row)."""
         old = _TMP / "old-ext-schemas"
         old.mkdir(exist_ok=True)
-        (old / "org.gnome.shell.extensions.tuf-control-quick.gschema.xml").write_text(
+        (old / "org.gnome.shell.extensions.asusius-quick.gschema.xml").write_text(
             _EXT_XML.read_text().split("    <key name=\"hide-power-mode\"")[0] +
             "  </schema>\n</schemalist>\n")
         subprocess.run(["glib-compile-schemas", str(old)], check=True,
@@ -208,6 +208,85 @@ class GestureKeys(unittest.TestCase):
         self.assertTrue(gest.available)
         self.assertIsNone(gest.hides_power_mode())
         self.assertFalse(gest.set_hides_power_mode(True))
+
+
+class GesturePageLabels(unittest.TestCase):
+    """The labels and schema texts behind the Touchpad & gestures page's new rows.
+    The page module imports without a display (widgets are only built in the page's
+    __init__); libadwaita is only importable on a desktop install, so the import is
+    lazy and the tests skip when it is not there."""
+
+    @classmethod
+    def setUpClass(cls):
+        try:
+            import gi
+            gi.require_version("Adw", "1")
+            from asusius.ui.pages import gestures as page
+        except (ImportError, ValueError):
+            raise unittest.SkipTest("libadwaita is not importable here") from None
+        cls.page = page
+
+    def setUp(self):
+        reset_all()
+        self.gest = touchpad.GestureSettings(source=ext_source())
+        self.gest.settings.reset("hide-night-light")
+
+    def test_every_action_the_wrapper_allows_has_a_label(self):
+        for action in touchpad.GESTURE_ACTIONS:
+            self.assertIn(action, self.page.ACTION_LABELS, action)
+
+    def test_media_actions_have_labels(self):
+        self.assertEqual(self.page.ACTION_LABELS["media-next"], "Next song")
+        self.assertEqual(self.page.ACTION_LABELS["media-prev"], "Previous song")
+
+    def test_four_finger_tap_row(self):
+        row = next(r for r in self.page.GESTURE_ROWS if r[0] == "gesture-hold4")
+        self.assertEqual(row[1], "Four-finger tap")
+        self.assertEqual(row[2], "Tap the touchpad with four fingers to run the action")
+
+    def test_night_light_key_in_the_schema_xml(self):
+        schema = ET.parse(_EXT_XML).getroot().find("schema")
+        key = schema.find("key[@name='hide-night-light']")
+        self.assertIsNotNone(key)
+        self.assertEqual(key.get("type"), "b")
+        self.assertEqual(key.find("default").text, "false")
+        self.assertEqual(key.find("summary").text, "Hide GNOME's built-in Night Light tile")
+
+    def test_hold4_schema_text_describes_a_tap(self):
+        schema = ET.parse(_EXT_XML).getroot().find("schema")
+        key = schema.find("key[@name='gesture-hold4']")
+        self.assertEqual(key.find("summary").text, "Action for a four-finger tap")
+        self.assertIn("450 ms", key.find("description").text)
+
+    def test_media_actions_are_schema_choices_for_every_gesture(self):
+        schema = ext_source().lookup(touchpad.EXTENSION_SCHEMA, False)
+        for key in touchpad.GESTURE_KEYS:
+            self.assertIn("media-next", schema.get_key(key).get_range()[1], key)
+            self.assertIn("media-prev", schema.get_key(key).get_range()[1], key)
+
+    def test_night_light_setting_round_trips(self):
+        self.assertFalse(self.gest.hides_night_light())  # the schema default
+        self.assertTrue(self.gest.set_hides_night_light(True))
+        self.assertTrue(self.gest.hides_night_light())
+        self.gest.settings.reset("hide-night-light")
+
+    def test_hide_night_light_when_the_installed_schema_is_older(self):
+        """The app can be newer than the installed extension: its compiled schema may
+        lack hide-night-light, and touching a missing key is a hard abort — the wrapper
+        must answer None / refuse instead (the page hides the row). Stripping everything
+        from hide-power-mode onwards also removes hide-night-light."""
+        old = _TMP / "old-ext-schemas"
+        old.mkdir(exist_ok=True)
+        (old / "org.gnome.shell.extensions.asusius-quick.gschema.xml").write_text(
+            _EXT_XML.read_text().split("    <key name=\"hide-power-mode\"")[0] +
+            "  </schema>\n</schemalist>\n")
+        subprocess.run(["glib-compile-schemas", str(old)], check=True,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        src = Gio.SettingsSchemaSource.new_from_directory(str(old), None, False)
+        gest = touchpad.GestureSettings(source=src)
+        self.assertTrue(gest.available)
+        self.assertIsNone(gest.hides_night_light())
+        self.assertFalse(gest.set_hides_night_light(True))
 
 
 class TouchpadKeys(unittest.TestCase):

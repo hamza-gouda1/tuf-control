@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) Hamza Gouda
 
-import {GestureSession} from '../extension/tuf-control-quick@hamza-gouda/gesture_session.js';
+import {GestureSession} from '../extension/asusius-quick@hamza-gouda/gesture_session.js';
 import {PHASE_BEGIN as BEGIN, PHASE_UPDATE as UPDATE, PHASE_END as END,
-    PHASE_CANCEL as CANCEL} from '../extension/tuf-control-quick@hamza-gouda/gesture_logic.js';
+    PHASE_CANCEL as CANCEL} from '../extension/asusius-quick@hamza-gouda/gesture_logic.js';
 
 let passed = 0;
 function equal(got, want, message) {
@@ -104,13 +104,33 @@ function fixture(desktopHidden = false) {
     session.swipe(END, 4, 0, 0, 180);
     session.hold(END, 4, 200);
     equal(calls, ['volume-up', 'volume-up', 'volume-down'],
-        'volume steps during travel, reverses, and never fires a pending hold');
+        'volume steps during travel, reverses, and a swipe cancels the pending tap');
     session.hold(BEGIN, 4, 300);
-    session.hold(CANCEL, 4, 500);
-    session.hold(BEGIN, 4, 600);
-    session.hold(END, 4, 840);
-    equal(calls.at(-1), 'play-pause', 'stationary four-finger release triggers playback once');
+    session.hold(END, 4, 440);
+    equal(calls.at(-1), 'play-pause', 'a four-finger tap fires at release inside the window');
+    session.hold(BEGIN, 4, 500);
+    session.hold(END, 4, 1050);
+    equal(calls.filter(action => action === 'play-pause').length, 1,
+        'a rest past the window never fires');
+    session.hold(BEGIN, 4, 1100);
+    session.hold(END, 3, 1200);
+    equal(calls.filter(action => action === 'play-pause').length, 1,
+        'a finger count change cancels the tap');
+    session.hold(BEGIN, 4, 1300);
+    session.hold(CANCEL, 4, 1400);
     equal(calls.filter(action => action === 'play-pause').length, 1, 'cancelled hold never triggers');
+}
+{
+    const {session, calls} = fixture();
+    session.hold(BEGIN, 4, 0);
+    session.hold(END, 4, 450);
+    equal(calls, ['play-pause'], 'exactly 450 ms still counts as a tap');
+}
+{
+    const {session, calls} = fixture();
+    session.hold(BEGIN, 4, 0);
+    session.hold(END, 4, 451);
+    equal(calls, [], '451 ms is a rest, not a tap');
 }
 {
     const {session, calls} = fixture();

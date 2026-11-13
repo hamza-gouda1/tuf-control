@@ -8,7 +8,7 @@ bindings need the extension installed and enabled ([INSTALL.md](INSTALL.md)).
 ## What is configurable
 
 Touchpad settings are plain GSettings under `org.gnome.desktop.peripherals.touchpad`
-(the schema ships with `gsettings-desktop-schemas`; `src/tuf_control/touchpad.py` wraps it
+(the schema ships with `gsettings-desktop-schemas`; `src/asusius/touchpad.py` wraps it
 in `TouchpadSettings`):
 
 | Control | Key | Values |
@@ -24,7 +24,7 @@ The choices are read from the installed schema rather than hardcoded, so the cli
 dropdown follows whatever the desktop allows. If the schema cannot be read, the touchpad
 rows are disabled and the page explains why instead.
 
-Gesture bindings live in the extension's `org.gnome.shell.extensions.tuf-control-quick`
+Gesture bindings live in the extension's `org.gnome.shell.extensions.asusius-quick`
 schema. Enable gestures in **Touchpad & gestures**, then choose the actions you want.
 The extension defaults to off, and the bindings default to None.
 
@@ -35,7 +35,7 @@ The extension defaults to off, and the bindings default to None.
 | Three fingers left | `gesture-swipe3-left` | Next app |
 | Three fingers right | `gesture-swipe3-right` | Previous app |
 | Four fingers up or down | `gesture-swipe4-up`, `gesture-swipe4-down` | Volume up or down |
-| Four fingers held and released | `gesture-hold4` | Play or pause |
+| Four fingers tapped | `gesture-hold4` | Play or pause |
 | Four fingers left or right | `gesture-swipe4-left`, `gesture-swipe4-right` | Configurable |
 | Pinch in or out | `gesture-pinch-in`, `gesture-pinch-out` | Configurable |
 
@@ -55,13 +55,16 @@ transforms so the overview can lay out the previews using the original geometry.
 
 The preview moves the existing compositor actors. Release uses a short ease-out
 transition, and GNOME's reduced-motion setting makes the committed action immediate.
-Volume changes in steps during travel through GNOME's media keys. A stationary
-four-finger hold triggers play/pause on release, with a 100–1500 ms window after
-Mutter reports the hold. Moving into a swipe cancels the hold. The libinput tapping
-interface supports up to three fingers, which is why the playback gesture uses a hold.
+Volume changes in steps during travel through GNOME's media keys. A four-finger tap —
+four fingers down and lifted again within 450 ms, without moving — triggers play/pause.
+Moving into a swipe, changing the finger count, or resting past the window cancels it:
+the window is timed by the extension, because Mutter reports the contact as a hold, not
+a tap. Next and previous song ride the same media keys, so any player exposing media
+keys (playerctl, GNOME's MPRIS handling) responds to them.
 
-Other bindings include Overview, App grid, Switch window, Previous or Next workspace
-and Launch an app. Use **App to launch** to choose the target for the last action.
+Other bindings include Overview, App grid, Switch window, Previous or Next workspace,
+Launch an app and Next or Previous song. Use **App to launch** to choose the target
+for the launch-app action.
 The installed schema supplies the available choices, including when an older version
 of the extension is present.
 
@@ -72,7 +75,7 @@ fast, so nothing goes through the background worker.
 
 `install.sh` copies the extension to `~/.local/share/gnome-shell/extensions/` and compiles
 its schema in place (`glib-compile-schemas`), so install.sh is what makes the bindings
-reachable; then `gnome-extensions enable tuf-control-quick@hamza-gouda` (GNOME Shell 46,
+reachable; then `gnome-extensions enable asusius-quick@hamza-gouda` (GNOME Shell 46,
 Wayland). The page chains the extension's schema directory onto the default schema source,
 so it can tell you which state you are in: the **Shell extension** row reads Installed or
 Not installed, and without the extension the gesture rows are replaced by a note to run
@@ -100,8 +103,9 @@ the page is never instantiated.
 
 - A configured three-finger horizontal binding takes priority over GNOME's workspace
   swipe. Leave it set to None to keep GNOME's workspace switching in that direction.
-- The playback binding uses a four-finger hold and release. Mutter does not report a
-  four-finger tap as a gesture.
+- The playback binding is a four-finger tap the extension times itself: Mutter reports
+  the contact as a hold, so the bound action fires when four fingers lift within 450 ms
+  without movement, and a swipe or a rest past the window cancels it.
 - Bindings apply live only while the extension is enabled — it is the extension that reads
   them per gesture. With the extension off or not installed nothing listens, and after
   installing it on Wayland a log-out and log-in is needed before it can be enabled.
