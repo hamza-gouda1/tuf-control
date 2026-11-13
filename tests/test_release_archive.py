@@ -30,7 +30,7 @@ class ReleaseArchiveTests(unittest.TestCase):
             with tarfile.open(first) as archive:
                 names = archive.getnames()
             self.assertTrue(names)
-            prefix = REPO.name + "-0.1.0"
+            prefix = release.PROJECT_NAME + "-0.1.0"
             self.assertTrue(all(name == prefix or name.startswith(prefix + "/") for name in names))
             if REPO.name == "asusius":
                 packaging = (REPO / "packaging/arch/PKGBUILD").read_text()

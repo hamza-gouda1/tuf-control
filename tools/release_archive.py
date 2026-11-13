@@ -42,7 +42,7 @@ def build_archive(repo: Path, tag: str, output: Path) -> tuple[Path, str]:
     ref = f"refs/tags/{tag}"
     subprocess.run(["git", "rev-parse", "--verify", f"{ref}^{{commit}}"], cwd=repo,
                    check=True, stdout=subprocess.DEVNULL)
-    name = f"{repo.name}-{tag[1:]}"
+    name = f"{PROJECT_NAME}-{tag[1:]}"
     output.mkdir(parents=True, exist_ok=True)
     archive = output / f"{name}.tar.gz"
     with tempfile.TemporaryFile() as source:
