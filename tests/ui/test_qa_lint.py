@@ -9,7 +9,7 @@ colour detection and the matrix definition.
 Slow headless run (a private session bus, mutter --headless, several GTK processes under a
 1500 MB systemd scope; minutes):
 
-    TUF_QA_SLOW=1 python3 -m unittest tests.ui.test_qa_lint            # --quick matrix
+    ASUSIUS_QA_SLOW=1 python3 -m unittest tests.ui.test_qa_lint            # --quick matrix
     python3 tests/ui/qa_lint.py                                         # the full matrix
 """
 import os
@@ -178,11 +178,11 @@ class MatrixTests(unittest.TestCase):
         import gi
         gi.require_version("Gtk", "4.0")
         gi.require_version("Adw", "1")
-        from tuf_control.ui.window import ENTRIES
+        from asusius.ui.window import ENTRIES
         self.assertEqual(sorted(q.PAGES), sorted(ENTRIES))
 
 
-@unittest.skipUnless(os.environ.get("TUF_QA_SLOW"), "headless run: set TUF_QA_SLOW=1")
+@unittest.skipUnless(os.environ.get("ASUSIUS_QA_SLOW"), "headless run: set ASUSIUS_QA_SLOW=1")
 class HeadlessRun(unittest.TestCase):
     def test_quick_matrix_is_clean(self):
         report = HERE / "qa_report.md"

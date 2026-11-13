@@ -9,7 +9,7 @@
 How: a private D-Bus session runs `mutter --headless` with a virtual monitor; the app
 connects to it over Wayland, and each page is rendered off-screen through
 Gtk.WidgetPaintable -> Gsk renderer -> PNG. Nothing touches real hardware
-(TUF_CONTROL_FAKE_ROOT is always set) and only one GTK process runs at a time.
+(ASUSIUS_FAKE_ROOT is always set) and only one GTK process runs at a time.
 """
 from __future__ import annotations
 
@@ -59,7 +59,7 @@ def outer(args) -> int:
         for scheme in args.schemes.split(","):
             env = {**os.environ, "GDK_BACKEND": "wayland", "WAYLAND_DISPLAY": sock,
                    "TUF_SHOT_CHILD": scheme, "PYTHONPATH": str(SRC),
-                   "TUF_CONTROL_COLOR_SCHEME": scheme, "GSK_RENDERER": "cairo",
+                   "ASUSIUS_COLOR_SCHEME": scheme, "GSK_RENDERER": "cairo",
                    "ADW_DISABLE_PORTAL": "1", "GDK_DEBUG": "no-portals", "GTK_A11Y": "none"}
             env.pop("DISPLAY", None)
             with tempfile.TemporaryDirectory(prefix="tuf-shot-home-") as home:
@@ -89,8 +89,8 @@ def isolated_env(home: Path, user_theme: bool = False) -> dict:
                 shutil.copyfile(src / name, dst / name)
     # Model an installed extension in the private HOME so the gesture controls are
     # exercised, rather than only its missing-extension state. No live schema is changed.
-    src = REPO / "extension/tuf-control-quick@hamza-gouda/schemas"
-    dst = home / ".local/share/gnome-shell/extensions/tuf-control-quick@hamza-gouda/schemas"
+    src = REPO / "extension/asusius-quick@hamza-gouda/schemas"
+    dst = home / ".local/share/gnome-shell/extensions/asusius-quick@hamza-gouda/schemas"
     dst.mkdir(parents=True, exist_ok=True)
     for xml in src.glob("*.xml"):
         shutil.copyfile(xml, dst / xml.name)
@@ -113,7 +113,7 @@ def simulate(root: Path, i: int) -> None:
 
 def exercise(win, root: Path, out: Path, scheme: str, suffix: str, render):
     """Drive the write paths end to end (fake tree only) and check what landed."""
-    from tuf_control.core import GpuMode, Profile
+    from asusius.core import GpuMode, Profile
     problems = []
     win.request_profile(Profile.PERFORMANCE)
     yield 500
@@ -188,9 +188,9 @@ DEMO_RULES = [
 
 
 def start_demo_daemon():
-    """A real tuf-controld against the fake tree, with demo rules and an effect."""
-    from tuf_control.automation.config import update_config
-    from tuf_control.automation.service import DaemonClient
+    """A real asusiusd against the fake tree, with demo rules and an effect."""
+    from asusius.automation.config import update_config
+    from asusius.automation.service import DaemonClient
 
     def edit(c):
         c["automation"]["rules"] = DEMO_RULES
@@ -217,7 +217,7 @@ def _scroll_bottom(widget) -> None:
 
 
 def automation_shots(win, out: Path, scheme: str, suffix: str, render):
-    from tuf_control.effects.registry import EFFECTS
+    from asusius.effects.registry import EFFECTS
     page = win.pages["automation"]
     win.show_page("automation")
     yield 1500  # first daemon status poll
@@ -259,7 +259,7 @@ def automation_shots(win, out: Path, scheme: str, suffix: str, render):
     render(win, out / f"automation-new-{scheme}{suffix}.png")
     new._save()  # through the page's locked config write
     yield 600
-    from tuf_control.automation.config import load_config
+    from asusius.automation.config import load_config
     ids = [r["id"] for r in load_config()["automation"]["rules"]]
     if "battery-saver" not in ids:
         raise AssertionError(f"rule not saved: {ids}")
@@ -269,8 +269,8 @@ def automation_shots(win, out: Path, scheme: str, suffix: str, render):
 def seed_agent_demo() -> None:
     """Calls from a demo MCP client against the fake tree: reads, dry runs, two requests
     waiting for approval (one high-risk) and a change made under a standing grant."""
-    from tuf_control.agent import policy
-    from tuf_control.agent.tools import AgentService
+    from asusius.agent import policy
+    from asusius.agent.tools import AgentService
     svc = AgentService()
     svc.set_client("demo-client", "2.1")
     for name, a in (("get_status", {}), ("get_telemetry", {"sections": ["cpu", "fans"]}),
@@ -299,8 +299,8 @@ def agent_shots(win, out: Path, scheme: str, suffix: str, render):
     yield 400
     render(win, out / f"agent-access-activity-{scheme}{suffix}.png")
     # drive the page: approve the basic request, then the kill switch
-    from tuf_control.agent import policy
-    from tuf_control.agent.present import pending_rows
+    from asusius.agent import policy
+    from asusius.agent.present import pending_rows
     rows = pending_rows(page.queue.pending())
     basic = next(r for r in rows if not r["high"])
     page._decide(basic, True)
@@ -360,7 +360,7 @@ def _find_all(widget, cls) -> list:
 def popover_shots(win, out: Path, scheme: str, suffix: str, render, render_over):
     """Keyboard page with its dropdowns open, and the colour chooser."""
     from gi.repository import Gtk
-    from tuf_control.effects.registry import EFFECTS
+    from asusius.effects.registry import EFFECTS
     kb = win.pages["keyboard"]
     win.show_page("keyboard")
     kb.preview.fixed_t = 1.3
@@ -420,20 +420,20 @@ def inner(args) -> int:
     gi.require_version("Graphene", "1.0")
     from gi.repository import Adw, GLib, Gsk, Gtk, Graphene
 
-    from tuf_control.backends.fake import build_fake_tree
-    from tuf_control.controller import FAKE_ROOT_ENV
+    from asusius.backends.fake import build_fake_tree
+    from asusius.controller import FAKE_ROOT_ENV
 
     scheme = os.environ["TUF_SHOT_CHILD"]
     tmp = Path(tempfile.mkdtemp(prefix="tuf-shot-"))
     root = build_fake_tree(tmp / "root", ppt_readable=args.ppt)
     os.environ[FAKE_ROOT_ENV] = str(root)
     # never read or write the user's real automation config or daemon status
-    from tuf_control.automation.config import CONFIG_DIR_ENV, RUNTIME_DIR_ENV
+    from asusius.automation.config import CONFIG_DIR_ENV, RUNTIME_DIR_ENV
     os.environ[CONFIG_DIR_ENV] = str(tmp / "config")
     os.environ[RUNTIME_DIR_ENV] = str(tmp / "run")
-    from tuf_control.agent.store import STATE_DIR_ENV  # agent audit log and approval queue
+    from asusius.agent.store import STATE_DIR_ENV  # agent audit log and approval queue
     os.environ[STATE_DIR_ENV] = str(tmp / "state")
-    os.environ["TUF_CONTROL_AGENT_NOTIFY"] = "0"
+    os.environ["ASUSIUS_AGENT_NOTIFY"] = "0"
     if args.agent:
         seed_agent_demo()
     daemon = start_demo_daemon() if args.automation else None
@@ -441,9 +441,9 @@ def inner(args) -> int:
     out.mkdir(parents=True, exist_ok=True)
     w, h = (int(x) for x in args.size.split("x"))
 
-    from tuf_control.ui.app import TufControlApp
+    from asusius.ui.app import AsusiusApp
 
-    app = TufControlApp()
+    app = AsusiusApp()
     state = {"failed": False}
 
     def render(widget, path: Path) -> None:
@@ -539,7 +539,7 @@ def inner(args) -> int:
         if args.dialog:
             win.show_page("gpu")
             yield 300
-            from tuf_control.core import GpuMode
+            from asusius.core import GpuMode
             page = win.pages["gpu"]
             page.checks[GpuMode.ASUS_MUX_DGPU].set_active(True)
             page._switch()
@@ -620,7 +620,7 @@ def main() -> int:
                    help="seed agent access demo data (calls, pending requests) and capture "
                         "the Agent access page")
     p.add_argument("--automation", action="store_true",
-                   help="run a demo tuf-controld on the fake tree; capture the Automation "
+                   help="run a demo asusiusd on the fake tree; capture the Automation "
                         "page, rule dialogs and keyboard software effects")
     args = p.parse_args()
     if os.environ.get("TUF_SHOT_CHILD"):

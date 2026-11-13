@@ -6,7 +6,7 @@ import contextlib
 import io
 import unittest
 
-from tuf_control.ui.app import _show_start_page
+from asusius.ui.app import _show_start_page
 
 
 class FakeWindow:
@@ -37,7 +37,7 @@ class PageOptionTests(unittest.TestCase):
         self.assertEqual(window.shown, [])
         self.assertEqual(
             stderr.getvalue(),
-            "tuf-control-gui: unknown page 'gpu-monitor'; valid pages: dashboard, processes, dgpu\n",
+            "asusius-gui: unknown page 'gpu-monitor'; valid pages: dashboard, processes, dgpu\n",
         )
 
     def test_missing_key_is_silent(self) -> None:

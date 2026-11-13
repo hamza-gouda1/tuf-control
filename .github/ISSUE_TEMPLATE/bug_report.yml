@@ -1,5 +1,5 @@
 name: Bug report
-description: Something in TUF Control does not work or shows wrong data
+description: Something in Asusius does not work or shows wrong data
 labels: [bug]
 body:
   - type: input
@@ -22,11 +22,11 @@ body:
   - type: textarea
     id: status
     attributes:
-      label: Output of `tuf-control status` and `tuf-control capabilities`
+      label: Output of `asusius status` and `asusius capabilities`
       render: text
   - type: textarea
     id: logs
     attributes:
       label: Logs
-      description: "`journalctl --user -b | grep tuf-control | tail -50` and `journalctl -u asusd -b | tail -50`"
+      description: "`journalctl --user -b | grep asusius | tail -50` and `journalctl -u asusd -b | tail -50`"
       render: text

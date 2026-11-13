@@ -1,6 +1,6 @@
 # Two-minute hardware-free quickstart
 
-This launches the released TUF Control 0.1.2 interface with simulated laptop data. It does not
+This launches the released Asusius 0.1.2 interface with simulated laptop data. It does not
 need an ASUS laptop, `asusd`, or `supergfxd`. It needs Linux, Python 3.12+, GTK 4, Libadwaita
 1.5, PyGObject, and a running graphical session.
 
@@ -23,18 +23,18 @@ when you close the demo window.
   set -eu
   demo_dir=$(mktemp -d)
   trap 'rm -r -- "$demo_dir"' EXIT
-  git clone --branch v0.1.2 --depth 1 https://github.com/hamza-gouda1/tuf-control.git "$demo_dir/tuf-control"
+  git clone --branch v0.1.2 --depth 1 https://github.com/hamza-gouda1/tuf-control.git "$demo_dir/asusius"
   export HOME="$demo_dir/home"
   export XDG_CONFIG_HOME="$HOME/.config"
   export XDG_DATA_HOME="$HOME/.local/share"
   export XDG_STATE_HOME="$HOME/.local/state"
   export XDG_CACHE_HOME="$HOME/.cache"
   export GSETTINGS_BACKEND=keyfile
-  export TUF_CONTROL_FAKE_ROOT="$demo_dir/fake-root"
-  export PYTHONPATH="$demo_dir/tuf-control/src"
+  export ASUSIUS_FAKE_ROOT="$demo_dir/fake-root"
+  export PYTHONPATH="$demo_dir/asusius/src"
   mkdir -p "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME"
-  python3 -c 'import os; from tuf_control.backends.fake import build_fake_tree; build_fake_tree(os.environ["TUF_CONTROL_FAKE_ROOT"])'
-  dbus-run-session -- python3 -m tuf_control.ui
+  python3 -c 'import os; from asusius.backends.fake import build_fake_tree; build_fake_tree(os.environ["ASUSIUS_FAKE_ROOT"])'
+  dbus-run-session -- python3 -m asusius.ui
 )
 ```
 
@@ -43,7 +43,7 @@ the controls and telemetry use simulated values.
 
 The graphical session display is reused so the window appears on your desktop. D-Bus is private
 to this run, settings live under the temporary `HOME`, and the controller selects only the fake
-backend while `TUF_CONTROL_FAKE_ROOT` is set. This quickstart does not install the daemon,
+backend while `ASUSIUS_FAKE_ROOT` is set. This quickstart does not install the daemon,
 GNOME extension, shortcuts, privileged helper, or any system service. It does not validate
 hardware compatibility or real firmware behavior.
 

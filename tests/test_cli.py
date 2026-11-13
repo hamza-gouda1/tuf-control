@@ -8,9 +8,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tuf_control import cli
-from tuf_control.backends.fake import build_fake_tree
-from tuf_control.controller import FAKE_ROOT_ENV
+from asusius import cli
+from asusius.backends.fake import build_fake_tree
+from asusius.controller import FAKE_ROOT_ENV
 
 
 class CliTests(unittest.TestCase):

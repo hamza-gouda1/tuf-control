@@ -1,5 +1,5 @@
 name: Hardware report
-description: Tell us how TUF Control behaves on your laptop model
+description: Tell us how Asusius behaves on your laptop model
 labels: [hardware]
 body:
   - type: input
@@ -10,7 +10,7 @@ body:
   - type: textarea
     id: caps
     attributes:
-      label: Output of `tuf-control capabilities --json`
+      label: Output of `asusius capabilities --json`
       render: json
     validations: {required: true}
   - type: textarea

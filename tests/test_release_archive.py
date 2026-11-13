@@ -32,7 +32,7 @@ class ReleaseArchiveTests(unittest.TestCase):
             self.assertTrue(names)
             prefix = REPO.name + "-0.1.0"
             self.assertTrue(all(name == prefix or name.startswith(prefix + "/") for name in names))
-            if REPO.name == "tuf-control":
+            if REPO.name == "asusius":
                 packaging = (REPO / "packaging/arch/PKGBUILD").read_text()
                 expected = re.search(r"sha256sums=\('([0-9a-f]{64})'\)", packaging)
                 self.assertIsNotNone(expected)

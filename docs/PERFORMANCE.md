@@ -14,16 +14,16 @@ Dashboard. RSS is what `ps -o rss` shows; PSS splits shared library pages betwee
 
 | | RSS | PSS | CPU (one core) |
 |---|---|---|---|
-| **TUF Control, Dashboard, idle 60 s** | **107 MB** | 60 MB | **1.2 %** |
-| TUF Control, after visiting all 17 pages, back on Dashboard | 116 MB | 69 MB | 1.3 % |
-| TUF Control, Processor page (2 Hz) | | | 2.7 % |
-| TUF Control, Processes page (600 processes, walk every 2 s) | 119 MB | | 1.3 % |
+| **Asusius, Dashboard, idle 60 s** | **107 MB** | 60 MB | **1.2 %** |
+| Asusius, after visiting all 17 pages, back on Dashboard | 116 MB | 69 MB | 1.3 % |
+| Asusius, Processor page (2 Hz) | | | 2.7 % |
+| Asusius, Processes page (600 processes, walk every 2 s) | 119 MB | | 1.3 % |
 | Mission Center 1.x flatpak (app + `magpie` helper), same machine | 154 + 56–64 = **~210–218 MB** | | 2.0 % + 7.1 % (ps lifetime average) |
 | Empty Python + GTK 4 + libadwaita window (Cairo renderer) | 67 MB | 25 MB | |
 | Empty Python + GTK 4 + libadwaita window (GL renderer) | 172 MB | 60 MB | |
-| TUF Control with the GL renderer (`TUF_CONTROL_RENDERER=gl`) | 217 MB | 103 MB | 1.0 % |
+| Asusius with the GL renderer (`ASUSIUS_RENDERER=gl`) | 217 MB | 103 MB | 1.0 % |
 | … GL, NVIDIA EGL vendor library excluded | 186 MB | 93 MB | 0.9 % |
-| Previous TUF Control build (installed copy, GL, all pages eager) | 265 MB | 156 MB | |
+| Previous Asusius build (installed copy, GL, all pages eager) | 265 MB | 156 MB | |
 
 These historical measurements used different sampling windows and are not a controlled
 benchmark against Mission Center. The sampler itself costs 4–6 ms per tick (all sources, one thread).
@@ -34,7 +34,7 @@ benchmark against Mission Center. The sampler itself costs 4–6 ms per tick (al
   `libgallium` and `libLLVM` (45 MB resident) and, through GLVND, NVIDIA's EGL libraries
   (`libnvidia-eglcore`, `libnvidia-gpucomp`, 28 MB). For an app that redraws a few small
   charts once or twice a second this buys nothing, so the app now selects GTK's **Cairo**
-  renderer unless `GSK_RENDERER` or `TUF_CONTROL_RENDERER=gl` says otherwise
+  renderer unless `GSK_RENDERER` or `ASUSIUS_RENDERER=gl` says otherwise
   (`ui/lean.py`). Idle CPU is within 0.2 % of GL; page switches cost a few % more for a
   moment. On a HiDPI panel software rendering costs more; switch back if it matters.
 - **The Python + GTK baseline (~67 MB RSS, half shared libraries) is outside the app-owned
@@ -87,7 +87,7 @@ the software preview timer runs at 15 fps and backs off to 4 Hz after 30 frames 
 unchanged colour, touching the swatch, hex label and keyboard widget only when the colour
 moved; both timers are removed when the page is unmapped or the window is hidden or suspended.
 
-Running the sampler in `tuf-controld` instead of the GUI would not save memory (the GUI
+Running the sampler in `asusiusd` instead of the GUI would not save memory (the GUI
 still needs GTK) and would make the daemon wake every second even with no window open, so
 the sampler stays in the GUI and stops with it.
 
@@ -101,7 +101,7 @@ busy). Awake but idle for three samples (utilisation < 1 %, no compute process) 
 session is closed and polling backs off for 30 s so the driver can suspend it; the page
 shows the last reading and its age. `nvidia-smi` is only a fallback when NVML is missing,
 and then at most every 5 s. During these measurements the dGPU stayed `active` because other
-clients held it (gnome-shell has a context on it, and the previously installed TUF Control
+clients held it (gnome-shell has a context on it, and the previously installed Asusius
 build ran `nvidia-smi` every second); the sleeping path is covered by a unit test with a
 suspended runtime state and an NVML stub that fails if called.
 

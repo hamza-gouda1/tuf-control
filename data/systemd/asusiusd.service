@@ -1,0 +1,26 @@
+# Copyright (C) Hamza Gouda
+# SPDX-License-Identifier: GPL-3.0-or-later
+[Unit]
+Description=Asusius automation and keyboard effects
+Documentation=https://github.com/hamza-gouda1/tuf-control/blob/main/docs/AUTOMATION.md
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+# asusiusd is installed by pip into ~/.local/bin or /usr/bin; search both.
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/env asusiusd
+ExecReload=/bin/kill -HUP $MAINPID
+KillSignal=SIGTERM
+TimeoutStopSec=10
+Restart=on-failure
+RestartSec=5
+# A user daemon: protected writes require asusd/PPD; pkexec cannot elevate here.
+# Resource caps apply where the user manager delegates them.
+NoNewPrivileges=yes
+MemoryMax=96M
+CPUQuota=25%
+
+[Install]
+WantedBy=graphical-session.target

@@ -5,7 +5,7 @@ import math
 import unittest
 from array import array
 
-from tuf_control.ui.chartmath import (
+from asusius.ui.chartmath import (
     bezier_controls,
     monotone_tangents,
     nice_range,

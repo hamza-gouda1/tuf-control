@@ -13,20 +13,21 @@ import unittest
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
-from tuf_control import cli
-from tuf_control.automation.config import (
+from asusius import cli
+from asusius.automation.config import (
     CONFIG_DIR_ENV,
     RUNTIME_DIR_ENV,
     load_config,
     update_config,
 )
-from tuf_control.automation.service import DaemonClient
-from tuf_control.automation.sources import StateCollector
-from tuf_control.backends.fake import FakeBackend, build_fake_tree
-from tuf_control.controller import FAKE_ROOT_ENV, Controller
-from tuf_control.daemon import Daemon, acquire_lock
-from tuf_control.effects.runner import EffectsRunner
+from asusius.automation.service import DaemonClient
+from asusius.automation.sources import StateCollector
+from asusius.backends.fake import FakeBackend, build_fake_tree
+from asusius.controller import FAKE_ROOT_ENV, Controller
+from asusius.daemon import Daemon, acquire_lock
+from asusius.effects.runner import EffectsRunner
 
 SRC = str(Path(__file__).resolve().parents[1] / "src")
 
@@ -144,10 +145,60 @@ class DaemonTests(Env):
         self.assertEqual(self.aura()["colour1"], [142, 42, 68])
         self.assertFalse(json.loads((self.tmp / "run/status.json").read_text())["running"])
 
+    def test_run_loop_survives_step_and_status_errors(self):
+        """A raising step()/write_status() is logged, not fatal: the loop goes on."""
+        d = self.make()
+        d.reload()
+        d.clock = time.monotonic
+        d.effects.clock = d.effects.writer.clock = time.monotonic
+        d.engine.clock = time.monotonic
+        steps = []
+
+        def bad_step():
+            steps.append(1)
+            raise ValueError("unexpected reply shape")
+        d.step = bad_step
+        real_write = d.write_status
+        failed_write = []
+
+        def flaky_write(running=True):
+            if not failed_write:
+                failed_write.append(1)
+                raise OSError("disk full")
+            real_write(running)
+        d.write_status = flaky_write
+        names = []
+        real_thread = threading.Thread
+
+        def spy(*a, **kw):  # rebrand check: no tuf-* thread names may come back
+            names.append(kw.get("name"))
+            return real_thread(*a, **kw)
+        stop = threading.Event()
+        with mock.patch("threading.Thread", spy):
+            t = real_thread(target=d.run, args=(stop,))
+            t.start()
+            try:
+                deadline = time.monotonic() + 5
+                while time.monotonic() < deadline:
+                    p = self.tmp / "run/status.json"
+                    if p.exists() and json.loads(p.read_text()).get("running"):
+                        break
+                    time.sleep(0.02)
+                st = json.loads((self.tmp / "run/status.json").read_text())
+                self.assertTrue(st["running"])           # past the failed first write
+                self.assertGreaterEqual(len(steps), 1)   # past the raising step()
+                self.assertIn("asusius-effects", names)  # rebranded effects thread
+                self.assertFalse(any(n and n.startswith("tuf-") for n in names))
+            finally:
+                stop.set()
+                t.join(5)
+        self.assertFalse(t.is_alive())
+        self.assertFalse(json.loads((self.tmp / "run/status.json").read_text())["running"])
+
     def test_single_instance_lock(self):
         a = acquire_lock(self.tmp / "run/daemon.lock")
         self.assertIsNotNone(a)
-        code = ("import sys;from pathlib import Path;from tuf_control.daemon import acquire_lock;"
+        code = ("import sys;from pathlib import Path;from asusius.daemon import acquire_lock;"
                 f"sys.exit(0 if acquire_lock(Path({str(self.tmp / 'run/daemon.lock')!r})) "
                 "is None else 1)")
         r = subprocess.run([sys.executable, "-c", code], env={**os.environ, "PYTHONPATH": SRC})
@@ -158,15 +209,32 @@ class DaemonTests(Env):
 class ServiceClientTests(Env):
     def test_spawn_without_systemd_under_fake_root(self):
         calls = []
-        popen = lambda cmd, **kw: (calls.append((cmd, kw)), SimpleNamespace(pid=4242))[1]
+        real_thread = threading.Thread
+        names = []
+
+        def spy(*a, **kw):  # rebrand check: no tuf-* thread names may come back
+            names.append(kw.get("name"))
+            return real_thread(*a, **kw)
+        popen = lambda cmd, **kw: (calls.append((cmd, kw)),
+                                   SimpleNamespace(pid=4242, stdout=io.BytesIO(b"boot\n")))[1]
         c = DaemonClient(self.tmp / "run", run=lambda *a, **k: self.fail("no systemctl"),
                          popen=popen)
         self.assertEqual(c.status(), {"running": False})
-        self.assertEqual(c.start(dry_run=True), "started pid 4242")
+        with mock.patch("threading.Thread", spy):
+            self.assertEqual(c.start(dry_run=True), "started pid 4242")
         cmd, kw = calls[0]
-        self.assertEqual(cmd[1:], ["-m", "tuf_control.daemon", "--dry-run"])
+        self.assertEqual(cmd[1:], ["-m", "asusius.daemon", "--dry-run"])
         self.assertTrue(kw["start_new_session"])
         self.assertEqual(kw["env"][FAKE_ROOT_ENV], str(self.root))
+        self.assertIn("asusius-daemon-log", names)
+        self.assertFalse(any(n and n.startswith("tuf-") for n in names))
+        deadline = time.monotonic() + 2
+        content = ""
+        while time.monotonic() < deadline and content != "boot\n":
+            p = self.tmp / "run/daemon.log"
+            content = p.read_text() if p.exists() else ""
+            time.sleep(0.02)
+        self.assertEqual(content, "boot\n")  # the drainer really drained the child's pipe
 
     def test_systemd_path_and_stale_status(self):
         os.environ.pop(FAKE_ROOT_ENV)
@@ -178,9 +246,9 @@ class ServiceClientTests(Env):
             return SimpleNamespace(returncode=0, stdout=out, stderr="")
         c = DaemonClient(self.tmp / "run", run=run, popen=lambda *a, **k: self.fail("spawned"),
                          alive=lambda pid: True)
-        self.assertEqual(c.start(), "started tuf-controld.service")
-        self.assertEqual(c.stop(), "stopped tuf-controld.service")
-        self.assertIn(["systemctl", "--user", "start", "tuf-controld.service"], seen)
+        self.assertEqual(c.start(), "started asusiusd.service")
+        self.assertEqual(c.stop(), "stopped asusiusd.service")
+        self.assertIn(["systemctl", "--user", "start", "asusiusd.service"], seen)
         (self.tmp / "run").mkdir(exist_ok=True)
         (self.tmp / "run/status.json").write_text(json.dumps(
             {"pid": 1, "updated_ts": time.time() - 60, "running": True}))
@@ -239,7 +307,7 @@ class CliTests(Env):
 
 
 class EndToEndTest(Env):
-    """The real `python -m tuf_control.daemon` process against a fake tree."""
+    """The real `python -m asusius.daemon` process against a fake tree."""
 
     def test_start_status_stop(self):
         self.run_cli("automation", "add", "--name", "Always", "--when", "battery",

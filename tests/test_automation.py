@@ -8,19 +8,19 @@ import unittest
 from datetime import datetime
 from pathlib import Path
 
-from tuf_control.automation import config as C
-from tuf_control.automation.actions import ControllerSink, PpdClient
-from tuf_control.automation.engine import Engine, State, evaluate, in_schedule, test_rule
-from tuf_control.automation.rules import (
+from asusius.automation import config as C
+from asusius.automation.actions import ControllerSink, PpdClient
+from asusius.automation.engine import Engine, State, evaluate, in_schedule, test_rule
+from asusius.automation.rules import (
     Rule,
     RuleError,
     parse_action_spec,
     parse_trigger_spec,
 )
-from tuf_control.automation.sources import ProcessScanner, StateCollector, read_power
-from tuf_control.backends.fake import FakeBackend, build_fake_tree
-from tuf_control.controller import FAKE_ROOT_ENV, Controller
-from tuf_control.core import BackendUnavailable, ValidationError
+from asusius.automation.sources import ProcessScanner, StateCollector, read_power
+from asusius.backends.fake import FakeBackend, build_fake_tree
+from asusius.controller import FAKE_ROOT_ENV, Controller
+from asusius.core import BackendUnavailable, ValidationError
 
 FRI_NOON = datetime(2026, 10, 23, 12, 0)  # a Friday
 

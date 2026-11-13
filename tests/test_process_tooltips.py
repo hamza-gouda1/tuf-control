@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 SOURCE = (Path(__file__).resolve().parents[1] /
-          "src/tuf_control/ui/pages/processes.py")
+          "src/asusius/ui/pages/processes.py")
 
 
 class FakeHeader:

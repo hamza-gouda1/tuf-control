@@ -8,7 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from tuf_control.updates import apt
+from asusius.updates import apt
 
 FIXTURE = Path(__file__).parent / "fixtures/updates/apt_python.json"
 

@@ -2,7 +2,7 @@
 # Copyright (C) Hamza Gouda
 import unittest
 
-from tuf_control.core import (
+from asusius.core import (
     BatteryHealth, FanCurve, PowerLimit, Profile, ValidationError,
 )
 

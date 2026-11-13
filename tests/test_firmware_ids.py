@@ -5,7 +5,7 @@ import json
 import unittest
 from pathlib import Path
 
-from tuf_control.updates import firmware
+from asusius.updates import firmware
 
 
 class FirmwareIdentityTests(unittest.TestCase):

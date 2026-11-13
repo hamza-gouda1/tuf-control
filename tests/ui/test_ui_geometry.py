@@ -4,10 +4,10 @@
 readout bubble, number formatting that must not wrap in the middle of a reading."""
 import unittest
 
-from tuf_control.backends.fake import DEFAULT_CURVES
-from tuf_control.core import FanCurve
-from tuf_control.telemetry import fmt
-from tuf_control.ui import viewmodels as vm
+from asusius.backends.fake import DEFAULT_CURVES
+from asusius.core import FanCurve
+from asusius.telemetry import fmt
+from asusius.ui import viewmodels as vm
 
 SIZES = [(300, 300), (328, 300), (600, 300), (1030, 300), (200, 120)]
 

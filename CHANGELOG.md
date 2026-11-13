@@ -81,7 +81,7 @@ All notable changes to this project. Format follows Keep a Changelog; versions f
   so every gesture threw before it could run), and the swipe threshold now matches the
   hardware — measured on the FX608JHR, a natural three-finger swipe accumulates ~73 px,
   so the floor is 50 px with 1.4× axis dominance (was 120 px / 1.5×, which no real
-  swipe reached). Gestures log to the journal (`[tuf-gesture]`) so a miss says why.
+  swipe reached). Gestures log to the journal (`[asusius-gesture]`) so a miss says why.
   "Show desktop" is a toggle: the app that was focused when everything minimised is
   remembered, and the next three-finger swipe down — on the desktop, or while the
   overview is up (the shell closes it, this restores the app) — restores the windows that were visible on that workspace.

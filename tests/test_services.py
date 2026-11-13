@@ -9,10 +9,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tuf_control import cli
-from tuf_control.controller import FAKE_ROOT_ENV
-from tuf_control.services.backend import FakeServices, RefusedError, SystemdBackend, cgroup_map
-from tuf_control.services.units import Unit, allowed_ops, filter_units, is_critical, refusal, \
+from asusius import cli
+from asusius.controller import FAKE_ROOT_ENV
+from asusius.services.backend import FakeServices, RefusedError, SystemdBackend, cgroup_map
+from asusius.services.units import Unit, allowed_ops, filter_units, is_critical, refusal, \
     sort_units, template_of
 
 
@@ -27,7 +27,7 @@ class SafetyTests(unittest.TestCase):
                   "NetworkManager-dispatcher.service", "gdm.service", "gdm3.service",
                   "display-manager.service", "sddm.service", "user@1000.service",
                   "getty@tty1.service", "org.gnome.Shell@wayland.service",
-                  "tuf-controld.service", "app-io.github.hamzagouda.TufControl-1234.scope",
+                  "asusiusd.service", "app-io.github.hamzagouda.Asusius-1234.scope",
                   "init.scope", "asusd.service", "thermald.service", "ModemManager.service"):
             self.assertTrue(is_critical(n), n)
         for n in ("cups.service", "docker.service", "ssh.service", "syncthing.service",

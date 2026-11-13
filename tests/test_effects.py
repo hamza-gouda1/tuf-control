@@ -11,31 +11,31 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from tuf_control.automation.config import CONFIG_DIR_ENV
-from tuf_control.backends.fake import FakeBackend, build_fake_tree
-from tuf_control.controller import FAKE_ROOT_ENV, Controller
-from tuf_control.core import KbdEffect, TufControlError, ValidationError
-from tuf_control.effects import audio as A
-from tuf_control.effects.ambient import (
+from asusius.automation.config import CONFIG_DIR_ENV
+from asusius.backends.fake import FakeBackend, build_fake_tree
+from asusius.controller import FAKE_ROOT_ENV, Controller
+from asusius.core import KbdEffect, AsusiusError, ValidationError
+from asusius.effects import audio as A
+from asusius.effects.ambient import (
     PortalDenied,
     ScreenCastFlow,
     ScreenColourSource,
     TokenStore,
     average_rgb,
 )
-from tuf_control.effects.base import EffectStack, Inputs
-from tuf_control.effects.colour import Smoother, gradient, hex_to_rgb
-from tuf_control.effects.notify import NotificationQueue, parse_notify
-from tuf_control.effects.plugins import (
+from asusius.effects.base import EffectStack, Inputs
+from asusius.effects.colour import Smoother, gradient, hex_to_rgb
+from asusius.effects.notify import NotificationQueue, parse_notify
+from asusius.effects.plugins import (
     AccentEffect,
     AudioEffect,
     NotificationFlash,
     ProfileEffect,
     TemperatureEffect,
 )
-from tuf_control.effects.registry import EFFECTS, coerce_params, parse_kv
-from tuf_control.effects.runner import RESTORE_CONFIG, EffectsRunner, KbdWriter
-from tuf_control.effects.theme import theme_accent, theme_variant
+from asusius.effects.registry import EFFECTS, coerce_params, parse_kv
+from asusius.effects.runner import RESTORE_CONFIG, EffectsRunner, KbdWriter
+from asusius.effects.theme import theme_accent, theme_variant
 
 
 class Clock:
@@ -317,8 +317,8 @@ class RunnerTests(unittest.TestCase):
         first = KbdWriter(self.ctl, clock=self.clock, recovery_path=self.recovery)
         first.push((100, 20, 30))
         restarted = KbdWriter(self.ctl, clock=self.clock, recovery_path=self.recovery)
-        with patch.object(self.ctl, "get_kbd_rgb", side_effect=TufControlError("offline")):
-            with self.assertRaises(TufControlError):
+        with patch.object(self.ctl, "get_kbd_rgb", side_effect=AsusiusError("offline")):
+            with self.assertRaises(AsusiusError):
                 restarted.save()
         restarted.save()
         self.assertEqual(restarted.saved, original)
@@ -350,8 +350,8 @@ class RunnerTests(unittest.TestCase):
         from unittest.mock import patch
         writer = KbdWriter(self.ctl, clock=self.clock, recovery_path=self.recovery)
         original = self.aura()
-        with patch("tuf_control.effects.runner.write_json_atomic", side_effect=OSError("full")):
-            with self.assertRaisesRegex(TufControlError, "recovery state"):
+        with patch("asusius.effects.runner.write_json_atomic", side_effect=OSError("full")):
+            with self.assertRaisesRegex(AsusiusError, "recovery state"):
                 writer.push((0, 255, 0))
         self.assertEqual(self.aura(), original)
 
@@ -405,7 +405,7 @@ class RunnerTests(unittest.TestCase):
     def test_write_failures_back_off(self):
         class Broken(Controller):
             def set_kbd_effect(self, effect, dry_run=False):
-                from tuf_control.core import BackendUnavailable
+                from asusius.core import BackendUnavailable
                 raise BackendUnavailable("asusd gone")
         ctl = Broken([FakeBackend(self.root)])
         r = EffectsRunner(ctl, clock=self.clock, sources={"theme": lambda: None})
@@ -438,7 +438,7 @@ class NotificationMonitorBusTest(unittest.TestCase):
     def test_become_monitor_on_private_bus(self):
         code = (
             "import subprocess,time\n"
-            "from tuf_control.effects.notify import NotificationMonitor\n"
+            "from asusius.effects.notify import NotificationMonitor\n"
             "m=NotificationMonitor();m.start();assert m.error is None, m.error\n"
             "subprocess.run(['gdbus','call','--session','--dest',"
             "'org.freedesktop.Notifications','--object-path','/org/freedesktop/Notifications',"

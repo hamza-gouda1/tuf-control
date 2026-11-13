@@ -14,17 +14,17 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from tuf_control import cli
-from tuf_control.agent import policy, present
-from tuf_control.agent.approvals import APPROVED_TTL_S, PENDING_TTL_S, ApprovalQueue
-from tuf_control.agent.audit import AuditLog
-from tuf_control.agent.sanitize import WITHHELD, clean, looks_like_instruction, untrusted
-from tuf_control.agent.schema import SchemaError, validate
-from tuf_control.agent.tools import TOOLS, AgentService, RateLimiter, parent_process
-from tuf_control.automation.config import CONFIG_DIR_ENV, RUNTIME_DIR_ENV
-from tuf_control.agent.store import STATE_DIR_ENV
-from tuf_control.backends.fake import build_fake_tree
-from tuf_control.controller import FAKE_ROOT_ENV
+from asusius import cli
+from asusius.agent import policy, present
+from asusius.agent.approvals import APPROVED_TTL_S, PENDING_TTL_S, ApprovalQueue
+from asusius.agent.audit import AuditLog
+from asusius.agent.sanitize import WITHHELD, clean, looks_like_instruction, untrusted
+from asusius.agent.schema import SchemaError, validate
+from asusius.agent.tools import TOOLS, AgentService, RateLimiter, parent_process
+from asusius.automation.config import CONFIG_DIR_ENV, RUNTIME_DIR_ENV
+from asusius.agent.store import STATE_DIR_ENV
+from asusius.backends.fake import build_fake_tree
+from asusius.controller import FAKE_ROOT_ENV
 
 CURVE = [(39, 28), (48, 53), (51, 65), (55, 116), (62, 158), (71, 180), (80, 217), (97, 255)]
 
@@ -52,7 +52,7 @@ class AgentEnv(unittest.TestCase):
         self.root = build_fake_tree(self.tmp / "root")
         env = {FAKE_ROOT_ENV: str(self.root), CONFIG_DIR_ENV: str(self.tmp / "cfg"),
                STATE_DIR_ENV: str(self.tmp / "state"), RUNTIME_DIR_ENV: str(self.tmp / "run"),
-               "TUF_CONTROL_AGENT_NOTIFY": "0"}
+               "ASUSIUS_AGENT_NOTIFY": "0"}
         for k, v in env.items():
             self.addCleanup(_restore_env, k, os.environ.get(k))
             os.environ[k] = v
@@ -344,8 +344,8 @@ class WriteFlow(AgentEnv):
         self.assertEqual(self.charge(), "90")
 
     def test_launcher_is_os_reported_and_visible_to_owner(self):
-        with patch("tuf_control.agent.tools.os.getppid", return_value=123), \
-                patch("tuf_control.agent.tools.os.readlink", return_value="/usr/bin/client"):
+        with patch("asusius.agent.tools.os.getppid", return_value=123), \
+                patch("asusius.agent.tools.os.readlink", return_value="/usr/bin/client"):
             svc = self.service()
         svc.set_client("a self-declared name", "1")
         self.grant("control-basic")
@@ -359,7 +359,7 @@ class WriteFlow(AgentEnv):
                       present.pending_rows([entry])[0]["subtitle"])
         self.assertIn("Launcher: /usr/bin/client (PID 123)",
                       present.audit_row(self.audit.tail(1)[0])["detail"])
-        with patch("tuf_control.agent.tools.os.readlink", side_effect=OSError):
+        with patch("asusius.agent.tools.os.readlink", side_effect=OSError):
             self.assertEqual(parent_process()["executable"], "unavailable")
 
     def test_denied_request(self):
@@ -631,7 +631,7 @@ class AuditAndKillSwitch(AgentEnv):
         self.assertEqual({t["name"] for t in man["tools"]}, set(TOOLS))
         self.assertEqual(len(man["resources"]), 4)
         code, out, _ = run("mcp", "--print-config")
-        cfg = json.loads(out)["mcpServers"]["tuf-control"]
+        cfg = json.loads(out)["mcpServers"]["asusius"]
         self.assertIn("mcp", cfg["args"])
 
 
@@ -651,7 +651,7 @@ class Sanitising(AgentEnv):
             self.assertFalse(looks_like_instruction(text), text)
 
     def test_hostile_process_names(self):
-        from tuf_control.telemetry.fake import ensure
+        from asusius.telemetry.fake import ensure
         ensure(self.root)
 
         def proc(pid, comm, argv0):
@@ -682,7 +682,7 @@ class Sanitising(AgentEnv):
 
 class NotificationButtons(AgentEnv):
     def test_actions_only_for_own_ids_and_never_approve_high_risk(self):
-        from tuf_control.agent.notify import DesktopNotifier, make_notifier
+        from asusius.agent.notify import DesktopNotifier, make_notifier
         self.assertIsNone(make_notifier(self.queue))  # fake tree: never touches the bus
         self.grant("control-all", high_risk=True)
         basic, _ = self.call("set_charge_limit", {"percent": 70, "dry_run": False})

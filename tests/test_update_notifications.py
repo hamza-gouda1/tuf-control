@@ -9,9 +9,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from tuf_control.updates import check, notify
-from tuf_control.updates.model import Report, SourceResult, UpdateItem
-from tuf_control.updates.scheduler import UpdateScheduler, mark_seen
+from asusius.updates import check, notify
+from asusius.updates.model import Report, SourceResult, UpdateItem
+from asusius.updates.scheduler import UpdateScheduler, mark_seen
 
 
 def report():
@@ -25,7 +25,7 @@ class DeliveryTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
         environment = patch.dict(os.environ, {"HOME": str(self.root),
-                                 "TUF_CONTROL_CACHE_DIR": str(self.root / "cache"),
+                                 "ASUSIUS_CACHE_DIR": str(self.root / "cache"),
                                  "GSETTINGS_BACKEND": "keyfile"})
         environment.start()
         self.addCleanup(environment.stop)
@@ -116,6 +116,7 @@ class ClickWatchTests(unittest.TestCase):
         connection.signal_subscribe.return_value = 7
         watch = notify._ClickWatch(connection, 11)
         self.addCleanup(watch.close)
+        self.assertEqual(watch.thread.name, "asusius-update-notification")
         self.assertTrue(context.waiting.wait(1), "watch must enter its private context")
         return watch, context, source, glib, connection
 

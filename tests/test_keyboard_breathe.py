@@ -11,12 +11,12 @@ import unittest
 
 from test_keyboard_fx import STATIC, AsusdAura
 
-from tuf_control.backends.dbus import DBusBackend
-from tuf_control.controller import Controller
-from tuf_control.core import BackendError, KbdEffect
-from tuf_control.effects.plugins import GradientBreatheEffect, two_colour_breathe
-from tuf_control.effects.registry import EFFECTS, coerce_params
-from tuf_control.effects.runner import KbdWriter
+from asusius.backends.dbus import DBusBackend
+from asusius.controller import Controller
+from asusius.core import BackendError, KbdEffect
+from asusius.effects.plugins import GradientBreatheEffect, two_colour_breathe
+from asusius.effects.registry import EFFECTS, coerce_params
+from asusius.effects.runner import KbdWriter
 
 
 class TufAura(AsusdAura):

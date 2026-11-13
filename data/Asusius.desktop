@@ -1,0 +1,19 @@
+# Copyright (C) Hamza Gouda
+# SPDX-License-Identifier: GPL-3.0-or-later
+[Desktop Entry]
+Type=Application
+Name=Asusius
+GenericName=Laptop Control
+Comment=Fans, power, graphics and lighting for ASUS TUF and ROG laptops
+Exec=asusius-gui
+Icon=io.github.hamzagouda.Asusius
+Terminal=false
+Categories=Settings;HardwareSettings;GTK;
+Keywords=asus;tuf;rog;fan;power;profile;gpu;mux;battery;keyboard;rgb;
+StartupNotify=true
+SingleMainWindow=true
+Actions=updates;
+
+[Desktop Action updates]
+Name=Updates
+Exec=asusius-gui --page updates

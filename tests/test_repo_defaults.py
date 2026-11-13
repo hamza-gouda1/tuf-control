@@ -3,7 +3,7 @@
 """Opting into checkout checks must not inject the maintainer's own paths."""
 import unittest
 
-from tuf_control.updates.settings import validate_updates_section
+from asusius.updates.settings import validate_updates_section
 
 
 class CheckoutDefaultsTests(unittest.TestCase):

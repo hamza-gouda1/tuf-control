@@ -8,15 +8,15 @@ import unittest
 from datetime import datetime
 from pathlib import Path
 
-from tuf_control.automation.service import DaemonClient
-from tuf_control.backends.dbus import DBusBackend
-from tuf_control.controller import Controller
-from tuf_control.core import BackendError, KbdEffect
-from tuf_control.effects.base import Inputs
-from tuf_control.effects.plugins import CpuLoadEffect, NightEffect, RainbowEffect, SpectrumEffect
-from tuf_control.effects.registry import EFFECTS
-from tuf_control.effects.runner import EffectsRunner, KbdWriter
-from tuf_control.effects.system import CpuLoad, read_cpu_times
+from asusius.automation.service import DaemonClient
+from asusius.backends.dbus import DBusBackend
+from asusius.controller import Controller
+from asusius.core import BackendError, KbdEffect
+from asusius.effects.base import Inputs
+from asusius.effects.plugins import CpuLoadEffect, NightEffect, RainbowEffect, SpectrumEffect
+from asusius.effects.registry import EFFECTS
+from asusius.effects.runner import EffectsRunner, KbdWriter
+from asusius.effects.system import CpuLoad, read_cpu_times
 
 STATIC = (0, 0, (155, 31, 64), (0, 0, 0), "Med", "Right")
 BREATHE = (1, 0, (155, 31, 64), (216, 185, 138), "Med", "Right")

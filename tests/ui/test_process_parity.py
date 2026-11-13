@@ -3,8 +3,8 @@
 """Process page parity helpers: VmSwap parsing, app identity keys, stop refusals, totals."""
 import unittest
 
-from tuf_control.telemetry.procs import app_from_cgroup, parse_vmswap
-from tuf_control.ui import viewmodels as vm
+from asusius.telemetry.procs import app_from_cgroup, parse_vmswap
+from asusius.ui import viewmodels as vm
 
 STATUS = (b"Name:\tfirefox\nVmPeak:\t 100 kB\nVmRSS:\t 2048 kB\nVmSwap:\t  512 kB\n"
           b"Threads:\t5\n")
@@ -23,25 +23,25 @@ class Swap(unittest.TestCase):
 class Identity(unittest.TestCase):
     def test_scope_name_of_our_own_launcher(self):
         cg = "0::/user.slice/user-1000.slice/user@1000.service/app.slice/" \
-             "app-gnome-tuf\\x2dcontrol\\x2dgui-12345.scope\n"
+             "app-gnome-asusius\\x2dgui-12345.scope\n"
         app, unit = app_from_cgroup(cg)
-        self.assertEqual(app, "tuf-control-gui")
+        self.assertEqual(app, "asusius-gui")
         self.assertIn(vm.norm_app_key(app), vm.OWN_APP_KEYS)
 
     def test_keys_unify_spellings(self):
-        for a in ("io.github.hamzagouda.TufControl", "io.github.hamzagouda.TufControl.desktop",
-                  "tuf-control", "TUF_Control"):
-            self.assertEqual(vm.norm_app_key(a), "tufcontrol", a)
+        for a in ("io.github.hamzagouda.Asusius", "io.github.hamzagouda.Asusius.desktop",
+                  "asusius", "Asusius"):
+            self.assertEqual(vm.norm_app_key(a), "asusius", a)
         self.assertEqual(vm.norm_app_key("org.gnome.Nautilus.desktop"), "nautilus")
         self.assertEqual(vm.norm_app_key("brave-browser"), "bravebrowser")
 
     def test_index_by_id_wm_class_and_exec(self):
         idx = vm.desktop_index([
-            ("A", "io.github.hamzagouda.TufControl.desktop", None, "tuf-control-gui %U"),
+            ("A", "io.github.hamzagouda.Asusius.desktop", None, "asusius-gui %U"),
             ("B", "org.mozilla.firefox.desktop", "Navigator", "/usr/lib/firefox/firefox %u"),
             ("C", "other.desktop", "Firefox", "firefox")])
-        self.assertEqual(idx["tufcontrolgui"], "A")  # by executable
-        self.assertEqual(idx["tufcontrol"], "A")  # by desktop id
+        self.assertEqual(idx["asusiusgui"], "A")  # by executable
+        self.assertEqual(idx["asusius"], "A")  # by desktop id
         self.assertEqual(idx["navigator"], "B")  # by StartupWMClass
         self.assertEqual(idx["firefox"], "B")  # first entry wins
 

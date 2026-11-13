@@ -1,7 +1,7 @@
 # Automation
 
 Rules change settings when something happens: plug in, unplug, battery drops, a game
-starts, a time window begins, the profile changes. They run in `tuf-controld`, a small
+starts, a time window begins, the profile changes. They run in `asusiusd`, a small
 per-user daemon. No root: every write goes through the same `Controller` the GUI uses, so
 firmware bounds and backend checks apply unchanged.
 
@@ -9,19 +9,19 @@ firmware bounds and backend checks apply unchanged.
 
 ## Service
 
-    tuf-control daemon start [--dry-run]     # systemd --user if the unit is installed, else detached
-    tuf-control daemon status
-    tuf-control daemon stop
-    tuf-controld --once                      # one dry-run step, print status JSON, exit
+    asusius daemon start [--dry-run]     # systemd --user if the unit is installed, else detached
+    asusius daemon status
+    asusius daemon stop
+    asusiusd --once                      # one dry-run step, print status JSON, exit
 
-The unit is `data/systemd/tuf-controld.service` (`WantedBy=graphical-session.target`, restarts
+The unit is `data/systemd/asusiusd.service` (`WantedBy=graphical-session.target`, restarts
 on failure, `SIGHUP` reloads). Copy it to `~/.config/systemd/user/` and
-`systemctl --user enable --now tuf-controld` to start at login. Without the unit (or with
-`TUF_CONTROL_FAKE_ROOT` set) `daemon start` spawns `python -m tuf_control.daemon` detached
+`systemctl --user enable --now asusiusd` to start at login. Without the unit (or with
+`ASUSIUS_FAKE_ROOT` set) `daemon start` spawns `python -m asusius.daemon` detached
 and `stop` sends `SIGTERM` to its pid.
 
-One instance per user (`flock` on `$XDG_RUNTIME_DIR/tuf-control/daemon.lock`). Status for
-the GUI and CLI is `$XDG_RUNTIME_DIR/tuf-control/status.json`, rewritten about once a second.
+One instance per user (`flock` on `$XDG_RUNTIME_DIR/asusius/daemon.lock`). Status for
+the GUI and CLI is `$XDG_RUNTIME_DIR/asusius/status.json`, rewritten about once a second.
 On `SIGTERM`/`SIGINT` the daemon stops the effects thread first (the keyboard goes back to its
 hardware mode), then every rule lets go of what it holds and restores the previous values
 where the rule asks for it. Measured on the fake tree: ~18 MB RSS; with an app rule and the
@@ -30,11 +30,11 @@ to asusd will cost more).
 
 ## Config file
 
-`~/.config/tuf-control/config.json` (`$TUF_CONTROL_CONFIG_DIR` overrides the directory).
+`~/.config/asusius/config.json` (`$ASUSIUS_CONFIG_DIR` overrides the directory).
 The GUI, the CLI and hand edits share it. Every writer takes an `flock`, validates the whole
 document and replaces the file atomically (temp file + `fsync` + `rename`). The daemon
 `stat()`s it every 250 ms and reloads on change. A broken edit is reported
-(`tuf-control daemon status`, the Automation page) and the last good config stays in force.
+(`asusius daemon status`, the Automation page) and the last good config stays in force.
 
 ```json
 {
@@ -86,7 +86,7 @@ flipping it.
 `automation.sync_ppd: true` mirrors every profile action into power-profiles-daemon, for
 setups where GNOME's power mode and the platform profile drift apart. power-profiles-daemon
 has no `Controller` capability, so this one action talks to `net.hadess.PowerProfiles`
-directly, limited to the three names above (under `TUF_CONTROL_FAKE_ROOT` it writes
+directly, limited to the three names above (under `ASUSIUS_FAKE_ROOT` it writes
 `<root>/fake/ppd.json`).
 
 ## How rules combine
@@ -110,23 +110,23 @@ directly, limited to the three names above (under `TUF_CONTROL_FAKE_ROOT` it wri
 ## Dry run
 
 - Per daemon: `automation.dry_run: true`, the switch on the Automation page, or
-  `tuf-control daemon start --dry-run`. Actions run through the Controller with
+  `asusius daemon start --dry-run`. Actions run through the Controller with
   `dry_run=True` and the log says `dry run: would set profile performance via dbus`.
-- One-off: `tuf-control automation test [ID] [--state ac=0,battery=15,apps=steam,time=23:30]`
+- One-off: `asusius automation test [ID] [--state ac=0,battery=15,apps=steam,time=23:30]`
   evaluates the rules against the current (or overridden) inputs, shows which match and who
   wins each setting, and dry-runs every action. The rule dialog's **Test** button does the
   same for the rule being edited.
 
 ## CLI
 
-    tuf-control automation list
-    tuf-control automation add --name "Games" --when app=steam,gamescope \
+    asusius automation list
+    asusius automation add --name "Games" --when app=steam,gamescope \
         --do profile=performance --do panel_overdrive=on --priority 80
-    tuf-control automation add --name "Night" --when "time=mon-fri@22:00-07:00" --do kbd_brightness=0
-    tuf-control automation add --name "Low" --when "battery<20" --do profile=quiet --do charge_limit=80
-    tuf-control automation add --name "x" --rule-json '{"trigger": {...}, "actions": [...]}'
-    tuf-control automation enable|disable|remove ID
-    tuf-control automation test --dry-run [ID] [--state ...]
+    asusius automation add --name "Night" --when "time=mon-fri@22:00-07:00" --do kbd_brightness=0
+    asusius automation add --name "Low" --when "battery<20" --do profile=quiet --do charge_limit=80
+    asusius automation add --name "x" --rule-json '{"trigger": {...}, "actions": [...]}'
+    asusius automation enable|disable|remove ID
+    asusius automation test --dry-run [ID] [--state ...]
 
 `--when`: `ac`, `battery`, `battery<N`, `battery>N`, `app=a,b`, `time=[days@]HH:MM-HH:MM`
 (days: `mon-fri`, `weekends`, `sat,sun`, ...), `profile=NAME`. `--do`: `TYPE=VALUE` for every
@@ -161,6 +161,6 @@ action type; `kbd_effect=breathe:#ff0000`; `effect=temperature|off`.
   writes and hot reload, the `/proc` scanner on a fake `/proc`, every Controller-routed
   action against the fake sysfs tree, the single-instance lock, the systemd and spawn
   paths of the service client (systemctl is injected), and the real
-  `python -m tuf_control.daemon` process started, observed and stopped against a fake tree.
+  `python -m asusius.daemon` process started, observed and stopped against a fake tree.
 - Not exercised on real hardware: the asusd/power-profiles-daemon writes made by rules, and
   the systemd unit under a real login session. The UPower wake-up subscription is untested.

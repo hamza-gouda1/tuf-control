@@ -12,7 +12,7 @@ the laptop that needs an update, grouped by source:
 | Flatpak (system and per-user) | `flatpak remote-ls --updates --cached` (offline-safe) + `flatpak list` | `flatpak update --user` (no prompt) / `--system` (flatpak's helper, polkit) |
 | Firmware (BIOS/UEFI, EC, Thunderbolt, webcam, Secure Boot dbx…) | fwupd D-Bus `GetDevices`, `GetUpgrades` per updatable device, `GetRemotes` for the LVFS metadata age | download the cabinet from the LVFS (https, checksum from the metadata), fwupd `Install` (fwupd verifies the signature; polkit) |
 | Restart needed | newer installed kernel of the running flavour, `/run/reboot-required`, NVIDIA kernel module older than the installed driver | GNOME's own restart dialog (`org.gnome.SessionManager.Reboot`) |
-| TUF Control / Bordeaux GNOME checkouts (off by default) | `git rev-list HEAD..@{u}` as of the last fetch (no network) | not applied; pull yourself |
+| Asusius / Bordeaux GNOME checkouts (off by default) | `git rev-list HEAD..@{u}` as of the last fetch (no network) | not applied; pull yourself |
 
 A missing source (no flatpak, no fwupd, no snapd) is shown under *Not available* with the reason;
 a source that fails (offline, timeout) shows the error and the rest of the report is kept.
@@ -64,19 +64,19 @@ window never freezes: a worker thread does the work and the panel repaints at ab
 
 ### History
 
-Every run is appended to `~/.local/state/tuf-control/updates-history.jsonl` (mode 0600,
+Every run is appended to `~/.local/state/asusius/updates-history.jsonl` (mode 0600,
 rotated at 1 MiB, with locked append/rotation, symlink refusal and malformed-record tolerance): start/end, trigger, duration, per item the old → new version and the
 verified result with its reason, reboot flag. The **History** section of the page lists runs
 newest first, expandable, with a source filter and a "since yesterday" summary; updates that
-happened outside TUF Control (unattended-upgrades, GNOME Software, a terminal) are noticed
+happened outside Asusius (unattended-upgrades, GNOME Software, a terminal) are noticed
 by the next healthy background check and recorded only when installed-version changes
 are proven. A withdrawn candidate or unavailable source is not counted as an installation.
 
 ### Background checks
 
-`tuf-controld` checks at most every 6 hours (configurable, minimum 6), skips metered
+`asusiusd` checks at most every 6 hours (configurable, minimum 6), skips metered
 connections (NetworkManager `Metered`), runs the check in a short-lived child process (one at a
-time per user, `flock`), caches the report in `~/.cache/tuf-control/updates.json`, and posts a
+time per user, `flock`), caches the report in `~/.cache/asusius/updates.json`, and posts a
 desktop notification such as *“4 updates available (apt 3, snap 1) · 2 security”* only when
 something new appears (a new item or a newer version). Updates already announced, or seen on
 the Updates page, never notify again; fewer updates never notify.
@@ -85,19 +85,19 @@ the Updates page, never notify again; fewer updates never notify.
 "updates": {"enabled": true, "interval_h": 6, "respect_metered": true, "notify": true,
             "sources": {"apt": true, "snap": true, "flatpak": true, "firmware": true,
                         "system": true},
-            "check_repos": false, "repos": ["~/projects/tuf-control", "~/projects/bordeaux-gnome"]}
+            "check_repos": false, "repos": ["~/projects/asusius", "~/projects/bordeaux-gnome"]}
 ```
-(in `~/.config/tuf-control/config.json`).
+(in `~/.config/asusius/config.json`).
 
 ### CLI and agents
 
 ```
-tuf-control updates [list] [--check] [--json]   # cached report, or check now
-tuf-control updates check
-tuf-control updates refresh [--source apt|firmware|flatpak]
-tuf-control updates apply [--source S] [--id ID]   # prints the plan; --yes applies (polkit),
+asusius updates [list] [--check] [--json]   # cached report, or check now
+asusius updates check
+asusius updates refresh [--source apt|firmware|flatpak]
+asusius updates apply [--source S] [--id ID]   # prints the plan; --yes applies (polkit),
                                                    # then re-checks and reports what really installed
-tuf-control updates history [--since 7d] [--source S] [--limit N] [--json]
+asusius updates history [--since 7d] [--source S] [--limit N] [--json]
 ```
 `updates apply --yes` verifies like the GUI: it prints the backend outcomes and then the
 per-item verified results ("4 of 5 installed, 1 still pending" with the reason), and records
@@ -123,23 +123,23 @@ Start / Stop / Restart / Enable / Disable.
   enable/disable only for `enabled`/`disabled` unit files; stop/restart/disable are refused for
   core units (D-Bus, `systemd-*`, polkit, NetworkManager and Wi-Fi, display managers, `user@`,
   gettys, the GNOME Shell/session/portals/PipeWire, asusd/supergfxd/power-profiles-daemon,
-  AppArmor/ufw, and TUF Control's own units). The CLI and the backend apply the same rules.
+  AppArmor/ufw, and Asusius's own units). The CLI and the backend apply the same rules.
 
 ```
-tuf-control services [--user] [list --filter X --state running|failed|... --type timer --sort memory]
-tuf-control services show NAME
-tuf-control services start|stop|restart|enable|disable NAME [--user] [--dry-run]
+asusius services [--user] [list --filter X --state running|failed|... --type timer --sort memory]
+asusius services show NAME
+asusius services start|stop|restart|enable|disable NAME [--user] [--dry-run]
 ```
 
 ## Tests and screenshots
 
 `tests/test_updates.py`, `tests/test_updates_live.py` and `tests/test_backend_audit.py` feed every parser recorded output
 (`tests/fixtures/updates/`), test the notification dedupe, the scheduler cadence and its
-"installed outside TUF Control" detection, the kept-back classifier, the verifier (a backend
+"installed outside Asusius" detection, the kept-back classifier, the verifier (a backend
 claiming success with unchanged versions is reported as still pending), the history
 writer/reader/rotation and the end-to-end runner in fake mode; `tests/test_services.py`
 covers the services safety rules and the D-Bus calls against recorders; a stand-in snapd
-runs on a private socket. Actions are only exercised in fake mode (`TUF_CONTROL_FAKE_ROOT`),
+runs on a private socket. Actions are only exercised in fake mode (`ASUSIUS_FAKE_ROOT`),
 where they are written to a log. Streaming/cancellation logic also runs against a harmless
 Python child standing in for Flatpak; no real update backend is mutated. `tests/ui/screenshots_system.py` renders both pages (dark
 and light) with fake data and drives an update-all and a service start through their

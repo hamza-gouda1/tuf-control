@@ -1,12 +1,12 @@
 # Maintainer: Hamza Gouda <hraafat357@gmail.com>
 # NOT yet built or tested on Arch. Build it in a clean chroot (extra-x86_64-build) before
 # submitting to the AUR. Publish the deterministic release asset before building.
-pkgname=tuf-control
+pkgname=asusius
 pkgver=0.1.0
 pkgrel=1
 pkgdesc='Control app for ASUS TUF/ROG laptops: profiles, fans, keyboard lighting, GPU mode, telemetry'
 arch=('any')
-url='https://github.com/hamza-gouda1/tuf-control'
+url='https://github.com/hamza-gouda1/asusius'
 license=('GPL-3.0-or-later')
 depends=('python' 'python-gobject' 'python-cairo' 'gtk4' 'libadwaita' 'asusctl' 'polkit')
 optdepends=('gnome-shell: Quick Settings profile toggle'
@@ -24,19 +24,19 @@ package() {
   cd "$pkgname-$pkgver"
   python -m installer --destdir="$pkgdir" dist/*.whl
 
-  install -Dm0755 src/tuf_control/helper.py "$pkgdir/usr/libexec/tuf-control-helper"
-  install -Dm0644 packaging/polkit/io.github.hamzagouda.tuf-control.policy \
-    "$pkgdir/usr/share/polkit-1/actions/io.github.hamzagouda.tuf-control.policy"
-  install -Dm0644 data/io.github.hamzagouda.TufControl.desktop \
-    "$pkgdir/usr/share/applications/io.github.hamzagouda.TufControl.desktop"
-  install -Dm0644 data/io.github.hamzagouda.TufControl.metainfo.xml \
-    "$pkgdir/usr/share/metainfo/io.github.hamzagouda.TufControl.metainfo.xml"
-  install -Dm0644 data/icons/hicolor/scalable/apps/io.github.hamzagouda.TufControl.svg \
-    "$pkgdir/usr/share/icons/hicolor/scalable/apps/io.github.hamzagouda.TufControl.svg"
-  install -Dm0644 data/systemd/tuf-controld.service \
-    "$pkgdir/usr/lib/systemd/user/tuf-controld.service"
+  install -Dm0755 src/asusius/helper.py "$pkgdir/usr/libexec/asusius-helper"
+  install -Dm0644 packaging/polkit/io.github.hamzagouda.asusius.policy \
+    "$pkgdir/usr/share/polkit-1/actions/io.github.hamzagouda.asusius.policy"
+  install -Dm0644 data/Asusius.desktop \
+    "$pkgdir/usr/share/applications/io.github.hamzagouda.Asusius.desktop"
+  install -Dm0644 data/Asusius.metainfo.xml \
+    "$pkgdir/usr/share/metainfo/io.github.hamzagouda.Asusius.metainfo.xml"
+  install -Dm0644 data/icons/hicolor/scalable/apps/io.github.hamzagouda.Asusius.svg \
+    "$pkgdir/usr/share/icons/hicolor/scalable/apps/io.github.hamzagouda.Asusius.svg"
+  install -Dm0644 data/systemd/asusiusd.service \
+    "$pkgdir/usr/lib/systemd/user/asusiusd.service"
 
-  local ext=tuf-control-quick@hamza-gouda
+  local ext=asusius-quick@hamza-gouda
   install -d "$pkgdir/usr/share/gnome-shell/extensions/$ext"
   cp -r "extension/$ext/." "$pkgdir/usr/share/gnome-shell/extensions/$ext/"
   glib-compile-schemas "$pkgdir/usr/share/gnome-shell/extensions/$ext/schemas"

@@ -8,10 +8,10 @@ import ast
 import unittest
 from pathlib import Path
 
-from tuf_control.ui import viewmodels
+from asusius.ui import viewmodels
 
 ROOT = Path(__file__).resolve().parents[1]
-UI = ROOT / "src/tuf_control/ui"
+UI = ROOT / "src/asusius/ui"
 
 
 def assigned_literal(body, name):

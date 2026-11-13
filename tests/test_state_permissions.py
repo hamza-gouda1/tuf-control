@@ -8,9 +8,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from tuf_control.automation import config
-from tuf_control.daemon import acquire_lock
-from tuf_control.effects.ambient import MAX_TOKEN_BYTES, TokenStore
+from asusius.automation import config
+from asusius.daemon import acquire_lock
+from asusius.effects.ambient import MAX_TOKEN_BYTES, TokenStore
 
 
 class StatePermissionsTests(unittest.TestCase):
@@ -90,7 +90,7 @@ class StatePermissionsTests(unittest.TestCase):
         self.assertFalse(token.exists())
 
     def test_config_and_lock_modes_and_default_directory_upgrade(self):
-        parent = self.root / "config" / "tuf-control"
+        parent = self.root / "config" / "asusius"
         parent.mkdir(parents=True)
         parent.chmod(0o775)
         path = parent / "config.json"
@@ -127,7 +127,7 @@ class StatePermissionsTests(unittest.TestCase):
             config.save_config({}, path)
 
     def test_daemon_lock_is_private_and_rejects_symlinks_and_nonregular_files(self):
-        parent = self.root / "runtime" / "tuf-control"
+        parent = self.root / "runtime" / "asusius"
         parent.mkdir(parents=True)
         parent.chmod(0o775)
         lock = parent / "daemon.lock"

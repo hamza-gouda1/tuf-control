@@ -10,8 +10,8 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
-from tuf_control.ui.pages.automation import RuleDialog  # noqa: E402
-from tuf_control.ui.pages.keyboard_effects import EffectsSection  # noqa: E402
+from asusius.ui.pages.automation import RuleDialog  # noqa: E402
+from asusius.ui.pages.keyboard_effects import EffectsSection  # noqa: E402
 
 
 class ActionSafetyTests(unittest.TestCase):
@@ -29,7 +29,7 @@ class ActionSafetyTests(unittest.TestCase):
 
     def test_stopping_service_waits_for_confirmation(self):
         section = self.section(True)
-        with patch("tuf_control.ui.pages.keyboard_effects.run_bg") as run:
+        with patch("asusius.ui.pages.keyboard_effects.run_bg") as run:
             EffectsSection._toggle_service(section)
             run.assert_not_called()  # cancelling leaves effects, rules and updates running
             heading, body, action, on_yes = section.win.confirm.call_args.args
@@ -44,7 +44,7 @@ class ActionSafetyTests(unittest.TestCase):
 
     def test_starting_service_is_immediate(self):
         section = self.section(False)
-        with patch("tuf_control.ui.pages.keyboard_effects.run_bg") as run:
+        with patch("asusius.ui.pages.keyboard_effects.run_bg") as run:
             EffectsSection._toggle_service(section)
         section.win.confirm.assert_not_called()
         self.assertEqual(run.call_args.args, (section.client.start,))

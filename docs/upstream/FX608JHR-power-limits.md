@@ -104,7 +104,7 @@ journalctl -u asusd --no-pager -n 80
 busctl --system introspect xyz.ljones.Asusd /xyz/ljones/asus_armoury/ppt_pl1_spl
 ```
 
-## How tuf-control behaves until this is fixed
+## How asusius behaves until this is fixed
 
 The Performance page does not show sliders when the firmware reports no
 minimum and maximum. It explains why, and it never writes a guessed value.

@@ -4,8 +4,8 @@
 import os
 import unittest
 
-from tuf_control.controller import Controller
-from tuf_control.core import Capability
+from asusius.controller import Controller
+from asusius.core import Capability
 
 
 try:  # optional: lets pytest users select with -m hardware
@@ -17,11 +17,11 @@ except ImportError:
 
 
 @_mark
-@unittest.skipUnless(os.environ.get("TUF_CONTROL_HARDWARE_TESTS") == "1",
-                     "set TUF_CONTROL_HARDWARE_TESTS=1 to run (reads only)")
+@unittest.skipUnless(os.environ.get("ASUSIUS_HARDWARE_TESTS") == "1",
+                     "set ASUSIUS_HARDWARE_TESTS=1 to run (reads only)")
 class HardwareSmoke(unittest.TestCase):
     def test_reads(self):
-        os.environ.pop("TUF_CONTROL_FAKE_ROOT", None)
+        os.environ.pop("ASUSIUS_FAKE_ROOT", None)
         ctl = Controller()
         self.assertTrue(ctl.capabilities()["telemetry"]["available"])
         ctl.read(Capability.TELEMETRY)

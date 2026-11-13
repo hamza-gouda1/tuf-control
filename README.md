@@ -1,4 +1,4 @@
-# TUF Control
+# Asusius
 
 [![ci](https://github.com/hamza-gouda1/tuf-control/actions/workflows/ci.yml/badge.svg)](https://github.com/hamza-gouda1/tuf-control/actions/workflows/ci.yml)
 ![Python 3.12](https://img.shields.io/badge/python-3.12-3776ab)
@@ -38,8 +38,8 @@ in a GTK 4 / Libadwaita interface, a CLI, and a GNOME Quick Settings toggle.
   and after.
 - **Services**: start/stop/restart and enable/disable user and system services, with core units
   protected and systemd's own polkit prompt for system ones.
-- **CLI**: `tuf-control status | profile | limit | battery ...`, `--json`, `--dry-run` on every write.
-- **Agent access**: an MCP server (`tuf-control mcp`) and JSON CLI for agents and scripts.
+- **CLI**: `asusius status | profile | limit | battery ...`, `--json`, `--dry-run` on every write.
+- **Agent access**: an MCP server (`asusius mcp`) and JSON CLI for agents and scripts.
   Read-only by default; every change is a dry run until you approve it. See below.
 - **Quick Settings**: a "Performance" toggle with a profile submenu, GPU mode and charge limit
   readouts. Follows the shell theme.
@@ -57,16 +57,16 @@ Light theme and narrow layouts are in [docs/screenshots](docs/screenshots/).
 Armoury Crate and G-Helper are Windows programs; this table compares what each offers, not a
 drop-in replacement. "Partial" means present but narrower than the original.
 
-| | Armoury Crate (Windows) | G-Helper (Windows) | TUF Control (Linux) |
+| | Armoury Crate (Windows) | G-Helper (Windows) | Asusius (Linux) |
 | --- | --- | --- | --- |
 | Performance profiles | yes | yes | yes |
 | PPT power limits | yes | yes | yes, if firmware exposes them (see limitations) |
 | Fan curves | yes | yes | yes |
 | GPU mode (Eco / Standard / Ultimate) | yes | yes | yes, via supergfxd |
 | Charge limit | yes | yes | yes |
-| Keyboard RGB effects | yes (Aura Sync) | yes | partial: single-zone hardware effects plus software effects run by tuf-controld; no per-key RGB |
-| Automation | Scenario profiles (model dependent) | AC/battery profile, GPU and display rules | Rules for AC/battery, app launches, time windows and profile changes (run by the optional tuf-controld daemon) |
-| Background operation | ASUS services; footprint not compared here | Single executable; footprint not compared here | Optional tuf-controld user service for rules, software effects and update checks; installed by default, skip with --no-daemon |
+| Keyboard RGB effects | yes (Aura Sync) | yes | partial: single-zone hardware effects plus software effects run by asusiusd; no per-key RGB |
+| Automation | Scenario profiles (model dependent) | AC/battery profile, GPU and display rules | Rules for AC/battery, app launches, time windows and profile changes (run by the optional asusiusd daemon) |
+| Background operation | ASUS services; footprint not compared here | Single executable; footprint not compared here | Optional asusiusd user service for rules, software effects and update checks; installed by default, skip with --no-daemon |
 | Open source | no | yes | yes (GPL-3.0-or-later) |
 | Runs on Linux | no | no | yes |
 
@@ -77,7 +77,7 @@ Features and firmware support vary by model; this is not a full parity claim.
 ## Hardware compatibility
 
 Only one model has been tested by the author. The other rows are what the design expects, not results.
-Run `tuf-control capabilities --json` on your laptop and open a
+Run `asusius capabilities --json` on your laptop and open a
 [hardware report](https://github.com/hamza-gouda1/tuf-control/issues/new?template=hardware_report.yml)
 so this table can be filled in with real results.
 
@@ -98,7 +98,7 @@ so this table can be filled in with real results.
 - Fan curves exist only for fans the firmware lists; through plain sysfs only the active profile's
   curve can be edited.
 - Keyboard: per-key RGB is not supported. Hardware effects are single-zone, and the software effects
-  work by writing one colour to the whole keyboard a few times a second (tuf-controld).
+  work by writing one colour to the whole keyboard a few times a second (asusiusd).
 - Keyboard (TUF): hardware Breathe shows only one colour (asusd keeps Colour 2, but it never reaches
   the keys), so the app's "Two colours" switch drives the software two-colour gradient
   (Gradient breathing) instead.
@@ -122,7 +122,7 @@ Try the released GUI with simulated data first: [two-minute hardware-free quicks
     cd tuf-control
     ./install.sh --dry-run
     ./install.sh
-    gnome-extensions enable tuf-control-quick@hamza-gouda
+    gnome-extensions enable asusius-quick@hamza-gouda
 
 Install instructions pin the tested release tag. Contributors can clone `main` with
 `git clone --branch main https://github.com/hamza-gouda1/tuf-control.git`; see [CONTRIBUTING.md](CONTRIBUTING.md).
@@ -130,37 +130,37 @@ Install instructions pin the tested release tag. Contributors can clone `main` w
 See [docs/INSTALL.md](docs/INSTALL.md). User-level, no root, no downloads. The optional polkit
 helper is printed with `./install.sh --system` and never run for you.
 
-The installer also binds the Armoury Crate key (XF86Launch3) to TUF Control, takes over an existing
+The installer also binds the Armoury Crate key (XF86Launch3) to Asusius, takes over an existing
 XF86Launch1 shortcut only when it still opens the retired asus-control app, and binds the Copilot
 key to Claude when that app is installed. With the Focus Keys extension from bordeaux-gnome
 installed and enabled,
 those go into its shortcut list, so a press brings the open window to the front instead of a
-"TUF Control is ready" notification, and earlier custom shortcuts for them are migrated away;
+"Asusius is ready" notification, and earlier custom shortcuts for them are migrated away;
 without it they are GNOME custom shortcuts. Skip them with `--no-hotkey`, pick another key with
 `--hotkey=KEYSYM`. The Quick Settings extension also shows the new profile in an OSD when Fn+F5
 changes it. Details in [docs/INSTALL.md](docs/INSTALL.md).
 
 ## Usage
 
-    tuf-control status
-    tuf-control profile set quiet --dry-run
-    tuf-control battery limit 80
-    tuf-control-gui
+    asusius status
+    asusius profile set quiet --dry-run
+    asusius battery limit 80
+    asusius-gui
 
-Development without hardware: `TUF_CONTROL_FAKE_ROOT=/tmp/tree tuf-control status` (see
+Development without hardware: `ASUSIUS_FAKE_ROOT=/tmp/tree asusius status` (see
 [docs/UI.md](docs/UI.md)).
 
 ## Agent access
 
-Agents use the app through a protocol instead of a window. `tuf-control mcp` is a Model
+Agents use the app through a protocol instead of a window. `asusius mcp` is a Model
 Context Protocol server (JSON-RPC over stdio, standard library only) with read tools
 (status, telemetry, processes, fan curves, battery health, automation rules, "why is this
 unavailable"), write tools for profile, charge limit and keyboard, and high-risk tools for
 fan curves, GPU mode, power limits and restoring defaults.
 
-    tuf-control mcp --print-config          # client config snippet
-    tuf-control agent grant control-basic   # allow change requests (each one approved by you)
-    tuf-control agent pending | approve ID | deny ID | audit | revoke
+    asusius mcp --print-config          # client config snippet
+    asusius agent grant control-basic   # allow change requests (each one approved by you)
+    asusius agent pending | approve ID | deny ID | audit | revoke
 
 - Read-only by default; only you raise the level (Agent access page or `agent grant`).
 - Writes are dry runs unless `dry_run: false` **and** you approved: once per call, or with a
@@ -168,7 +168,7 @@ fan curves, GPU mode, power limits and restoring defaults.
   them and always ask per call.
 - Hardware bounds enforced through the same Controller, rate limits, strict schemas with no
   path or command parameters, untrusted process names cleaned and marked, an audit log,
-  and a kill switch (`tuf-control agent revoke`, **Revoke all** on the page).
+  and a kill switch (`asusius agent revoke`, **Revoke all** on the page).
 
 <p align="center">
   <img src="docs/screenshots/agent-access-dark.png" alt="Agent access" width="60%">
@@ -187,7 +187,7 @@ Tools, safety model, threat model and an example session: [docs/AGENT_API.md](do
  D-Bus (asusd,     sysfs        asusctl CLI
  supergfxd, PPD)   (+ writer)   (allow-listed args)
                       |
-              direct write -> EACCES -> pkexec tuf-control-helper (allow-listed)
+              direct write -> EACCES -> pkexec asusius-helper (allow-listed)
 ```
 
 Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/UI.md](docs/UI.md).

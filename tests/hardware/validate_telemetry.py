@@ -30,10 +30,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from tuf_control.telemetry import Sampler  # noqa: E402
-from tuf_control.telemetry.memory import derive, parse_meminfo  # noqa: E402
-from tuf_control.telemetry.pci import runtime_state  # noqa: E402
-from tuf_control.telemetry.procs import ProcessWalker  # noqa: E402
+from asusius.telemetry import Sampler  # noqa: E402
+from asusius.telemetry.memory import derive, parse_meminfo  # noqa: E402
+from asusius.telemetry.pci import runtime_state  # noqa: E402
+from asusius.telemetry.procs import ProcessWalker  # noqa: E402
 
 ROWS: list[tuple] = []
 

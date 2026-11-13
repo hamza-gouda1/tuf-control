@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) Hamza Gouda
 #
-# User-level installer for tuf-control. Nothing is downloaded and no root is needed:
-# the package is copied into ~/.local/share/tuf-control and started through small
+# User-level installer for asusius. Nothing is downloaded and no root is needed:
+# the package is copied into ~/.local/share/asusius and started through small
 # launchers in ~/.local/bin. Root-only pieces (polkit helper) are only PRINTED
 # (--system), never executed. Safe to run repeatedly.
 set -euo pipefail
@@ -11,25 +11,25 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 DATA_HOME=${XDG_DATA_HOME:-$HOME/.local/share}
 STATE_HOME=${XDG_STATE_HOME:-$HOME/.local/state}
-BIN_DIR=${TUF_CONTROL_BIN_DIR:-$HOME/.local/bin}
-APP_DIR=$DATA_HOME/tuf-control
-BACKUP_DIR=$STATE_HOME/tuf-control/backup
-APP_ID=io.github.hamzagouda.TufControl
-EXT_UUID=tuf-control-quick@hamza-gouda
+BIN_DIR=${ASUSIUS_BIN_DIR:-$HOME/.local/bin}
+APP_DIR=$DATA_HOME/asusius
+BACKUP_DIR=$STATE_HOME/asusius/backup
+APP_ID=io.github.hamzagouda.Asusius
+EXT_UUID=asusius-quick@hamza-gouda
 EXT_DIR=$DATA_HOME/gnome-shell/extensions/$EXT_UUID
 CONFIG_HOME=${XDG_CONFIG_HOME:-$HOME/.config}
-DAEMON_UNIT=$CONFIG_HOME/systemd/user/tuf-controld.service
-MARK="managed by tuf-control install.sh"
+DAEMON_UNIT=$CONFIG_HOME/systemd/user/asusiusd.service
+MARK="managed by asusius install.sh"
 
 # GNOME custom keybinding for the dedicated Armoury Crate key (asus-nb-wmi code 0x38 ->
 # KEY_PROG3 (202) -> XKB keycode 210 -> XF86Launch3). See docs/INSTALL.md.
 KB_SCHEMA=org.gnome.settings-daemon.plugins.media-keys
 KB_ITEM=$KB_SCHEMA.custom-keybinding
 KB_BASE=/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings
-HOTKEY=${TUF_CONTROL_HOTKEY:-XF86Launch3}
+HOTKEY=${ASUSIUS_HOTKEY:-XF86Launch3}
 # Copilot key (Shift+Super+F23; XKB calls F23 XF86TouchpadOff) opens Claude, the mic key toggles music.
-COPILOT_KEY=${TUF_CONTROL_COPILOT_KEY:-<Shift><Super>XF86TouchpadOff}
-MIC_KEY=${TUF_CONTROL_MIC_KEY:-XF86AudioMicMute}
+COPILOT_KEY=${ASUSIUS_COPILOT_KEY:-<Shift><Super>XF86TouchpadOff}
+MIC_KEY=${ASUSIUS_MIC_KEY:-XF86AudioMicMute}
 # The Focus Keys GNOME Shell extension (from bordeaux-gnome) raises an app's open window from
 # a shortcut; a custom shortcut running a launcher only gets an "is ready" notification on
 # Wayland. When it is installed and enabled, the app keys are written into its `bindings`.
@@ -55,12 +55,12 @@ Usage: ./install.sh [--dry-run] [--uninstall] [--system] [--no-extension]
                   (they are NOT executed; run them yourself if you want root-only
                   writes through pkexec)
   --no-extension  skip the GNOME Shell Quick Settings extension
-  --no-hotkey     do not add the GNOME shortcut that opens TUF Control from the
-                  Armoury Crate key (a custom keybinding named "TUF Control", appended to
+  --no-hotkey     do not add the GNOME shortcut that opens Asusius from the
+                  Armoury Crate key (a custom keybinding named "Asusius", appended to
                   your existing custom shortcuts, removed again by --uninstall)
   --hotkey=KEYSYM use another key than XF86Launch3 for that shortcut. An existing custom
                   shortcut on XF86Launch1 that runs the retired asus-control app is
-                  retargeted to TUF Control (old values saved, restored by --uninstall)
+                  retargeted to Asusius (old values saved, restored by --uninstall)
   --no-copilot-key  do not bind the Copilot key to the Claude desktop app
   --copilot-key=ACCEL  other key for that (default <Shift><Super>XF86TouchpadOff)
   --no-mic-key    do not bind the mic key to play/pause (this also leaves the
@@ -71,7 +71,7 @@ Usage: ./install.sh [--dry-run] [--uninstall] [--system] [--no-extension]
                   (XF86Launch3 and XF86Launch1) and the Copilot key go into its shortcut
                   list instead, so a second press brings the open window to the front;
                   our earlier custom shortcuts for them are removed
-  --no-daemon     do not install or start tuf-controld (the per-user automation and
+  --no-daemon     do not install or start asusiusd (the per-user automation and
                   keyboard-effects service). Without it, software keyboard effects and
                   rules run only while you start the daemon yourself, and they do not
                   come back after a restart
@@ -169,12 +169,12 @@ write_launcher() {
 }
 
 write_desktop() {
-    local src=$ROOT/data/$APP_ID.desktop dst=$DATA_HOME/applications/$APP_ID.desktop
+    local src=$ROOT/data/Asusius.desktop dst=$DATA_HOME/applications/$APP_ID.desktop
     backup "$dst"
     say "desktop entry $dst"
     [ "$DRY" = 0 ] || return 0
     mkdir -p "$(dirname "$dst")"
-    python3 - "$src" "$dst" "$BIN_DIR/tuf-control-gui" "$MARK" <<'PYTHON'
+    python3 - "$src" "$dst" "$BIN_DIR/asusius-gui" "$MARK" <<'PYTHON'
 from pathlib import Path
 import sys
 src, dst, launcher, marker = sys.argv[1:]
@@ -184,8 +184,8 @@ quoted = quoted.replace('`', '\\`').replace('$', '\\$').replace('%', '%%')
 quoted = ('"' + quoted + '"').replace('\\', '\\\\')
 lines = []
 for line in Path(src).read_text().splitlines():
-    if line.startswith('Exec=tuf-control-gui'):
-        line = 'Exec=' + quoted + line[len('Exec=tuf-control-gui'):]
+    if line.startswith('Exec=asusius-gui'):
+        line = 'Exec=' + quoted + line[len('Exec=asusius-gui'):]
     lines.append(line)
 Path(dst).write_text('# ' + marker + '\n' + '\n'.join(lines) + '\n')
 PYTHON
@@ -261,31 +261,31 @@ add_shortcut() {
 }
 
 # The owner's old shortcut on XF86Launch1 that opens the retired asus-control app is retargeted
-# to TUF Control (MODE retarget) or, when Focus Keys takes the key, removed (MODE remove: the
+# to Asusius (MODE retarget) or, when Focus Keys takes the key, removed (MODE remove: the
 # path goes to MIGRATE). Its old name/command/binding are kept in takeover.tsv for uninstall.
 takeover_launch1() {
     local mode=${1:-retarget} p n c b tsv=$BACKUP_DIR/takeover.tsv
-    # Taken over earlier and since removed by a Focus Keys install: bring it back as TUF Control.
+    # Taken over earlier and since removed by a Focus Keys install: bring it back as Asusius.
     if [ "$mode" = retarget ] && [ -e "$tsv" ]; then
         while IFS=$'\t' read -r p n c b; do
             [ -n "$p" ] || continue
             case " ${KB_CUR[*]} " in *" $p "*) continue ;; esac
-            say "shortcut $b: re-adding \"TUF Control\" ($BIN_DIR/tuf-control-gui)"
-            act gsettings set "$KB_ITEM:$p" name 'TUF Control'
-            act gsettings set "$KB_ITEM:$p" command "$BIN_DIR/tuf-control-gui"
+            say "shortcut $b: re-adding \"Asusius\" ($BIN_DIR/asusius-gui)"
+            act gsettings set "$KB_ITEM:$p" name 'Asusius'
+            act gsettings set "$KB_ITEM:$p" command "$BIN_DIR/asusius-gui"
             act gsettings set "$KB_ITEM:$p" binding "$b"
             KB_NEW+=("$p")
         done <"$tsv"
     fi
     for p in "${KB_CUR[@]}"; do
         [ -n "$p" ] || continue
-        case $p in "$KB_BASE"/tuf-control*) continue ;; esac
+        case $p in "$KB_BASE"/asusius*) continue ;; esac
         n=$(kb_get "$p" binding)
         [ "${n#XF86}" = Launch1 ] || continue
         n=$(kb_get "$p" name)
         c=$(kb_get "$p" command)
         if [ -e "$tsv" ] && grep -q "^$p	" "$tsv"; then
-            : # ours since an earlier run (retargeted to TUF Control)
+            : # ours since an earlier run (retargeted to Asusius)
         else
             case "$c|$n" in
                 *asus-control*|*Armoury*) ;;
@@ -304,9 +304,9 @@ takeover_launch1() {
             MIGRATE+=("$p")
             continue
         fi
-        say "shortcut XF86Launch1: retargeting \"$n\" -> \"TUF Control\" ($BIN_DIR/tuf-control-gui)"
-        act gsettings set "$KB_ITEM:$p" name 'TUF Control'
-        act gsettings set "$KB_ITEM:$p" command "$BIN_DIR/tuf-control-gui"
+        say "shortcut XF86Launch1: retargeting \"$n\" -> \"Asusius\" ($BIN_DIR/asusius-gui)"
+        act gsettings set "$KB_ITEM:$p" name 'Asusius'
+        act gsettings set "$KB_ITEM:$p" command "$BIN_DIR/asusius-gui"
     done
 }
 
@@ -396,7 +396,7 @@ PY
 collect_migrate() {
     local p
     for p in "${KB_CUR[@]}"; do
-        case $p in "$KB_BASE/tuf-control/" | "$KB_BASE/tuf-control-claude/") MIGRATE+=("$p") ;; esac
+        case $p in "$KB_BASE/asusius/" | "$KB_BASE/asusius-claude/") MIGRATE+=("$p") ;; esac
     done
     if [ "$HOTKEY" = XF86Launch3 ]; then takeover_launch1 remove; fi
 }
@@ -514,11 +514,11 @@ install_hotkey() {
         done
         install_focus_bindings
     else
-        add_shortcut tuf-control "TUF Control" "$BIN_DIR/tuf-control-gui" "$HOTKEY"
+        add_shortcut asusius "Asusius" "$BIN_DIR/asusius-gui" "$HOTKEY"
         if [ "$HOTKEY" = XF86Launch3 ]; then takeover_launch1; fi
         if [ "$WITH_COPILOT" = 1 ]; then
             if claude_installed; then
-                add_shortcut tuf-control-claude "Claude" "gtk-launch $CLAUDE_ID" "$COPILOT_KEY"
+                add_shortcut asusius-claude "Claude" "gtk-launch $CLAUDE_ID" "$COPILOT_KEY"
             else
                 say "shortcut: Claude desktop entry not found, skipping the Copilot key"
             fi
@@ -526,7 +526,7 @@ install_hotkey() {
     fi
     if [ "$WITH_MIC" = 1 ]; then
         if command -v playerctl >/dev/null 2>&1; then
-            add_shortcut tuf-control-playpause "Play/pause music" "playerctl play-pause" "$MIC_KEY"
+            add_shortcut asusius-playpause "Play/pause music" "playerctl play-pause" "$MIC_KEY"
             claim_mic_key
         else
             say "shortcut: playerctl not found, skipping the mic key"
@@ -549,7 +549,7 @@ uninstall_hotkey() {
     for p in "${cur[@]}"; do
         [ -n "$p" ] || continue
         case $p in
-            "$KB_BASE"/tuf-control*)
+            "$KB_BASE"/asusius*)
                 found=1
                 for k in name command binding; do act gsettings reset "$KB_ITEM:$p" "$k"; done ;;
             *) keep+=("$p") ;;
@@ -590,12 +590,12 @@ Optional, root-only part (NOT executed by this script). It lets the app write
 root-only sysfs attributes through pkexec when a direct write is refused. The helper
 only accepts an allow-list of exact sysfs paths and validated values. Run:
 
-  sudo install -Dm0755 "$ROOT/src/tuf_control/helper.py" /usr/libexec/tuf-control-helper
-  sudo install -Dm0644 "$ROOT/packaging/polkit/io.github.hamzagouda.tuf-control.policy" /usr/share/polkit-1/actions/io.github.hamzagouda.tuf-control.policy
+  sudo install -Dm0755 "$ROOT/src/asusius/helper.py" /usr/libexec/asusius-helper
+  sudo install -Dm0644 "$ROOT/packaging/polkit/io.github.hamzagouda.asusius.policy" /usr/share/polkit-1/actions/io.github.hamzagouda.asusius.policy
 
 Remove again with:
 
-  sudo rm -f /usr/libexec/tuf-control-helper /usr/share/polkit-1/actions/io.github.hamzagouda.tuf-control.policy
+  sudo rm -f /usr/libexec/asusius-helper /usr/share/polkit-1/actions/io.github.hamzagouda.asusius.policy
 SYS
 }
 
@@ -605,72 +605,72 @@ install_daemon() {
     say "daemon $DAEMON_UNIT"
     if [ "$DRY" = 0 ]; then
         mkdir -p "$(dirname "$DAEMON_UNIT")"
-        { printf '# %s\n' "$MARK"; cat "$ROOT/data/systemd/tuf-controld.service"; } >"$DAEMON_UNIT"
+        { printf '# %s\n' "$MARK"; cat "$ROOT/data/systemd/asusiusd.service"; } >"$DAEMON_UNIT"
     fi
     if command -v systemctl >/dev/null 2>&1 && [ "$DRY" = 0 ] \
-            && [ -z "${TUF_CONTROL_NO_SYSTEMD:-}" ]; then
+            && [ -z "${ASUSIUS_NO_SYSTEMD:-}" ]; then
         if [ ! -f "$state" ]; then
-            enabled=$(systemctl --user is-enabled tuf-controld.service 2>/dev/null) || true
-            active=$(systemctl --user is-active tuf-controld.service 2>/dev/null) || true
+            enabled=$(systemctl --user is-enabled asusiusd.service 2>/dev/null) || true
+            active=$(systemctl --user is-active asusiusd.service 2>/dev/null) || true
             printf '%s\n%s\n' "$enabled" "$active" >"$state"
             chmod 0600 "$state"
         fi
         act systemctl --user daemon-reload
-        act systemctl --user enable --now tuf-controld.service
+        act systemctl --user enable --now asusiusd.service
     fi
 }
 
 restore_daemon_state() {
     local state=$BACKUP_DIR/daemon-state enabled active
     [ -f "$state" ] && [ "$DRY" = 0 ] || return 0
-    [ -z "${TUF_CONTROL_NO_SYSTEMD:-}" ] || return 0
+    [ -z "${ASUSIUS_NO_SYSTEMD:-}" ] || return 0
     command -v systemctl >/dev/null 2>&1 || return 0
     enabled=$(sed -n '1p' "$state")
     active=$(sed -n '2p' "$state")
     systemctl --user daemon-reload
     case $enabled in
-        enabled) systemctl --user enable tuf-controld.service ;;
-        enabled-runtime) systemctl --user enable --runtime tuf-controld.service ;;
+        enabled) systemctl --user enable asusiusd.service ;;
+        enabled-runtime) systemctl --user enable --runtime asusiusd.service ;;
     esac
-    if [ "$active" = active ]; then systemctl --user start tuf-controld.service; fi
+    if [ "$active" = active ]; then systemctl --user start asusiusd.service; fi
     rm -f "$state"
 }
 
 do_install() {
     local app_literal
     command -v python3 >/dev/null 2>&1 || { echo "python3 is required" >&2; exit 1; }
-    say "installing tuf-control for $USER ($([ "$DRY" = 1 ] && echo dry run || echo for real))"
+    say "installing asusius for $USER ($([ "$DRY" = 1 ] && echo dry run || echo for real))"
     snapshot_asset package "$APP_DIR"
-    act rm -rf "$APP_DIR/tuf_control"
+    act rm -rf "$APP_DIR/asusius"
     act mkdir -p "$APP_DIR"
-    act cp -r "$ROOT/src/tuf_control" "$APP_DIR/tuf_control"
+    act cp -r "$ROOT/src/asusius" "$APP_DIR/asusius"
     if [ "$DRY" = 0 ]; then
         find "$APP_DIR" -name __pycache__ -type d -prune -exec rm -rf {} +
     fi
     app_literal=$(python3 -c 'import shlex,sys; print(shlex.quote(sys.argv[1]))' "$APP_DIR")
-    write_launcher "$BIN_DIR/tuf-control" \
-        "PYTHONPATH=$app_literal\"\${PYTHONPATH:+:\$PYTHONPATH}\" exec python3 -m tuf_control \"\$@\""
-    write_launcher "$BIN_DIR/tuf-control-mcp" \
-        "PYTHONPATH=$app_literal\"\${PYTHONPATH:+:\$PYTHONPATH}\" exec python3 -m tuf_control mcp \"\$@\""
-    write_launcher "$BIN_DIR/tuf-control-gui" \
-        "PYTHONPATH=$app_literal\"\${PYTHONPATH:+:\$PYTHONPATH}\" exec python3 -c 'from tuf_control.ui.app import main; raise SystemExit(main())' \"\$@\""
-    write_launcher "$BIN_DIR/tuf-controld" \
-        "PYTHONPATH=$app_literal\"\${PYTHONPATH:+:\$PYTHONPATH}\" exec python3 -m tuf_control.daemon \"\$@\""
+    write_launcher "$BIN_DIR/asusius" \
+        "PYTHONPATH=$app_literal\"\${PYTHONPATH:+:\$PYTHONPATH}\" exec python3 -m asusius \"\$@\""
+    write_launcher "$BIN_DIR/asusius-mcp" \
+        "PYTHONPATH=$app_literal\"\${PYTHONPATH:+:\$PYTHONPATH}\" exec python3 -m asusius mcp \"\$@\""
+    write_launcher "$BIN_DIR/asusius-gui" \
+        "PYTHONPATH=$app_literal\"\${PYTHONPATH:+:\$PYTHONPATH}\" exec python3 -c 'from asusius.ui.app import main; raise SystemExit(main())' \"\$@\""
+    write_launcher "$BIN_DIR/asusiusd" \
+        "PYTHONPATH=$app_literal\"\${PYTHONPATH:+:\$PYTHONPATH}\" exec python3 -m asusius.daemon \"\$@\""
     write_desktop
     snapshot_asset icon "$DATA_HOME/icons/hicolor/scalable/apps/$APP_ID.svg"
     snapshot_asset metainfo "$DATA_HOME/metainfo/$APP_ID.metainfo.xml"
     act install -Dm0644 "$ROOT/data/icons/hicolor/scalable/apps/$APP_ID.svg" \
         "$DATA_HOME/icons/hicolor/scalable/apps/$APP_ID.svg"
-    act install -Dm0644 "$ROOT/data/$APP_ID.metainfo.xml" "$DATA_HOME/metainfo/$APP_ID.metainfo.xml"
+    act install -Dm0644 "$ROOT/data/Asusius.metainfo.xml" "$DATA_HOME/metainfo/$APP_ID.metainfo.xml"
     if [ "$WITH_EXT" = 1 ]; then install_extension; fi
     if [ "$WITH_DAEMON" = 1 ]; then install_daemon; fi
     refresh_caches
     if [ "$WITH_HOTKEY" = 1 ]; then install_hotkey; fi
     say
-    say "done. Run: $BIN_DIR/tuf-control status   (make sure $BIN_DIR is on your PATH)"
+    say "done. Run: $BIN_DIR/asusius status   (make sure $BIN_DIR is on your PATH)"
     if [ "$WITH_DAEMON" = 1 ] && command -v systemctl >/dev/null 2>&1; then
-        say "daemon: tuf-controld unit installed (automation, keyboard effects and update"
-        say "  checks run at login; systemctl --user status tuf-controld shows it)"
+        say "daemon: asusiusd unit installed (automation, keyboard effects and update"
+        say "  checks run at login; systemctl --user status asusiusd shows it)"
     fi
     if [ "$WITH_EXT" = 1 ]; then
         say "Quick Settings extension copied; enable it yourself with:"
@@ -679,22 +679,22 @@ do_install() {
 }
 
 do_uninstall() {
-    say "removing tuf-control for $USER"
+    say "removing asusius for $USER"
     local f
     # the unit file goes no matter what; the manager is only told when we may talk to it
     if [ -e "$BACKUP_DIR/assets/daemon/managed" ]; then
         if command -v systemctl >/dev/null 2>&1 && [ "$DRY" = 0 ] \
-                && [ -z "${TUF_CONTROL_NO_SYSTEMD:-}" ]; then
-            act systemctl --user disable --now tuf-controld.service
+                && [ -z "${ASUSIUS_NO_SYSTEMD:-}" ]; then
+            act systemctl --user disable --now asusiusd.service
         fi
         restore_asset daemon "$DAEMON_UNIT"
         if command -v systemctl >/dev/null 2>&1 && [ "$DRY" = 0 ] \
-                && [ -z "${TUF_CONTROL_NO_SYSTEMD:-}" ]; then
+                && [ -z "${ASUSIUS_NO_SYSTEMD:-}" ]; then
             act systemctl --user daemon-reload
         fi
     fi
-    for f in "$BIN_DIR/tuf-control" "$BIN_DIR/tuf-control-gui" "$BIN_DIR/tuf-control-mcp" \
-             "$BIN_DIR/tuf-controld" \
+    for f in "$BIN_DIR/asusius" "$BIN_DIR/asusius-gui" "$BIN_DIR/asusius-mcp" \
+             "$BIN_DIR/asusiusd" \
              "$DATA_HOME/applications/$APP_ID.desktop"; do
         if is_ours "$f"; then act rm -f "$f"; elif [ -e "$f" ]; then say "keeping $f (not ours)"; fi
         restore "$f"

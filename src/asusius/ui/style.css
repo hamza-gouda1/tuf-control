@@ -1,0 +1,166 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) Hamza Gouda
+ */
+/* Asusius: warm wine palette. Light values here, dark overrides in style-dark.css. */
+
+/* BEGIN GENERATED BORDEAUX PALETTE */
+@define-color accent_bg_color #7A1C34;
+@define-color accent_fg_color #FFF7F2;
+@define-color accent_color #7A1C34;
+@define-color gold_color #A8844C;
+@define-color window_bg_color #F8F4EE;
+@define-color window_fg_color #2B1A1E;
+@define-color view_bg_color #FDFBF7;
+@define-color view_fg_color #2B1A1E;
+@define-color headerbar_bg_color #F8F4EE;
+@define-color headerbar_fg_color #2B1A1E;
+@define-color headerbar_backdrop_color #F8F4EE;
+@define-color sidebar_bg_color #EFE8DD;
+@define-color sidebar_fg_color #5A454A;
+@define-color sidebar_backdrop_color #EFE8DD;
+@define-color card_bg_color #FDFBF7;
+@define-color card_fg_color #2B1A1E;
+@define-color popover_bg_color #E6DDCF;
+@define-color popover_fg_color #2B1A1E;
+@define-color dialog_bg_color #FDFBF7;
+@define-color dialog_fg_color #2B1A1E;
+@define-color thumbnail_bg_color #E6DDCF;
+@define-color banner_bg_color alpha(@accent_bg_color, 0.12);
+@define-color tile_border alpha(#2B1A1E, 0.07);
+/* END GENERATED BORDEAUX PALETTE */
+
+/* gold, sparingly: focus ring and active ticks */
+*:focus-visible { outline-color: alpha(@gold_color, 0.85); }
+/* GTK 4.14 draws no visible ring on a focused scale; draw one on the trough */
+scale:focus-visible > trough {
+  outline: 2px solid alpha(@gold_color, 0.85);
+  outline-offset: 2px;
+}
+checkbutton check:checked, checkbutton radio:checked {
+  background-color: @accent_bg_color;
+  color: @gold_color;
+}
+switch:checked { background-color: @accent_bg_color; }
+.linked > button.toggle:checked { background-color: @accent_bg_color; color: @accent_fg_color; }
+switch:checked > slider { background-color: @accent_fg_color; }
+
+/* numerals */
+.stat-value, .mini-value, .scale-value, .mono {
+  font-family: "@MONO@", monospace;
+  font-feature-settings: "tnum";
+}
+.numeric { font-feature-settings: "tnum"; }
+
+/* sidebar */
+.navigation-sidebar > row { padding: 4px 10px; margin: 1px 6px; border-radius: 9px; }
+.navigation-sidebar > row:selected {
+  background-color: alpha(@accent_bg_color, 0.14);
+  color: @window_fg_color;
+  box-shadow: inset 3px 0 0 @gold_color;
+}
+.navigation-sidebar > row image { opacity: 0.85; }
+.sidebar-brand { padding: 2px 0; }
+.sidebar-brand .brand-title { font-weight: 800; letter-spacing: 0.02em; }
+.sidebar-mode { font-size: 0.8em; }
+/* Small sidebar labels need the full foreground colour for readable glyphs. */
+.sidebar-section, .sidebar-mode { color: @window_fg_color; opacity: 1; }
+
+/* header chips */
+.profile-chip {
+  border-radius: 999px;
+  padding: 2px 12px 2px 10px;
+  background-color: alpha(@accent_bg_color, 0.14);
+  min-height: 28px;
+}
+.profile-chip:hover { background-color: alpha(@accent_bg_color, 0.22); }
+.profile-chip .chip-dot {
+  min-width: 7px; min-height: 7px; border-radius: 999px; background-color: @gold_color;
+}
+.power-indicator { padding: 0 6px; opacity: 0.85; }
+.power-indicator label { font-size: 0.92em; }
+
+/* dashboard tiles */
+.tile {
+  background-color: @card_bg_color;
+  border-radius: 16px;
+  border: 1px solid @tile_border;
+  padding: 20px 22px 16px 22px;
+  box-shadow: 0 1px 2px alpha(black, 0.04);
+}
+.tile-title { font-weight: 600; font-size: 0.92em; opacity: 0.72; }
+.tile-icon { opacity: 0.55; }
+.stat-value { font-size: 38px; font-weight: 600; letter-spacing: -0.02em; }
+.stat-unit { font-size: 17px; opacity: 0.72; margin-bottom: 6px; }
+.stat-sub { font-size: 0.86em; opacity: 0.74; }
+.stat-sub .numeric { font-size: 1em; }
+.mini-value { font-size: 19px; font-weight: 600; }
+.mini-label { font-size: 0.8em; opacity: 0.72; }
+.sparkline { margin-top: 10px; }
+
+.hero-heading { font-size: 26px; font-weight: 700; }
+.section-caption { font-size: 0.85em; opacity: 0.72; }
+
+/* chips / pills */
+.pill {
+  border-radius: 999px; padding: 2px 10px; font-size: 0.8em; font-weight: 600;
+  background-color: alpha(@window_fg_color, 0.08);
+}
+.pill.accent { background-color: alpha(@accent_bg_color, 0.16); color: @accent_color; }
+.pill.gold { background-color: alpha(@gold_color, 0.18); color: @window_fg_color; }
+.soon {
+  border-radius: 999px; padding: 1px 9px; font-size: 0.75em; font-weight: 700;
+  letter-spacing: 0.04em; background-color: alpha(@gold_color, 0.22);
+}
+
+/* profile cards */
+.profile-card {
+  border-radius: 14px; padding: 14px 12px; min-height: 92px;
+  background-color: @card_bg_color; border: 1px solid @tile_border;
+}
+.profile-card:checked {
+  background-color: alpha(@accent_bg_color, 0.12);
+  border-color: alpha(@accent_bg_color, 0.65);
+  box-shadow: inset 0 0 0 1px alpha(@accent_bg_color, 0.45);
+}
+.profile-card .card-title { font-weight: 700; font-size: 1.05em; }
+.profile-card .card-sub { font-size: 0.84em; opacity: 0.72; }
+.profile-card:checked .card-tick { color: @gold_color; }
+
+/* value next to sliders */
+.scale-value { font-size: 1.05em; font-weight: 600; min-width: 64px; }
+.big-scale-value { font-family: "@MONO@", monospace; font-feature-settings: "tnum";
+  font-size: 30px; font-weight: 600; }
+
+/* fan curve canvas */
+.curve-frame {
+  background-color: @card_bg_color; border-radius: 14px; border: 1px solid @tile_border;
+}
+.curve-readout { font-size: 0.92em; opacity: 0.8; }
+
+/* keyboard preview */
+.kbd-preview { border-radius: 14px; min-height: 120px; }
+button.palette-button { padding: 4px; min-width: 0; min-height: 0; }
+
+/* disabled-looking "coming soon" groups */
+.dimmed-group { opacity: 0.55; }
+
+/* about */
+.about-name { font-size: 26px; font-weight: 800; }
+.about-version { opacity: 0.72; }
+
+/* destructive action tone in dialogs stays default; suggested uses burgundy */
+button.suggested-action { background-color: @accent_bg_color; color: @accent_fg_color; }
+
+/* Secondary text. Light: Adwaita's 55 % is only ~3.7:1 on white, below WCAG AA (4.5:1);
+   72 % is ~5:1. style-dark.css puts the original softer values back (they pass on dark). */
+.dim-label, .subtitle, row.property > box.header > box.title > .title { opacity: 0.72; }
+entry > text > placeholder, searchentry > text > placeholder { opacity: 0.72; }
+
+/* Bars: the sidebar's and the content's header are the same height, so the lines meet. */
+headerbar { min-height: 50px; }
+
+/* The content pane reads larger than the stock 11 pt (about +2 px) and rows breathe. */
+.content-area { font-size: 1.14em; }
+.content-area list.boxed-list > row { min-height: 60px; }
+.content-area button, .content-area dropdown > button { min-height: 36px; }
+.content-area switch { min-height: 28px; }

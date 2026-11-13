@@ -2,7 +2,7 @@
 // Copyright (C) Hamza Gouda
 // Run: gjs -m tests/test_app_drag.js
 
-import * as D from '../extension/tuf-control-quick@hamza-gouda/drag_switcher.js';
+import * as D from '../extension/asusius-quick@hamza-gouda/drag_switcher.js';
 
 let failed = 0, passed = 0;
 function ok(cond, msg) {

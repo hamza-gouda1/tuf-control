@@ -10,10 +10,10 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Gdk, Gtk  # noqa: E402
 
-from tuf_control.backends.fake import DEFAULT_CURVES  # noqa: E402
-from tuf_control.core import FanCurve  # noqa: E402
-from tuf_control.ui.viewmodels import CurveGeometry, FanCurveModel, pwm_to_pct  # noqa: E402
-from tuf_control.ui.widgets import FAN_CURVE_KEYBOARD_HELP, FanCurveCanvas  # noqa: E402
+from asusius.backends.fake import DEFAULT_CURVES  # noqa: E402
+from asusius.core import FanCurve  # noqa: E402
+from asusius.ui.viewmodels import CurveGeometry, FanCurveModel, pwm_to_pct  # noqa: E402
+from asusius.ui.widgets import FAN_CURVE_KEYBOARD_HELP, FanCurveCanvas  # noqa: E402
 
 
 class CanvasDouble:

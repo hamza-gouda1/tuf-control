@@ -16,7 +16,7 @@ gjs -m tests/test_quick_profiles.js
 gjs -m tests/test_gestures.js
 ```
 
-Use fake hardware (`TUF_CONTROL_FAKE_ROOT`) for development. Tests must not change
+Use fake hardware (`ASUSIUS_FAKE_ROOT`) for development. Tests must not change
 hardware, real desktop settings or install updates. GUI QA instructions and memory
 limits are in [docs/UI.md](docs/UI.md). Include a regression test for behavioral fixes,
 and fake screenshots for visible changes. Explain what you tested and any limits.

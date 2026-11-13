@@ -12,11 +12,11 @@ import time
 import unittest
 from pathlib import Path
 
-from tuf_control import cli
-from tuf_control.controller import FAKE_ROOT_ENV
-from tuf_control.automation.config import CONFIG_DIR_ENV
-from tuf_control.updates import actions, blockers, check, history, progress, runner, verify
-from tuf_control.updates.model import Report, SourceResult, UpdateItem
+from asusius import cli
+from asusius.controller import FAKE_ROOT_ENV
+from asusius.automation.config import CONFIG_DIR_ENV
+from asusius.updates import actions, blockers, check, history, progress, runner, verify
+from asusius.updates.model import Report, SourceResult, UpdateItem
 
 FIX = Path(__file__).resolve().parent / "fixtures" / "updates"
 
@@ -40,8 +40,8 @@ class FakeEnv(unittest.TestCase):
         for k, v in ((FAKE_ROOT_ENV, self.tmp / "root"), (CONFIG_DIR_ENV, self.tmp / "cfg")):
             os.environ[k] = str(v)
             self.addCleanup(os.environ.pop, k, None)
-        os.environ.pop("TUF_CONTROL_FAKE_PENDING", None)
-        self.addCleanup(os.environ.pop, "TUF_CONTROL_FAKE_PENDING", None)
+        os.environ.pop("ASUSIUS_FAKE_PENDING", None)
+        self.addCleanup(os.environ.pop, "ASUSIUS_FAKE_PENDING", None)
         (self.tmp / "root").mkdir()
         os.environ[history.STATE_DIR_ENV] = str(self.tmp / "state")
         self.addCleanup(os.environ.pop, history.STATE_DIR_ENV, None)
@@ -254,14 +254,14 @@ class HistoryTests(FakeEnv):
         self.assertEqual([c["name"] for c in ch], ["a"])  # only what really changed
         self.assertEqual(history.run_title(runs[0]), "1 of 1 installed")
         self.assertEqual(history.run_title({"trigger": "detected", "items": runs[0]["items"]}),
-                         "1 updated outside TUF Control")
+                         "1 updated outside Asusius")
 
 
 # -- runner (fake mode end to end) ------------------------------------------------------------
 class RunnerTests(FakeEnv):
     def apply(self, pending_ids=""):
         if pending_ids:
-            os.environ["TUF_CONTROL_FAKE_PENDING"] = pending_ids
+            os.environ["ASUSIUS_FAKE_PENDING"] = pending_ids
         rep = check.run_check()
         state = progress.RunState()
         res = runner.apply_run(rep.updates(), state, trigger="manual")
@@ -320,7 +320,7 @@ class RunnerTests(FakeEnv):
 
 class SchedulerDetectedTests(FakeEnv):
     def test_outside_installs_are_recorded(self):
-        from tuf_control.updates.scheduler import UpdateScheduler
+        from asusius.updates.scheduler import UpdateScheduler
         rep1 = check.run_check()
         # make the cached check 7 hours old so the scheduler is due
         doc = rep1.to_dict()
@@ -349,7 +349,7 @@ class SchedulerDetectedTests(FakeEnv):
         self.assertEqual(len(runs), 1)
         self.assertEqual(runs[0]["trigger"], "detected")
         self.assertEqual([i["name"] for i in runs[0]["items"]], ["openssl"])
-        self.assertIn("outside TUF Control", runs[0]["items"][0]["reason"])
+        self.assertIn("outside Asusius", runs[0]["items"][0]["reason"])
 
 
 class CliHistoryTests(FakeEnv):
@@ -380,7 +380,7 @@ class CliHistoryTests(FakeEnv):
         self.seed()
         code, out = self.run_cli("updates", "history")
         self.assertEqual(code, 0)
-        self.assertIn("run from TUF Control", out)
+        self.assertIn("run from Asusius", out)
         self.assertIn("1 of 2 installed, 1 still pending", out)
         self.assertIn("linux-image-generic", out)
         self.assertIn("still pending", out)
@@ -399,7 +399,7 @@ class CliHistoryTests(FakeEnv):
         self.assertIn("No update runs recorded", out)  # the run is an hour old
 
     def test_apply_records_history_and_reports_pending(self):
-        os.environ["TUF_CONTROL_FAKE_PENDING"] = "apt:linux-image-generic:amd64"
+        os.environ["ASUSIUS_FAKE_PENDING"] = "apt:linux-image-generic:amd64"
         code, out = self.run_cli("updates", "check")
         code, out = self.run_cli("updates", "apply", "--source", "apt", "--yes")
         self.assertIn("4 of 5 installed, 1 still pending", out)
@@ -411,14 +411,14 @@ class CliHistoryTests(FakeEnv):
 
 class AgentHistoryTests(FakeEnv):
     def test_get_update_history(self):
-        from tuf_control.agent.store import STATE_DIR_ENV
+        from asusius.agent.store import STATE_DIR_ENV
         os.environ[STATE_DIR_ENV] = str(self.tmp / "astate")
         self.addCleanup(os.environ.pop, STATE_DIR_ENV, None)
-        from tuf_control.agent.tools import TOOLS, AgentService
+        from asusius.agent.tools import TOOLS, AgentService
         self.assertEqual(TOOLS["get_update_history"].tier, "read")
         history.append({"start": 1, "end": 2, "trigger": "detected", "duration_s": 0.0,
                         "sources": ["apt"], "cancelled": False, "reboot": False,
-                        "summary": "1 updated outside TUF Control",
+                        "summary": "1 updated outside Asusius",
                         "items": [{"id": "apt:openssl", "source": "apt", "name": "openssl",
                                    "old": "1", "new": "2", "offered": "2",
                                    "result": "installed", "reason": ""}]})

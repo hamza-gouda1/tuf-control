@@ -5,7 +5,7 @@ import subprocess
 import unittest
 from unittest import mock
 
-from tuf_control.updates import apt
+from asusius.updates import apt
 
 
 class Clock:

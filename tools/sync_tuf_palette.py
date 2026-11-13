@@ -97,8 +97,8 @@ def css_palette(original: str, palette: dict, scheme: str) -> str:
 
 def generated_files(source: Path, target: Path) -> dict[Path, str]:
     palettes, accents = source_palettes(source)
-    ui = target / "src/tuf_control/ui"
-    outputs = {target / "src/tuf_control/brand_palette.py": python_palette(palettes, accents)}
+    ui = target / "src/asusius/ui"
+    outputs = {target / "src/asusius/brand_palette.py": python_palette(palettes, accents)}
     for scheme, filename in (("light", "style.css"), ("dark", "style-dark.css")):
         path = ui / filename
         outputs[path] = css_palette(path.read_text(), palettes[scheme], scheme)
@@ -108,7 +108,7 @@ def generated_files(source: Path, target: Path) -> dict[Path, str]:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--source", required=True, type=Path, help="Bordeaux repository")
-    ap.add_argument("--target", required=True, type=Path, help="TUF Control repository")
+    ap.add_argument("--target", required=True, type=Path, help="Asusius repository")
     ap.add_argument("--check", action="store_true", help="report stale files without writing")
     args = ap.parse_args(argv)
     stale = []

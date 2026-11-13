@@ -59,7 +59,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y gjs
       - name: Syntax check
         run: |
-          for f in extension/tuf-control-quick@hamza-gouda/*.js; do
+          for f in extension/asusius-quick@hamza-gouda/*.js; do
             node --input-type=module --check < "$f"
           done
       - name: Extension logic tests
@@ -67,6 +67,6 @@ jobs:
           gjs -m tests/test_quick_profiles.js
           gjs -m tests/test_gestures.js
       - name: Validate settings schema
-        run: glib-compile-schemas --strict --dry-run extension/tuf-control-quick@hamza-gouda/schemas
+        run: glib-compile-schemas --strict --dry-run extension/asusius-quick@hamza-gouda/schemas
       - name: metadata.json
-        run: python3 -c "import json; json.load(open('extension/tuf-control-quick@hamza-gouda/metadata.json'))"
+        run: python3 -c "import json; json.load(open('extension/asusius-quick@hamza-gouda/metadata.json'))"

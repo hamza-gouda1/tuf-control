@@ -2,29 +2,29 @@
 
 GTK 4 + Libadwaita 1.5 through PyGObject. Runs as the user; no root.
 
-    PYTHONPATH=src python3 -m tuf_control.ui          # or: tuf-control-gui (after pip install)
-    TUF_CONTROL_FAKE_ROOT=/tmp/tree PYTHONPATH=src python3 -m tuf_control.ui   # fake hardware
+    PYTHONPATH=src python3 -m asusius.ui          # or: asusius-gui (after pip install)
+    ASUSIUS_FAKE_ROOT=/tmp/tree PYTHONPATH=src python3 -m asusius.ui   # fake hardware
 
-`tuf-control-gui --page KEY` opens a page at startup. The page keys are `dashboard`,
+`asusius-gui --page KEY` opens a page at startup. The page keys are `dashboard`,
 `processes`, `services`, `cpu`, `memory`, `dgpu`, `igpu`, `fanmon`, `storage`, `network`,
 `performance`, `fans`, `gpu`, `display`, `gestures`, `battery`, `keyboard`, `automation`,
 `agent`, `updates`, and `about`. An unknown key is reported to stderr along with this list.
 
-Create a fake tree with `python3 -c "from tuf_control.backends.fake import build_fake_tree;
-build_fake_tree('/tmp/tree')"`. `TUF_CONTROL_COLOR_SCHEME=dark|light` forces a scheme;
+Create a fake tree with `python3 -c "from asusius.backends.fake import build_fake_tree;
+build_fake_tree('/tmp/tree')"`. `ASUSIUS_COLOR_SCHEME=dark|light` forces a scheme;
 otherwise the system preference is followed.
 
 ## Layout
 
-`src/tuf_control/ui/`
+`src/asusius/ui/`
 
 | File | Role |
 | --- | --- |
-| `app.py` | `Adw.Application` (`io.github.hamzagouda.TufControl`), styles, icon path, `main()` |
+| `app.py` | `Adw.Application` (`io.github.hamzagouda.Asusius`), styles, icon path, `main()` |
 | `window.py` | `Adw.NavigationSplitView` sidebar (Monitor / Control sections) + `Gtk.Stack`; pages imported and built on first visit (`LazyPages`), hidden monitor pages destroyed after 30 s; header profile chip and battery indicator, toasts, confirm dialogs |
-| `live.py` | `LiveHub`: the one telemetry timer (1 Hz, 2 Hz on a detail page, stopped while the window is hidden) over `tuf_control.telemetry.Sampler`; process walk only while Processes is visible |
+| `live.py` | `LiveHub`: the one telemetry timer (1 Hz, 2 Hz on a detail page, stopped while the window is hidden) over `asusius.telemetry.Sampler`; process walk only while Processes is visible |
 | `charts.py`, `chartmath.py` | Cairo `Chart` (axes, grid, time axis, hover readout, stacked areas), `CoreGrid`, `CompositionBar`, `Meter`; display-free windowing, downsampling and monotone curves |
-| `lean.py` | Cairo renderer by default (`TUF_CONTROL_RENDERER=gl` to change), `malloc_trim`; see [PERFORMANCE.md](PERFORMANCE.md) |
+| `lean.py` | Cairo renderer by default (`ASUSIUS_RENDERER=gl` to change), `malloc_trim`; see [PERFORMANCE.md](PERFORMANCE.md) |
 | `viewmodels.py` | Display-free logic: formatting, `History`, power-limit view, `FanCurveModel` (clamped drags), `CurveGeometry`, GPU/keyboard/battery helpers, Mutter state parsing |
 | `widgets.py` | `Sparkline`, `Tile`, `FanCurveCanvas`, `KeyboardPreview` (Cairo) |
 | `display_config.py` | `org.gnome.Mutter.DisplayConfig` client (async Gio) and an in-memory fake |
@@ -49,7 +49,7 @@ otherwise the system preference is followed.
   Profile, charge limit, keyboard and refresh rate apply directly with a toast
   (refresh rate has Undo).
 - Every write ends in a toast with the result or the real error (`humanize_error`).
-- With `TUF_CONTROL_FAKE_ROOT` set, only the fake backend and a fake display config exist.
+- With `ASUSIUS_FAKE_ROOT` set, only the fake backend and a fake display config exist.
   Dialogs and toasts say so.
 - Popovers, dropdowns and menus are one rounded surface: `ui/style-popover.css` is loaded
   above user stylesheets (`STYLE_PROVIDER_PRIORITY_USER + 1`) and only clears the popover
@@ -68,7 +68,7 @@ otherwise the system preference is followed.
   setters after the fact: one added once a breakpoint is active is not applied.
 - Controls that have no text of their own (switches, scales, radio buttons, icon-only
   buttons) get an accessible name (`pages.base.a11y_name`) and icon-only buttons a tooltip.
-- Monitor values come from `tuf_control.telemetry` (/proc, /sys, NVML; no dependencies).
+- Monitor values come from `asusius.telemetry` (/proc, /sys, NVML; no dependencies).
   A reading that is missing is a gap in the graph, never a zero; what needs root (RAPL
   package power, per-process network) says so.
 
@@ -79,7 +79,7 @@ CPU fan, GPU fan, storage, network, battery; a card opens its page), Processes (
 by systemd scope plus one "System processes" group, or all processes; columns CPU, Memory,
 Swap (VmSwap), Drive (read + write), GPU, GPU memory and PID, each header carrying the
 machine-wide figure like Mission Center; sort, filter; Stop = SIGTERM and Force Stop =
-SIGKILL, both confirmed, refused for PID 1 and TUF Control itself; app names and icons come
+SIGKILL, both confirmed, refused for PID 1 and Asusius itself; app names and icons come
 from the cgroup scope, the .desktop id, StartupWMClass or the executable), Processor (stacked
 user/system/iowait, 24-CPU
 grid with P/E cores, clock, temperatures, load, governor/EPP), Memory (in use / cache stack,
@@ -103,7 +103,7 @@ send-events, tap to click, natural scrolling, speed, click method; swipe and pin
 for the Quick Settings extension's gestures, off by default; see [GESTURES.md](GESTURES.md)),
 Battery (charge limit 20–100 with 60/80/100 presets, one-shot full charge, health), Keyboard (brightness, hardware effect, live preview,
 software effects: picker, parameters, simulated preview, service status; see
-[EFFECTS.md](EFFECTS.md)), Automation (tuf-controld service, rules with enable switches and an
+[EFFECTS.md](EFFECTS.md)), Automation (asusiusd service, rules with enable switches and an
 "Active" badge, add/edit dialog with a dry-run Test, suggestions, recent activity; see
 [AUTOMATION.md](AUTOMATION.md)), Agent access (access levels, standing approval for
 permitted lower-risk changes, pending one-time approvals, high-risk confirmation,
@@ -149,7 +149,7 @@ runs the app on that Wayland socket against a fresh fake tree (sensor values ani
 the graphs), and renders each page with `Gtk.WidgetPaintable` -> `Gsk.CairoRenderer` -> PNG.
 `--user-theme` keeps `~/.config/gtk-4.0/gtk.css`; by default it is bypassed so the shots
 show the app's own styling. The automation config and daemon status always live in the run's
-temporary directory; `--automation` starts a real `tuf-controld` against the fake tree with demo
+temporary directory; `--automation` starts a real `asusiusd` against the fake tree with demo
 rules and stops it afterwards.
 
 ## UI QA lint
@@ -162,7 +162,7 @@ each with a timeout, against the fake tree (nothing real is read or written).
     python3 tests/ui/qa_lint.py                 # full matrix, about 20 minutes
     python3 tests/ui/qa_lint.py --quick         # 1280x720 and 360x640, dark and light
     python3 tests/ui/qa_lint.py --sizes 360x640 --variants dark --pages fans,battery
-    TUF_QA_SLOW=1 python3 -m unittest tests.ui.test_qa_lint   # the --quick run as a test
+    ASUSIUS_QA_SLOW=1 python3 -m unittest tests.ui.test_qa_lint   # the --quick run as a test
 
 The matrix also drives a fake Updates transaction, checking the running progress panel,
 version-verified pending result and expanded history at each normal size. The `gpu-lost`

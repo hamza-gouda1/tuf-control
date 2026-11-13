@@ -1,6 +1,6 @@
 # Agent access
 
-People use TUF Control through its window; agents use it through a protocol. Agent access
+People use Asusius through its window; agents use it through a protocol. Agent access
 is a second door into the same app: an MCP server (Model Context Protocol, JSON-RPC 2.0 over
 stdio) and a JSON command line, both behind one safety gate. By default an agent can read
 and explain, not change. Every change is a dry run first and needs the owner's approval.
@@ -9,26 +9,26 @@ and explain, not change. Every change is a dry run first and needs the owner's a
 
 ## Quick start
 
-    tuf-control mcp --print-config          # paste the output into your MCP client's config
-    tuf-control agent status                # read-only by default
-    tuf-control agent schema                # inspect tool schemas without accessing hardware
-    tuf-control agent grant control-basic   # allow profile, charge limit and keyboard requests
+    asusius mcp --print-config          # paste the output into your MCP client's config
+    asusius agent status                # read-only by default
+    asusius agent schema                # inspect tool schemas without accessing hardware
+    asusius agent grant control-basic   # allow profile, charge limit and keyboard requests
 
 `--print-config` prints the installed launcher, so the snippet works from any directory:
 
 ```json
 {
   "mcpServers": {
-    "tuf-control": {
-      "command": "/home/you/.local/bin/tuf-control",
+    "asusius": {
+      "command": "/home/you/.local/bin/asusius",
       "args": ["mcp"]
     }
   }
 }
 ```
 
-Without an installed launcher it prints `python3 -m tuf_control mcp` with `PYTHONPATH`. The
-`tuf-control-mcp` script (from `pyproject.toml`) is the same server. The **Copy client
+Without an installed launcher it prints `python3 -m asusius mcp` with `PYTHONPATH`. The
+`asusius-mcp` script (from `pyproject.toml`) is the same server. The **Copy client
 config** button on the Agent access page copies the same snippet.
 
 ## Tools
@@ -61,7 +61,7 @@ are a closed object (`additionalProperties: false`) with ranges, enums and patte
 | `restore_defaults` | control-all + high-risk | `scope`: fan_curves / power_limits / all; `profile` | write, destructive |
 
 Every write tool also takes `dry_run` (default `true`), `reason` (shown to the owner, at
-most 200 characters) and `approval_id`. `tuf-control agent schema` prints the full manifest
+most 200 characters) and `approval_id`. `asusius agent schema` prints the full manifest
 (schemas, annotations, levels, rate limits) as JSON.
 
 Results come back as `structuredContent` and the same JSON as a text block. Failures set
@@ -72,8 +72,8 @@ Results come back as `structuredContent` and the same JSON as a text block. Fail
 `approval_cancelled`, `approval_mismatch`, `unknown_request`, `queue_full`, `unavailable`,
 `backend_error`, `internal_error`. An unknown tool is a JSON-RPC error (-32602).
 
-**Resources:** `tuf://status`, `tuf://capabilities`, `tuf://telemetry/summary` (JSON, same
-gate as read tools) and `tuf://docs/safety` (Markdown, always readable).
+**Resources:** `asusius://status`, `asusius://capabilities`, `asusius://telemetry/summary`
+(JSON, same gate as read tools) and `asusius://docs/safety` (Markdown, always readable).
 
 **Prompts:** `diagnose-thermals` (optional `focus`) and `optimise-battery` (optional
 `goal`): step-by-step plans that read first and only propose changes as dry runs.
@@ -89,14 +89,14 @@ fd 1 at stderr, so nothing else can reach the stream.
 
 ## Safety model
 
-All of this is enforced in `src/tuf_control/agent/tools.py` (`AgentService.call`), not
+All of this is enforced in `src/asusius/agent/tools.py` (`AgentService.call`), not
 by the client and not by this document.
 
-1. **Read-only by default.** `~/.config/tuf-control/agent.json` (absent = enabled, `read`).
+1. **Read-only by default.** `~/.config/asusius/agent.json` (absent = enabled, `read`).
    It is re-read on every call. A file that does not parse or validate means **no access**
    until the owner fixes or rewrites it (fail closed).
 2. **Only the owner raises access**, in the app (Agent access page) or with
-   `tuf-control agent grant`. No tool changes access, approves requests or reads the
+   `asusius agent grant`. No tool changes access, approves requests or reads the
    approval queue beyond the status of an id it was given.
 3. **Dry run first.** Write tools default to `dry_run: true`. The value is validated by the
    schema, then against the hardware through the Controller (firmware min/max for power
@@ -104,15 +104,15 @@ by the client and not by this document.
    curve rules), and the Controller is asked in dry-run mode which backend would receive
    what. The answer (`would.sends`) is exactly what a real write sends.
 4. **Approval for every real write.** `dry_run: false` needs one of:
-   - a **standing grant**: `tuf-control agent grant control-basic --for 1h` (15 min to
+   - a **standing grant**: `asusius agent grant control-basic --for 1h` (15 min to
      24 h, stored with its expiry in `agent.json`); it covers control-basic tools only;
    - a **per-call approval**: the server queues the request (id, tool, validated
      parameters, the agent's reason, claimed client name, server session and OS-reported
      parent PID/executable) in
-     `~/.local/state/tuf-control/agent-approvals.json`, shows a desktop notification
+     `~/.local/state/asusius/agent-approvals.json`, shows a desktop notification
      (org.freedesktop.Notifications, when available) and returns `pending_approval` with
      an `approval_id`. The owner chooses **Approve once** or **Deny** on the Agent access
-     page, in the notification, or with `tuf-control agent approve|deny <id>`. The agent
+     page, in the notification, or with `asusius agent approve|deny <id>`. The agent
      polls `get_approval_status` and repeats the identical call with `approval_id`.
      An approval is bound to the tool, a hash of the normalised parameters and the server
      session; it works once; restarting the server requires a fresh approval; undecided requests expire after 10 minutes and approvals not
@@ -138,7 +138,7 @@ by the client and not by this document.
    instructions`, `system:`, tool names) is replaced by `[withheld: text looked like
    instructions]`. Results that contain such fields list them in `untrusted_fields` and
    carry a note to treat them as data. Command lines and environments are never exposed.
-9. **Audit log.** `~/.local/state/tuf-control/agent-audit.log`, one JSON object per line:
+9. **Audit log.** `~/.local/state/asusius/agent-audit.log`, one JSON object per line:
    time, self-declared client name and version from `initialize`, OS-reported parent PID
    and executable (also shown in approval rows and notifications), tool, cleaned parameters, decision
    (`ok`, `dry_run`, `pending`, `executed`, `denied`, `refused`, `invalid`, `rate_limited`,
@@ -147,14 +147,14 @@ by the client and not by this document.
    old files kept. Owner decisions and pending/executed writes are also copied to
    `agent-audit-important.log` with independent rotation and the same permissions.
    Routine, refused and rate-limited calls cannot rotate this protected history.
-   `tuf-control agent audit --tail 20`; the page shows up to 50 events, reserving half
+   `asusius agent audit --tail 20`; the page shows up to 50 events, reserving half
    the slots for protected events so a flood cannot hide them. Results are chronological;
    a one-event query returns the newest event. Protected history is still bounded:
    subsequent owner decisions and approved writes can eventually rotate older entries.
-10. **Kill switch.** `tuf-control agent revoke` or **Revoke all** on the page: access off,
+10. **Kill switch.** `asusius agent revoke` or **Revoke all** on the page: access off,
     level back to read, standing grant and high-risk tools off, every open request
     cancelled (an approved but unused request can no longer be used). Running servers see it
-    on their next call. `tuf-control agent grant read` turns read-only access back on.
+    on their next call. `asusius agent grant read` turns read-only access back on.
 11. **Process isolation.** The server runs as the desktop user and refuses to start as
     root. Its Controller never escalates: the polkit helper fallback the GUI may use is
     disabled, so a write that needs root fails instead of prompting. Privileged changes go
@@ -179,13 +179,13 @@ explicitly. Copying a client name cannot consume another server session's approv
 Existing approvals from before session binding cannot be consumed; request a fresh one.
 
 **Not covered:** an agent that can also run shell commands as you can edit `agent.json`,
-run `tuf-control agent approve`, or call asusd directly. Agent access protects you from
+run `asusius agent approve`, or call asusd directly. Agent access protects you from
 what an MCP client does through this server; it is not a sandbox. Give agents that have a
 shell no more trust than you would give that shell.
 
 ## Example transcript
 
-The owner ran `tuf-control agent grant control-basic` (per-call approvals). Client to
+The owner ran `asusius agent grant control-basic` (per-call approvals). Client to
 server, one line each:
 
 ```json
@@ -212,7 +212,7 @@ server, one line each:
 {"tool": "set_charge_limit", "summary": "Set the battery charge limit to 80 %",
  "params": {"percent": 80}, "dry_run": false, "applied": false,
  "status": "pending_approval", "approval_id": "f8be888299efc3ce", "expires_at": 1792780626.7,
- "next": "the owner must approve this in TUF Control (Agent access) or with `tuf-control agent approve f8be888299efc3ce`; poll get_approval_status, then repeat this exact call with approval_id"}
+ "next": "the owner must approve this in Asusius (Agent access) or with `asusius agent approve f8be888299efc3ce`; poll get_approval_status, then repeat this exact call with approval_id"}
 ```
 
 The owner clicks **Approve once**. The client polls `get_approval_status` (`"status":
@@ -223,7 +223,7 @@ the same id returns `approval_used`.
 ## JSON command line
 
 Every read subcommand accepts `--json`, before or after the subcommand
-(`tuf-control --json status` and `tuf-control status --json` are the same). These shapes
+(`asusius --json status` and `asusius status --json` are the same). These shapes
 are stable; new keys may be added, existing keys are not renamed or removed.
 
 | Command | Top-level keys |
@@ -245,23 +245,23 @@ value}` and honour `--dry-run`. Errors go to stderr with exit code 1.
 
 Owner commands:
 
-    tuf-control agent status
-    tuf-control agent grant read|control-basic|control-all [--for 1h] [--enable-high-risk|--disable-high-risk]
-    tuf-control agent grant none
-    tuf-control agent revoke
-    tuf-control agent pending
-    tuf-control agent approve <id>
-    tuf-control agent deny <id>
-    tuf-control agent audit [--tail N]
-    tuf-control agent schema
+    asusius agent status
+    asusius agent grant read|control-basic|control-all [--for 1h] [--enable-high-risk|--disable-high-risk]
+    asusius agent grant none
+    asusius agent revoke
+    asusius agent pending
+    asusius agent approve <id>
+    asusius agent deny <id>
+    asusius agent audit [--tail N]
+    asusius agent schema
 
 ## Files
 
 | File | What |
 | --- | --- |
-| `~/.config/tuf-control/agent.json` | `enabled`, `level`, `high_risk_tools`, `standing_grant`, `notifications` (`$TUF_CONTROL_CONFIG_DIR` overrides the directory) |
-| `~/.local/state/tuf-control/agent-approvals.json` | the approval queue (`$TUF_CONTROL_STATE_DIR` or `$XDG_STATE_HOME`) |
-| `~/.local/state/tuf-control/agent-audit.log` | the audit log, rotated to `.1` to `.3` |
+| `~/.config/asusius/agent.json` | `enabled`, `level`, `high_risk_tools`, `standing_grant`, `notifications` (`$ASUSIUS_CONFIG_DIR` overrides the directory) |
+| `~/.local/state/asusius/agent-approvals.json` | the approval queue (`$ASUSIUS_STATE_DIR` or `$XDG_STATE_HOME`) |
+| `~/.local/state/asusius/agent-audit.log` | the audit log, rotated to `.1` to `.3` |
 
 All are written with a lock and atomically (temp file and rename), mode 0600.
 
@@ -283,10 +283,10 @@ All are written with a lock and atomically (temp file and rename), mode 0600.
 
 Tests: `tests/test_agent.py` (gate, approvals, expiry, rate limits, audit, kill switch,
 sanitising) and `tests/test_agent_mcp.py` (protocol conformance, JSON CLI shapes, the real
-`python -m tuf_control mcp` process over pipes). The page is rendered and driven (approve,
+`python -m asusius mcp` process over pipes). The page is rendered and driven (approve,
 revoke) headlessly with `python3 tests/ui/screenshots.py --pages none --agent`.
 
-Agent access was written by Hamza Gouda as part of TUF Control (GPL-3.0-or-later).
+Agent access was written by Hamza Gouda as part of Asusius (GPL-3.0-or-later).
 
 
 Audit and state files reject symbolic links and non-regular files. Audit logs are repaired

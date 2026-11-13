@@ -5,7 +5,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "tuf-control"
+name = "asusius"
 version = "0.1.2"
 description = "Control core for ASUS TUF/ROG laptops on Linux"
 readme = "README.md"
@@ -20,23 +20,23 @@ gui = ["PyGObject", "pycairo"]
 dev = ["pytest", "ruff"]
 
 [project.scripts]
-tuf-control = "tuf_control.cli:main"
-tuf-controld = "tuf_control.daemon:main"
-tuf-control-mcp = "tuf_control.agent.mcp:main"
+asusius = "asusius.cli:main"
+asusiusd = "asusius.daemon:main"
+asusius-mcp = "asusius.agent.mcp:main"
 
 [project.gui-scripts]
-tuf-control-gui = "tuf_control.ui.app:main"
+asusius-gui = "asusius.ui.app:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-"tuf_control.ui" = ["*.css"]
+"asusius.ui" = ["*.css"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
-markers = ["hardware: read-only smoke test on real hardware (set TUF_CONTROL_HARDWARE_TESTS=1)"]
+markers = ["hardware: read-only smoke test on real hardware (set ASUSIUS_HARDWARE_TESTS=1)"]
 
 [tool.ruff]
 line-length = 100

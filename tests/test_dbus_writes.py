@@ -3,9 +3,9 @@
 """D-Bus write names and signatures, checked against asusd 6.3 / supergfxd introspection."""
 import unittest
 
-from tuf_control.backends.dbus import (ARMOURY_PATH, ASUSD, DBusBackend, direction_to_name,
+from asusius.backends.dbus import (ARMOURY_PATH, ASUSD, DBusBackend, direction_to_name,
                                        speed_to_name)
-from tuf_control.core import FanCurve, KbdEffect, Profile
+from asusius.core import FanCurve, KbdEffect, Profile
 
 
 class Rec:

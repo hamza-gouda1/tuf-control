@@ -7,16 +7,16 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tuf_control.backends.fake import build_fake_tree
-from tuf_control.telemetry import Sampler, Store, fmt
-from tuf_control.telemetry.cpu import parse_cpulist, parse_loadavg, parse_stat, usage
-from tuf_control.telemetry.gpu_intel import DrmClients, parse_fdinfo
-from tuf_control.telemetry.gpu_nvidia import NvidiaGpu, parse_smi
-from tuf_control.telemetry.memory import derive, parse_meminfo, parse_psi
-from tuf_control.telemetry.network import parse_net_dev, parse_wireless
-from tuf_control.telemetry.procs import app_from_cgroup, parse_io, parse_pid_stat
-from tuf_control.telemetry.storage import disk_rates, parse_diskstats, parse_mounts
-from tuf_control.telemetry.util import nice_ceiling, rate
+from asusius.backends.fake import build_fake_tree
+from asusius.telemetry import Sampler, Store, fmt
+from asusius.telemetry.cpu import parse_cpulist, parse_loadavg, parse_stat, usage
+from asusius.telemetry.gpu_intel import DrmClients, parse_fdinfo
+from asusius.telemetry.gpu_nvidia import NvidiaGpu, parse_smi
+from asusius.telemetry.memory import derive, parse_meminfo, parse_psi
+from asusius.telemetry.network import parse_net_dev, parse_wireless
+from asusius.telemetry.procs import app_from_cgroup, parse_io, parse_pid_stat
+from asusius.telemetry.storage import disk_rates, parse_diskstats, parse_mounts
+from asusius.telemetry.util import nice_ceiling, rate
 
 FIX = Path(__file__).parent / "fixtures" / "telemetry"
 
@@ -270,8 +270,8 @@ class StoreTests(unittest.TestCase):
 
 class SamplerOnFakeTreeTests(unittest.TestCase):
     def test_rates_from_fake_world(self):
-        from tuf_control.telemetry.fake import FakeWorld
-        from tuf_control.telemetry.procs import ProcessWalker
+        from asusius.telemetry.fake import FakeWorld
+        from asusius.telemetry.procs import ProcessWalker
         with tempfile.TemporaryDirectory() as d:
             root = build_fake_tree(Path(d) / "root")
             w = FakeWorld(root)

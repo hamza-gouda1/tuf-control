@@ -1,6 +1,6 @@
 # Keyboard software effects
 
-Single-zone RGB effects computed by `tuf-controld` and written to the keyboard as a static
+Single-zone RGB effects computed by `asusiusd` and written to the keyboard as a static
 colour through `Controller.set_kbd_effect` (asusd `LedModeData` on real systems). The
 hardware mode is saved when an effect starts and written back when effects stop, the daemon
 stops, or a rule turns effects off.
@@ -14,10 +14,10 @@ stops, or a rule turns effects off.
 Keyboard page, **Effects (software)**: pick an effect, adjust its parameters, watch the
 preview, **Apply** (writes the config and starts the service if needed). From the CLI:
 
-    tuf-control kbd effect list
-    tuf-control kbd effect temperature --param source=cpu --param high=85
-    tuf-control kbd effect audio --param band=bass --param peak=#a3283a --notifications on
-    tuf-control kbd effect off
+    asusius kbd effect list
+    asusius kbd effect temperature --param source=cpu --param high=85
+    asusius kbd effect audio --param band=bass --param peak=#a3283a --notifications on
+    asusius kbd effect off
 
 Rules can switch effects too (`{"type": "effect", "name": "audio"}`); a rule's choice
 overrides the configured one while the rule is active, then the configured one returns.
@@ -86,7 +86,7 @@ cursor hidden, `persist_mode=2`) → `Start` → `OpenPipeWireRemote`, then GStr
 `pipewiresrc` scaled to 16×9 at 4 fps; dark pixels are ignored and saturation boosted.
 
 - The **first start shows GNOME's screen-sharing dialog**; you pick the monitor. The portal
-  returns a restore token, kept in `~/.config/tuf-control/screencast-token` (mode 600), so
+  returns a restore token, kept in `~/.config/asusius/screencast-token` (mode 600), so
   later starts skip the dialog until you revoke it. Cancelling the dialog clears the token
   and the effect reports `denied`.
 - While the effect runs, **GNOME Shell shows its screen-sharing indicator** in the top bar.
@@ -114,10 +114,10 @@ urgency are read.
   write did not take. Picking a mode loads the colours/speed asusd keeps for that mode
   (`AllModeData`; asusd 6.3 lists Pulse there as 9, read as 10).
 - If a software effect is on, the hardware Apply first turns it Off and waits (≤ 6 s) until
-  tuf-controld has handed the keyboard back, so a frame cannot paint over the new mode.
+  asusiusd has handed the keyboard back, so a frame cannot paint over the new mode.
 - Frames are Static writes, which asusd also stores as Static's own colour: when effects
   stop, a non-Static mode gets Static's colour put back first, then its own mode.
-- Errors are visible: a failed start of tuf-controld raises a toast with the daemon's last
+- Errors are visible: a failed start of asusiusd raises a toast with the daemon's last
   log line; an effect or input error (no `parec`, portal denied, write failures) shows in
   the service row and as a toast once.
 
@@ -147,7 +147,7 @@ What the Keyboard page does:
   Colour 1 ↔ off, said plainly. On: Colour 2 and the palettes appear, and Apply writes the
   hardware Breathe (both colours, so asusd keeps them and it is the mode that returns when
   effects stop), then turns on the software `gradient` effect with Colour 1, Colour 2 and a
-  cycle of 6/4/2.5 s for Slow/Medium/Fast; tuf-controld is started if needed. Turning the
+  cycle of 6/4/2.5 s for Slow/Medium/Fast; asusiusd is started if needed. Turning the
   switch off (or picking another mode) and Apply turns the software effect off first.
   While `gradient` runs the page shows Breathe with Two colours on, not the Static frames.
 - Keyboards whose firmware does show Colour 2 (HID keyboards, `DeviceType` 0/1) get
@@ -161,7 +161,7 @@ What the Keyboard page does:
 ## Status and caveats
 
 - Run on the real FX608JHR (asusd 6.3.5): hardware Static/Breathe/Colour cycle/Pulse from
-  the Keyboard page; tuf-controld started from the page, `rainbow`, `cpu`, `night` written
+  the Keyboard page; asusiusd started from the page, `rainbow`, `cpu`, `night` written
   live and Off restoring the exact previous `LedModeData`; `audio` and `spectrum` against a
   synthetic beat and against real `parec` capture of music playing; `ambient` through the
   real `ScreenColourSource` pipeline with a fake portal and fake frames (the real portal

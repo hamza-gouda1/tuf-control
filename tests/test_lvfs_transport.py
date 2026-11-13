@@ -8,7 +8,7 @@ import ssl
 import unittest
 from unittest import mock
 
-from tuf_control.updates import actions
+from asusius.updates import actions
 
 PUBLIC = (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("8.8.8.8", 443))
 PRIVATE = (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("127.0.0.1", 443))
@@ -49,7 +49,7 @@ class LvfsTransportTests(unittest.TestCase):
         request = b"".join(call.args[0] for call in tls.sendall.call_args_list)
         self.assertIn(b"GET /downloads/test.cab?revision=2 HTTP/1.1\r\n", request)
         self.assertIn(b"Host: fwupd.org\r\n", request)
-        self.assertIn(b"User-Agent: tuf-control\r\n", request)
+        self.assertIn(b"User-Agent: asusius\r\n", request)
         self.assertEqual(watch.phase.call_args.kwargs["percent"], 100)
         tls.close.assert_called_once_with()
 

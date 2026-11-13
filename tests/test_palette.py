@@ -9,8 +9,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tuf_control.brand_palette import ACCENTS, HEX_PALETTES
-from tuf_control.effects import plugins, theme
+from asusius.brand_palette import ACCENTS, HEX_PALETTES
+from asusius.effects import plugins, theme
 
 REPO = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location("sync_tuf_palette", REPO / "tools/sync_tuf_palette.py")
@@ -25,7 +25,7 @@ class PaletteTests(unittest.TestCase):
         self.root = Path(tmp.name)
         self.source, self.target = self.root / "source", self.root / "target"
         (self.source / "tokens").mkdir(parents=True)
-        ui = self.target / "src/tuf_control/ui"
+        ui = self.target / "src/asusius/ui"
         ui.mkdir(parents=True)
         for filename in ("style.css", "style-dark.css"):
             (ui / filename).write_text("/* fixture */\n@define-color old #000000;\n"
@@ -54,11 +54,11 @@ class PaletteTests(unittest.TestCase):
         self.assertEqual(self.run_tool(), 0)
         self.assertEqual(self.run_tool(check=True), 0)
         namespace = {}
-        output = self.target / "src/tuf_control/brand_palette.py"
+        output = self.target / "src/asusius/brand_palette.py"
         exec(compile(output.read_text(), str(output), "exec"), namespace)
         self.assertEqual(namespace["HEX_PALETTES"]["light"]["gold"], "#123456")
         self.assertEqual(namespace["PALETTE"]["light"]["gold"], (18 / 255, 52 / 255, 86 / 255))
-        css = (self.target / "src/tuf_control/ui/style.css").read_text()
+        css = (self.target / "src/asusius/ui/style.css").read_text()
         self.assertIn("@define-color gold_color #123456;", css)
         self.assertIn(".tile { padding: 16px; }", css)
         self.assertEqual(css.count(sync.BEGIN), 1)
@@ -69,7 +69,7 @@ class PaletteTests(unittest.TestCase):
         outputs = sync.generated_files(self.source, self.target)
         self.assertEqual(outputs, sync.generated_files(self.source, self.target))
         for scheme, filename in (("light", "style.css"), ("dark", "style-dark.css")):
-            css = outputs[self.target / "src/tuf_control/ui" / filename]
+            css = outputs[self.target / "src/asusius/ui" / filename]
             for role, token in sync.ROLE_TOKENS.items():
                 self.assertIn(f"@define-color {role} {HEX_PALETTES[scheme][token]};", css)
         self.assertIs(theme.ACCENTS, ACCENTS)
@@ -78,11 +78,11 @@ class PaletteTests(unittest.TestCase):
 
     def test_invalid_shared_colour_fails_without_writing_target(self):
         self.tokens.write_text(self.tokens.read_text().replace('gold = "', 'gold = "invalid', 1))
-        before = (self.target / "src/tuf_control/ui/style.css").read_text()
+        before = (self.target / "src/asusius/ui/style.css").read_text()
         with self.assertRaises(ValueError):
             self.run_tool()
-        self.assertEqual((self.target / "src/tuf_control/ui/style.css").read_text(), before)
-        self.assertFalse((self.target / "src/tuf_control/brand_palette.py").exists())
+        self.assertEqual((self.target / "src/asusius/ui/style.css").read_text(), before)
+        self.assertFalse((self.target / "src/asusius/brand_palette.py").exists())
 
 
 if __name__ == "__main__":

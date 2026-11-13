@@ -10,7 +10,7 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
-from tuf_control.ui.pages.updates import UpdatesPage, _write_background_checks  # noqa: E402
+from asusius.ui.pages.updates import UpdatesPage, _write_background_checks  # noqa: E402
 
 
 class BackgroundChecksSettingsTests(unittest.TestCase):
@@ -18,7 +18,7 @@ class BackgroundChecksSettingsTests(unittest.TestCase):
         page = SimpleNamespace(_syncing_auto=False, _render_auto=Mock(), win=Mock())
         switch = Mock()
         switch.get_active.return_value = True
-        with patch("tuf_control.ui.pages.updates.run_bg") as run:
+        with patch("asusius.ui.pages.updates.run_bg") as run:
             UpdatesPage._background_checks_changed(page, switch, None)
         switch.set_sensitive.assert_called_once_with(False)
         self.assertEqual(run.call_args.args, (_write_background_checks, True))
@@ -31,7 +31,7 @@ class BackgroundChecksSettingsTests(unittest.TestCase):
 
     def test_loading_settings_never_writes_them(self):
         page = SimpleNamespace(_syncing_auto=True)
-        with patch("tuf_control.ui.pages.updates.run_bg") as run:
+        with patch("asusius.ui.pages.updates.run_bg") as run:
             UpdatesPage._background_checks_changed(page, Mock(), None)
         run.assert_not_called()
 

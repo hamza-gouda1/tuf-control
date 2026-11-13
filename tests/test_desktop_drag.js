@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) Hamza Gouda
 // Run: gjs -m tests/test_desktop_drag.js
-import {DesktopDrag} from '../extension/tuf-control-quick@hamza-gouda/drag_desktop.js';
+import {DesktopDrag} from '../extension/asusius-quick@hamza-gouda/drag_desktop.js';
 
 let passed = 0, failed = 0;
 function ok(value, msg) {

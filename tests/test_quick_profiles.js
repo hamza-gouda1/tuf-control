@@ -5,7 +5,7 @@
 
 import System from 'system';
 import GLib from 'gi://GLib';
-import * as P from '../extension/tuf-control-quick@hamza-gouda/profiles.js';
+import * as P from '../extension/asusius-quick@hamza-gouda/profiles.js';
 
 let failed = 0, passed = 0;
 function ok(cond, msg) {
@@ -194,7 +194,7 @@ class Clock {
         });
     };
     const disable = () => {
-        // same order as TufControlQuickExtension.disable()
+        // same order as AsusiusQuickExtension.disable()
         osd.destroy();
         model.destroy();
         osd = model = null;
@@ -211,7 +211,7 @@ class Clock {
 }
 
 // --- real Gio sources: read-only smoke (construct, let proxies settle, destroy)
-const D = await import('../extension/tuf-control-quick@hamza-gouda/dbus.js');
+const D = await import('../extension/asusius-quick@hamza-gouda/dbus.js');
 const sources = [new D.AsusdProfileSource(), new D.PpdProfileSource(), new D.GpuModeSource()];
 await new Promise(res => GLib.timeout_add(GLib.PRIORITY_DEFAULT, 800, () => { res(); return GLib.SOURCE_REMOVE; }));
 print(`  live: asusd=${sources[0].available}/${sources[0].profile} ppd=${sources[1].available}/${sources[1].profile} gpu=${sources[2].mode}`);

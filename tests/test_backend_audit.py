@@ -12,8 +12,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from tuf_control.updates import actions, apt, blockers, history, notify, progress, verify
-from tuf_control.updates.model import Report, SourceResult, UpdateItem
+from asusius.updates import actions, apt, blockers, history, notify, progress, verify
+from asusius.updates.model import Report, SourceResult, UpdateItem
 
 
 def pkg(name="linux-image-generic", **facts):
@@ -216,7 +216,7 @@ class VerificationRegressionTests(unittest.TestCase):
         self.assertEqual(result[0]["result"], "installed")
 
     def test_external_update_needs_version_proof_and_healthy_source(self):
-        from tuf_control.updates.scheduler import UpdateScheduler
+        from asusius.updates.scheduler import UpdateScheduler
         item = pkg()
         old = Report(checked_ts=1, sources=[SourceResult("apt", items=[item])])
         new = Report(checked_ts=2, sources=[SourceResult("apt")])
@@ -331,7 +331,7 @@ class NotificationTests(unittest.TestCase):
 
 class AgentStateSafetyTests(unittest.TestCase):
     def test_nonfinite_grants_fail_closed_and_future_not_effective(self):
-        from tuf_control.agent import policy
+        from asusius.agent import policy
         for val in (float("inf"), float("nan"), float("-inf"), 10**1000):
             with self.assertRaises(ValueError):
                 policy.validate_access({"standing_grant": {
@@ -345,7 +345,7 @@ class AgentStateSafetyTests(unittest.TestCase):
         self.assertFalse(acc.pre_approved("basic", 50))
 
     def test_audit_rejects_symlinks_and_repairs_permissions(self):
-        from tuf_control.agent.audit import AuditLog
+        from asusius.agent.audit import AuditLog
         with tempfile.TemporaryDirectory() as tmp:
             p = Path(tmp) / "audit.log"
             target = Path(tmp) / "target"
@@ -365,7 +365,7 @@ class AgentStateSafetyTests(unittest.TestCase):
 
 class SnapProgressTests(unittest.TestCase):
     def test_real_task_dictionary_becomes_progress_text(self):
-        from tuf_control.updates import snap
+        from asusius.updates import snap
         docs = [{"change": "7"}, {"result": {"ready": False, "tasks": [
             {"status": "Do", "summary": "Download app", "progress": {"done": 1, "total": 2}}]}},
             {"result": {"ready": True, "summary": "done"}}]
@@ -376,7 +376,7 @@ class SnapProgressTests(unittest.TestCase):
         self.assertEqual(dict(st.snapshot()["sources"])["snapd"]["package"], "Download app")
 
     def test_timeout_is_not_a_success(self):
-        from tuf_control.updates import snap
+        from asusius.updates import snap
         with mock.patch.object(snap, "snapd", return_value={"change": "7"}):
             with self.assertRaises(TimeoutError):
                 snap.refresh(["app"], timeout_s=0)
@@ -384,7 +384,7 @@ class SnapProgressTests(unittest.TestCase):
 
 class GpuLostRegressionTests(unittest.TestCase):
     def test_lost_gpu_without_nvml_never_polls(self):
-        from tuf_control.telemetry import gpu_nvidia as gpu
+        from asusius.telemetry import gpu_nvidia as gpu
         dev = {"vendor": "0x10de", "device": "0x1234", "addr": "0000:01:00.0",
                "dir": "/fake/device"}
         with mock.patch.object(gpu, "display_devices", return_value=[dev]), \
@@ -405,7 +405,7 @@ class GpuLostRegressionTests(unittest.TestCase):
         self.assertEqual(card.procs, {})
 
     def test_error_after_nvml_initialization_releases_without_query(self):
-        from tuf_control.telemetry import gpu_nvidia as gpu
+        from asusius.telemetry import gpu_nvidia as gpu
         dev = {"vendor": "0x10de", "device": "0x1234", "addr": "0000:01:00.0",
                "dir": "/fake/device"}
         with mock.patch.object(gpu, "display_devices", return_value=[dev]), \
@@ -424,16 +424,16 @@ class GpuLostRegressionTests(unittest.TestCase):
 
 class DaemonSafetyRegressionTests(unittest.TestCase):
     def test_forced_dry_run_disables_configured_effect(self):
-        from tuf_control.automation.config import update_config
-        from tuf_control.backends.fake import build_fake_tree, FakeBackend
-        from tuf_control.controller import Controller
-        from tuf_control.daemon import Daemon
+        from asusius.automation.config import update_config
+        from asusius.backends.fake import build_fake_tree, FakeBackend
+        from asusius.controller import Controller
+        from asusius.daemon import Daemon
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp)
             root = build_fake_tree(path / "root")
             cfg = path / "config.json"
             update_config(lambda c: c["effects"].update(active="accent"), cfg)
-            with mock.patch.dict(os.environ, {"TUF_CONTROL_FAKE_ROOT": str(root)}):
+            with mock.patch.dict(os.environ, {"ASUSIUS_FAKE_ROOT": str(root)}):
                 daemon = Daemon(Controller([FakeBackend(root)]), config_file=cfg,
                                 status_file=path / "status.json", dry_run=True)
                 daemon.reload(force=True)
@@ -443,7 +443,7 @@ class DaemonSafetyRegressionTests(unittest.TestCase):
             self.assertEqual(daemon.effects.writer.writes, 0)
 
     def test_detached_log_is_private_and_bounded_and_reaps_children(self):
-        from tuf_control.automation import service
+        from asusius.automation import service
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / "daemon.log"
             raw = io.BytesIO(b"x" * (2 * service.MAX_LOG_BYTES + 100))
@@ -462,7 +462,7 @@ class FlatpakProgressTests(unittest.TestCase):
         import sys
         st = progress.RunState()
         cmd = [sys.executable, "-u", "-c", "print('Downloading app 40%',flush=True);print('Done',flush=True)"]
-        with mock.patch("tuf_control.updates.flatpak.update_cmd", return_value=cmd):
+        with mock.patch("asusius.updates.flatpak.update_cmd", return_value=cmd):
             self.assertEqual(actions.flatpak_update("user", ["demo.App"],
                              watch=st.watcher("flatpak-user")), "flatpak (user) updated")
         self.assertIn("Downloading app 40%", "\n".join(st.snapshot()["log"]))
@@ -472,13 +472,13 @@ class FlatpakProgressTests(unittest.TestCase):
         stop = threading.Event()
         cmd = [sys.executable, "-u", "-c",
                "import time;print('Downloading app 1%',flush=True);time.sleep(60)"]
-        with mock.patch("tuf_control.updates.flatpak.update_cmd", return_value=cmd):
+        with mock.patch("asusius.updates.flatpak.update_cmd", return_value=cmd):
             with self.assertRaises(actions._Cancelled):
                 actions.flatpak_update("user", ["demo.App"], progress=lambda _line: stop.set(),
                                        cancel=stop)
 
     def test_reference_options_and_traversal_rejected(self):
-        from tuf_control.updates.flatpak import update_cmd
+        from asusius.updates.flatpak import update_cmd
         for ref in ("--installation=other", "/tmp/other", "../../file", "app//stable"):
             with self.subTest(ref=ref), self.assertRaises(ValueError):
                 update_cmd("user", [ref])
@@ -488,7 +488,7 @@ class FlatpakProgressTests(unittest.TestCase):
 
 class HistoryFailureResultTests(unittest.TestCase):
     def test_history_write_failure_preserves_verified_results(self):
-        from tuf_control.updates import runner
+        from asusius.updates import runner
         item = pkg()
         state = progress.RunState()
         with mock.patch.object(verify, "before_versions", return_value={item.id: "146"}), \
@@ -531,7 +531,7 @@ class UpdateCancellationBoundaryTests(unittest.TestCase):
         fetch.assert_not_called()
 
     def test_cancel_during_firmware_download_prevents_flash(self):
-        from tuf_control import dbusutil
+        from asusius import dbusutil
         stop = threading.Event()
         item = UpdateItem("firmware:test", "firmware", "Firmware", "1", "2",
                           apply_method="fwupd", extra={"locations": ["https://fwupd.org/test.cab"]})

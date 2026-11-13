@@ -10,7 +10,7 @@
 
 What runs. A private `dbus-run-session` hosts `mutter --headless`; for each size one
 compositor with a virtual monitor of that size, and for each variant one app process
-against a fake hardware tree (TUF_CONTROL_FAKE_ROOT, nothing real is read or written;
+against a fake hardware tree (ASUSIUS_FAKE_ROOT, nothing real is read or written;
 automation, agent and daemon state live in a temp dir). Sizes: 1920x1080 maximised,
 1280x720, 900x700, 640x700, 360x640. Variants: dark, light, and `usertheme` = dark with
 the owner's real ~/.config/gtk-4.0/gtk.css and settings.ini loaded (read-only).
@@ -118,17 +118,17 @@ def jobs(args) -> list:
 # ============================================================================================
 def reexec(args) -> int:
     """Under systemd-run's memory cap, then under a private session bus."""
-    if not os.environ.get("TUF_QA_SCOPE") and not args.no_scope:
+    if not os.environ.get("ASUSIUS_QA_SCOPE") and not args.no_scope:
         if not shutil.which("systemd-run"):
             print("systemd-run not found: refusing to run GTK without a memory cap "
                   "(use --no-scope to override)", file=sys.stderr)
             return 2
-        env = {**os.environ, "TUF_QA_SCOPE": "1"}
+        env = {**os.environ, "ASUSIUS_QA_SCOPE": "1"}
         return subprocess.call(
             ["systemd-run", "--user", "--scope", "-q", "-p", f"MemoryMax={MEM_MAX}",
              "-p", "MemorySwapMax=0", "--", sys.executable, __file__, *sys.argv[1:]], env=env)
-    if not os.environ.get("TUF_QA_BUS"):
-        env = {**os.environ, "TUF_QA_BUS": "1"}
+    if not os.environ.get("ASUSIUS_QA_BUS"):
+        env = {**os.environ, "ASUSIUS_QA_BUS": "1"}
         return subprocess.call(["dbus-run-session", "--", sys.executable, __file__,
                                 *sys.argv[1:]], env=env)
     return outer(args)
@@ -154,10 +154,10 @@ def start_mutter(size: str):
 
 def run_child(job: dict, sock: str, workdir: Path) -> tuple:
     env = {**os.environ, "GDK_BACKEND": "wayland", "WAYLAND_DISPLAY": sock,
-           "TUF_QA_JOB": json.dumps(job),
+           "ASUSIUS_QA_JOB": json.dumps(job),
            "PYTHONPATH": f"{SRC}:{HERE}:{site.getusersitepackages()}:"
                          + os.environ.get("PYTHONPATH", ""),
-           "TUF_CONTROL_COLOR_SCHEME": "light" if job["variant"] == "light" else "dark",
+           "ASUSIUS_COLOR_SCHEME": "light" if job["variant"] == "light" else "dark",
            "GSK_RENDERER": "cairo", "ADW_DISABLE_PORTAL": "1", "GDK_DEBUG": "no-portals",
            "GTK_A11Y": "none", "G_MESSAGES_DEBUG": "all", "GSETTINGS_BACKEND": "keyfile",
            "NO_AT_BRIDGE": "1", "PYTHONWARNINGS": "default", "PYTHONUNBUFFERED": "1"}
@@ -201,7 +201,7 @@ def outer(args) -> int:
                 rc, log = run_child(job, sock, work)
                 dt = time.time() - t0
                 text = log.read_text(errors="replace")
-                if os.environ.get("TUF_QA_DEBUG_FOCUS"):
+                if os.environ.get("ASUSIUS_QA_DEBUG_FOCUS"):
                     print("\n".join(x for x in text.splitlines() if x.startswith(("FOCUS","STUCK"))))
                 res = {}
                 rp = Path(job["result"])
@@ -290,8 +290,8 @@ def child(job: dict) -> int:
     import screenshots as sh
     from PIL import Image, ImageChops
     import qa_audit as qa
-    from tuf_control.backends.fake import build_fake_tree
-    from tuf_control.controller import FAKE_ROOT_ENV
+    from asusius.backends.fake import build_fake_tree
+    from asusius.controller import FAKE_ROOT_ENV
 
     variant, size, mode = job["variant"], job["size"], job["mode"]
     name = job["name"]
@@ -316,17 +316,17 @@ def child(job: dict) -> int:
         os.environ.pop(FAKE_ROOT_ENV, None)
     else:
         os.environ[FAKE_ROOT_ENV] = str(root)
-    from tuf_control.automation.config import CONFIG_DIR_ENV, RUNTIME_DIR_ENV
+    from asusius.automation.config import CONFIG_DIR_ENV, RUNTIME_DIR_ENV
     os.environ[CONFIG_DIR_ENV] = str(tmp / "config")
     os.environ[RUNTIME_DIR_ENV] = str(tmp / "run")
-    from tuf_control.agent.store import STATE_DIR_ENV
+    from asusius.agent.store import STATE_DIR_ENV
     os.environ[STATE_DIR_ENV] = str(tmp / "state")
-    os.environ["TUF_CONTROL_AGENT_NOTIFY"] = "0"
+    os.environ["ASUSIUS_AGENT_NOTIFY"] = "0"
     long_mode = mode == "long"
     if long_mode:
         patch_long_text(root)
     if mode == "empty":
-        from tuf_control.telemetry import fake
+        from asusius.telemetry import fake
         orig_ensure = fake.ensure
 
         def ensure_stripped(r):  # a laptop that exposes none of the ASUS or sensor files
@@ -336,7 +336,7 @@ def child(job: dict) -> int:
         fake.FakeWorld.advance = lambda self, now: None
         strip_hardware(root)
     if mode == "gpu-lost":
-        from tuf_control.telemetry.gpu_nvidia import NvidiaGpu
+        from asusius.telemetry.gpu_nvidia import NvidiaGpu
         original_sample = NvidiaGpu.sample
 
         def lost_sample(gpu, now, vals, info):
@@ -349,7 +349,7 @@ def child(job: dict) -> int:
     if not real:
         sh.seed_agent_demo()
     if long_mode:
-        from tuf_control.agent.tools import AgentService
+        from asusius.agent.tools import AgentService
         svc = AgentService()
         svc.set_client("an-agent-client-with-a-really-long-name-that-just-keeps-going-on", "1")
         svc.call("get_status", {})
@@ -363,8 +363,8 @@ def child(job: dict) -> int:
     if mode == "rtl":
         Gtk.init()
         Gtk.Widget.set_default_direction(Gtk.TextDirection.RTL)
-    from tuf_control.ui.app import TufControlApp
-    app = TufControlApp()
+    from asusius.ui.app import AsusiusApp
+    app = AsusiusApp()
     if mode == "scale":
         def _scale(_a):
             Gtk.Settings.get_default().set_property("gtk-xft-dpi", int(96 * 1.5 * 1024))
@@ -474,8 +474,6 @@ def child(job: dict) -> int:
             tick()
             yield 700
         pages = [p for p in (job["pages"].split(",") if job["pages"] else PAGES) if p in win.pages]
-        if job.get("quick") and not job["pages"]:
-            pages = pages
         if mode == "ppt":
             pages = [p for p in ("performance", "dashboard") if p in pages]
 
@@ -644,7 +642,7 @@ def child(job: dict) -> int:
 
     def updates_states(win, aud, frame):
         """Exercise real UI state transitions against the fake transaction backend."""
-        from tuf_control.updates.fake import FAKE_PENDING_ENV
+        from asusius.updates.fake import FAKE_PENDING_ENV
         up = win.pages["updates"]
         for _ in range(40):
             if up.report is not None and not up.busy:
@@ -684,7 +682,7 @@ def child(job: dict) -> int:
             yield 150
             aud.audit("updates:history", hist, png=frame())
         # A service failure is not proof that there are no updates.
-        from tuf_control.updates.model import Report, SourceResult
+        from asusius.updates.model import Report, SourceResult
         saved = up.report
         up.report = Report(checked_ts=time.time(), sources=[SourceResult(
             "apt", error="PackageKit did not return its package list")], fake=True)
@@ -783,7 +781,7 @@ def child(job: dict) -> int:
         fans._reset()
         yield from dialog_pass(win, aud, "dialog:fans-reset")
         # GPU switch + banner
-        from tuf_control.core import GpuMode
+        from asusius.core import GpuMode
         win.show_page("gpu")
         yield 500
         gpu = win.pages["gpu"]
@@ -918,7 +916,7 @@ def biggest_scrolled(root):
 
 
 def seed_audit_rows(n: int) -> None:
-    from tuf_control.agent.tools import AgentService
+    from asusius.agent.tools import AgentService
     svc = AgentService()
     svc.set_client("log-filler", "1")
     for i in range(n):
@@ -927,7 +925,7 @@ def seed_audit_rows(n: int) -> None:
 
 def patch_long_text(root: Path) -> None:
     """80-character process names, a very long GPU / disk model, mount and interface."""
-    from tuf_control.telemetry import fake
+    from asusius.telemetry import fake
     longname = "an-extremely-long-process-name-that-never-seems-to-end-and-keeps-going-on-and-on"
     fake.PROCS[:] = [
         (p[0], p[1], p[2], (f"/opt/{longname}/bin/{longname}" if p[0] in (2101, 3488, 2610)
@@ -988,8 +986,8 @@ def main() -> int:
     p.add_argument("--no-scope", action="store_true", help="skip the systemd-run memory cap")
     p.add_argument("--list", action="store_true")
     args = p.parse_args()
-    if os.environ.get("TUF_QA_JOB") and args.child:
-        return child(json.loads(os.environ["TUF_QA_JOB"]))
+    if os.environ.get("ASUSIUS_QA_JOB") and args.child:
+        return child(json.loads(os.environ["ASUSIUS_QA_JOB"]))
     if args.pages:
         unknown = set(args.pages.split(",")) - set(PAGES)
         if unknown:

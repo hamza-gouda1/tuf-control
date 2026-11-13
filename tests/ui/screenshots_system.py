@@ -6,7 +6,7 @@
     python3 tests/ui/screenshots_system.py [--out docs/screenshots] [--schemes dark,light]
 
 Same machinery as screenshots.py (private D-Bus session, `mutter --headless`, off-screen
-rendering); TUF_CONTROL_FAKE_ROOT is always set, so the update sources are the fixed fake
+rendering); ASUSIUS_FAKE_ROOT is always set, so the update sources are the fixed fake
 set, the services backend is in-memory, and every "install" or "stop" lands in a log in the
 temporary tree. Nothing on the machine is updated or changed.
 """
@@ -29,7 +29,7 @@ def _seed_history() -> None:
     content: one run from this app, one update installed outside it."""
     import time
 
-    from tuf_control.updates import history
+    from asusius.updates import history
     now = time.time()
     history.append({
         "start": now - 2 * 86400, "end": now - 2 * 86400 + 640, "trigger": "manual",
@@ -49,12 +49,12 @@ def _seed_history() -> None:
     history.append({
         "start": now - 86400 - 3600, "end": now - 86400, "trigger": "detected",
         "duration_s": 0.0, "sources": ["apt"], "cancelled": False, "reboot": False,
-        "summary": "1 updated outside TUF Control",
+        "summary": "1 updated outside Asusius",
         "items": [
             {"id": "apt:firefox:amd64", "source": "apt", "name": "firefox",
              "old": "1:1snap1-0ubuntu4", "new": "1:1snap1-0ubuntu5", "offered": "1:1snap1-0ubuntu5",
              "result": "installed",
-             "reason": "installed outside TUF Control (unattended-upgrades, GNOME Software "
+             "reason": "installed outside Asusius (unattended-upgrades, GNOME Software "
                        "or a terminal); the installed version was verified"}]})
 
 
@@ -66,9 +66,9 @@ def inner(args) -> int:
     gi.require_version("Graphene", "1.0")
     from gi.repository import Adw, GLib, Graphene, Gsk, Gtk
 
-    from tuf_control.automation.config import CONFIG_DIR_ENV, RUNTIME_DIR_ENV
-    from tuf_control.backends.fake import build_fake_tree
-    from tuf_control.controller import FAKE_ROOT_ENV
+    from asusius.automation.config import CONFIG_DIR_ENV, RUNTIME_DIR_ENV
+    from asusius.backends.fake import build_fake_tree
+    from asusius.controller import FAKE_ROOT_ENV
 
     scheme = os.environ["TUF_SHOT_CHILD"]
     tmp = Path(tempfile.mkdtemp(prefix="tuf-shot-sys-"))
@@ -76,17 +76,17 @@ def inner(args) -> int:
     os.environ[FAKE_ROOT_ENV] = str(root)
     os.environ[CONFIG_DIR_ENV] = str(tmp / "config")
     os.environ[RUNTIME_DIR_ENV] = str(tmp / "run")
-    from tuf_control.agent.store import STATE_DIR_ENV
+    from asusius.agent.store import STATE_DIR_ENV
     os.environ[STATE_DIR_ENV] = str(tmp / "state")
-    os.environ["TUF_CONTROL_AGENT_NOTIFY"] = "0"
+    os.environ["ASUSIUS_AGENT_NOTIFY"] = "0"
     # the fake run reports one still-pending item (the kernel meta that needs new
     # packages) so the verified result and the history show the honest outcome
-    os.environ["TUF_CONTROL_FAKE_PENDING"] = "apt:linux-image-generic:amd64"
-    # a fresh cached report, as tuf-controld would have left it twenty minutes ago
+    os.environ["ASUSIUS_FAKE_PENDING"] = "apt:linux-image-generic:amd64"
+    # a fresh cached report, as asusiusd would have left it twenty minutes ago
     import time
 
-    from tuf_control.updates import check, history
-    from tuf_control.updates.model import Report
+    from asusius.updates import check, history
+    from asusius.updates.model import Report
     rep = check.collect(now=time.time() - 20 * 60)
 
     def put(d):
@@ -97,8 +97,8 @@ def inner(args) -> int:
     out.mkdir(parents=True, exist_ok=True)
     w, h = (int(x) for x in args.size.split("x"))
 
-    from tuf_control.ui.app import TufControlApp
-    app = TufControlApp()
+    from asusius.ui.app import AsusiusApp
+    app = AsusiusApp()
     state = {"failed": False}
 
     def render(widget, path: Path) -> None:

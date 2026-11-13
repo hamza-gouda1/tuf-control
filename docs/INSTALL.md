@@ -8,20 +8,20 @@ Nothing is downloaded by the installer.
 
     ./install.sh --dry-run     # see what would happen
     ./install.sh               # copies into ~/.local, adds launchers and the .desktop file
-    tuf-control status         # ~/.local/bin must be on PATH
-    tuf-control-gui
+    asusius status         # ~/.local/bin must be on PATH
+    asusius-gui
 
-Files: `~/.local/share/tuf-control/`, `~/.local/bin/tuf-control{,-gui}`, desktop entry, icon,
+Files: `~/.local/share/asusius/`, `~/.local/bin/asusius{,-gui}`, desktop entry, icon,
 metainfo, and the extension in `~/.local/share/gnome-shell/extensions/`. Files that already exist
-and are not ours are backed up to `~/.local/state/tuf-control/backup/` and restored by
-`./uninstall.sh` (or `./install.sh --uninstall`). Skip the extension with `--no-extension`. The per-user `tuf-controld` service is installed
+and are not ours are backed up to `~/.local/state/asusius/backup/` and restored by
+`./uninstall.sh` (or `./install.sh --uninstall`). Skip the extension with `--no-extension`. The per-user `asusiusd` service is installed
 and started by default (`--no-daemon` skips it). Its original unit and enabled/active state
-are restored on uninstall. `TUF_CONTROL_NO_SYSTEMD=1` installs files without contacting the
+are restored on uninstall. `ASUSIUS_NO_SYSTEMD=1` installs files without contacting the
 manager, for isolated tests. `XDG_CONFIG_HOME` is respected for the user unit.
 
 ## Quick Settings extension
 
-    gnome-extensions enable tuf-control-quick@hamza-gouda
+    gnome-extensions enable asusius-quick@hamza-gouda
 
 GNOME Shell 46 only. On Wayland a new extension appears after you log out and in. It talks to
 `xyz.ljones.Asusd` and falls back to power-profiles-daemon. It never sets colours: it follows the
@@ -35,7 +35,7 @@ reads at startup is not announced, and several presses within 300 ms show only t
 ## App keys with Focus Keys (recommended)
 
 A GNOME custom shortcut runs a command. On Wayland a command cannot hand the focus to an app that
-is already running, so pressing the Armoury key with TUF Control open only gives a "TUF Control is
+is already running, so pressing the Armoury key with Asusius open only gives a "Asusius is
 ready" notification. The `focus-keys@hamza-gouda` extension from
 [bordeaux-gnome](https://github.com/hamza-gouda1/bordeaux-gnome) has the shell raise the window
 instead (on any workspace), or start the app when it is not running.
@@ -45,17 +45,17 @@ When it is installed for your user **and enabled** (bordeaux-gnome's `./install.
 
 | Key | Opens |
 | --- | --- |
-| XF86Launch3 (Armoury Crate key, or the `--hotkey` you chose) | TUF Control |
-| XF86Launch1 (the other Armoury key code, only with the default `--hotkey`) | TUF Control |
+| XF86Launch3 (Armoury Crate key, or the `--hotkey` you chose) | Asusius |
+| XF86Launch1 (the other Armoury key code, only with the default `--hotkey`) | Asusius |
 | Copilot key, `<Shift><Super>XF86TouchpadOff` (`--copilot-key`) | Claude (`com.anthropic.Claude.desktop`) |
 
 The mic key stays a custom shortcut (`playerctl play-pause` is a command, not an app). Entries you
 already have are kept; a key used by one of your own custom shortcuts is skipped with a note. Our
-entries are listed in `~/.local/state/tuf-control/backup/focus-keys.added` and `--uninstall`
+entries are listed in `~/.local/state/asusius/backup/focus-keys.added` and `--uninstall`
 removes exactly those (the list as it was before is in `focus-keys.orig`).
 
-**Migration from an earlier install:** the custom shortcuts "TUF Control" (`.../tuf-control/`),
-"Claude" (`.../tuf-control-claude/`) and the XF86Launch1 shortcut that was retargeted from the
+**Migration from an earlier install:** the custom shortcuts "Asusius" (`.../asusius/`),
+"Claude" (`.../asusius-claude/`) and the XF86Launch1 shortcut that was retargeted from the
 old "ASUS Armoury Control Center" are removed, so the extension is the only owner of those keys
 (the shell gives each key to one grab). `takeover.tsv` is kept, so `--uninstall` still restores
 your original "ASUS Armoury Control Center" shortcut and puts it back in the list.
@@ -67,12 +67,12 @@ back.
 
 ## Armoury Crate key shortcut (without Focus Keys)
 
-`./install.sh` also adds a GNOME custom shortcut named "TUF Control" that runs
-`~/.local/bin/tuf-control-gui` on **XF86Launch3**. The app has a fixed application id, so
+`./install.sh` also adds a GNOME custom shortcut named "Asusius" that runs
+`~/.local/bin/asusius-gui` on **XF86Launch3**. The app has a fixed application id, so
 pressing the key again does not start a second copy (on Wayland GNOME may only notify you that it
 is ready; see Focus Keys above). Your other
-custom shortcuts are kept: the entry `.../custom-keybindings/tuf-control/` is appended to the list,
-the previous list is saved to `~/.local/state/tuf-control/backup/custom-keybindings.list`, and
+custom shortcuts are kept: the entry `.../custom-keybindings/asusius/` is appended to the list,
+the previous list is saved to `~/.local/state/asusius/backup/custom-keybindings.list`, and
 `--uninstall` removes only our entry. If another custom shortcut already uses the key, ours is not
 added. Options: `--no-hotkey` skips it, `--hotkey=XF86Launch1` picks another key.
 
@@ -97,9 +97,9 @@ Most settings go through `asusd`, which already holds the privileges. Direct sys
 (for example without `asusd`) may be refused with EACCES; an allow-listed helper can then be
 used through `pkexec`. `./install.sh --system` prints the exact commands, it never runs them:
 
-    sudo install -Dm0755 src/tuf_control/helper.py /usr/libexec/tuf-control-helper
-    sudo install -Dm0644 packaging/polkit/io.github.hamzagouda.tuf-control.policy \
-        /usr/share/polkit-1/actions/io.github.hamzagouda.tuf-control.policy
+    sudo install -Dm0755 src/asusius/helper.py /usr/libexec/asusius-helper
+    sudo install -Dm0644 packaging/polkit/io.github.hamzagouda.asusius.policy \
+        /usr/share/polkit-1/actions/io.github.hamzagouda.asusius.policy
 
 The helper accepts only `write <path> <value>` for: `platform_profile`, asus-armoury
 `attributes/*/current_value` (checked against the attribute's own min/max/possible_values),
@@ -110,4 +110,4 @@ The helper accepts only `write <path> <value>` for: `platform_profile`, asus-arm
 ## Uninstall
 
     ./uninstall.sh
-    sudo rm -f /usr/libexec/tuf-control-helper /usr/share/polkit-1/actions/io.github.hamzagouda.tuf-control.policy
+    sudo rm -f /usr/libexec/asusius-helper /usr/share/polkit-1/actions/io.github.hamzagouda.asusius.policy

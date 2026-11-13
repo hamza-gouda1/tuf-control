@@ -10,15 +10,15 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tuf_control import cli
-from tuf_control.agent.approvals import ApprovalQueue
-from tuf_control.agent.audit import AuditLog
-from tuf_control.agent.mcp import LATEST, McpServer, serve
-from tuf_control.agent.store import STATE_DIR_ENV
-from tuf_control.agent.tools import TOOLS, AgentService
-from tuf_control.automation.config import CONFIG_DIR_ENV, RUNTIME_DIR_ENV
-from tuf_control.backends.fake import build_fake_tree
-from tuf_control.controller import FAKE_ROOT_ENV
+from asusius import cli
+from asusius.agent.approvals import ApprovalQueue
+from asusius.agent.audit import AuditLog
+from asusius.agent.mcp import LATEST, McpServer, serve
+from asusius.agent.store import STATE_DIR_ENV
+from asusius.agent.tools import TOOLS, AgentService
+from asusius.automation.config import CONFIG_DIR_ENV, RUNTIME_DIR_ENV
+from asusius.backends.fake import build_fake_tree
+from asusius.controller import FAKE_ROOT_ENV
 
 SRC = Path(__file__).resolve().parents[1] / "src"
 
@@ -42,7 +42,7 @@ class Env(unittest.TestCase):
         self.root = build_fake_tree(self.tmp / "root")
         self.env = {FAKE_ROOT_ENV: str(self.root), CONFIG_DIR_ENV: str(self.tmp / "cfg"),
                     STATE_DIR_ENV: str(self.tmp / "state"),
-                    RUNTIME_DIR_ENV: str(self.tmp / "run"), "TUF_CONTROL_AGENT_NOTIFY": "0"}
+                    RUNTIME_DIR_ENV: str(self.tmp / "run"), "ASUSIUS_AGENT_NOTIFY": "0"}
         for k, v in self.env.items():
             old = os.environ.get(k)
             self.addCleanup(lambda k=k, old=old: os.environ.pop(k, None) if old is None
@@ -64,7 +64,7 @@ class Protocol(Env):
         res = r["result"]
         self.assertEqual((r["jsonrpc"], r["id"]), ("2.0", 1))
         self.assertEqual(res["protocolVersion"], LATEST)
-        self.assertEqual(res["serverInfo"]["name"], "tuf-control")
+        self.assertEqual(res["serverInfo"]["name"], "asusius")
         self.assertEqual(set(res["capabilities"]), {"tools", "resources", "prompts"})
         self.assertIn("dry_run", res["instructions"])
         self.assertEqual(self.svc.client, "conformance/0.1")
@@ -147,15 +147,15 @@ class Protocol(Env):
     def test_resources(self):
         self.init()
         res = self.srv.handle(req(2, "resources/list"))["result"]["resources"]
-        self.assertEqual({r["uri"] for r in res}, {"tuf://status", "tuf://capabilities",
-                                                   "tuf://docs/safety",
-                                                   "tuf://telemetry/summary"})
-        for uri in ("tuf://status", "tuf://capabilities", "tuf://telemetry/summary"):
+        self.assertEqual({r["uri"] for r in res}, {"asusius://status", "asusius://capabilities",
+                                                   "asusius://docs/safety",
+                                                   "asusius://telemetry/summary"})
+        for uri in ("asusius://status", "asusius://capabilities", "asusius://telemetry/summary"):
             r = self.srv.handle(req(3, "resources/read", {"uri": uri}))
             c = r["result"]["contents"][0]
             self.assertEqual((c["uri"], c["mimeType"]), (uri, "application/json"))
             json.loads(c["text"])
-        doc = self.srv.handle(req(4, "resources/read", {"uri": "tuf://docs/safety"}))
+        doc = self.srv.handle(req(4, "resources/read", {"uri": "asusius://docs/safety"}))
         self.assertIn("read-only", doc["result"]["contents"][0]["text"])
         r = self.srv.handle(req(5, "resources/read", {"uri": "file:///etc/passwd"}))
         self.assertEqual(r["error"]["code"], -32002)
@@ -250,18 +250,18 @@ class Subprocess(Env):
                                       "arguments": {"sections": ["cpu", "fans"]}}),
                 req(4, "tools/call", {"name": "set_platform_profile",
                                       "arguments": {"profile": "quiet", "dry_run": False}}),
-                req(5, "resources/read", {"uri": "tuf://status"}),
+                req(5, "resources/read", {"uri": "asusius://status"}),
                 req(6, "prompts/get", {"name": "optimise-battery"}),
                 req(7, "nope/nope")]
         data = ("\n".join(json.dumps(m) for m in msgs) + "\nnot json\n").encode()
-        p = subprocess.run([sys.executable, "-m", "tuf_control", "mcp"], input=data,
+        p = subprocess.run([sys.executable, "-m", "asusius", "mcp"], input=data,
                            capture_output=True, env=env, timeout=60)
         self.assertEqual(p.returncode, 0, p.stderr.decode())
         frames = [json.loads(line) for line in p.stdout.decode().splitlines()]
         self.assertTrue(all(f.get("jsonrpc") == "2.0" for f in frames))
         by_id = {f["id"]: f for f in frames}
         self.assertEqual([f["id"] for f in frames], [1, 2, 3, 4, 5, 6, 7, None])
-        self.assertEqual(by_id[1]["result"]["serverInfo"]["name"], "tuf-control")
+        self.assertEqual(by_id[1]["result"]["serverInfo"]["name"], "asusius")
         self.assertEqual(len(by_id[2]["result"]["tools"]), len(TOOLS))
         tel = by_id[3]["result"]["structuredContent"]
         self.assertIn("usage_pct", tel["cpu"])
@@ -279,11 +279,11 @@ class Subprocess(Env):
 
     def test_entry_point_print_config(self):
         env = {**os.environ, **self.env, "PYTHONPATH": str(SRC)}
-        p = subprocess.run([sys.executable, "-c", "import sys; from tuf_control.agent.mcp "
+        p = subprocess.run([sys.executable, "-c", "import sys; from asusius.agent.mcp "
                             "import main; sys.exit(main(['--print-config']))"],
                            capture_output=True, env=env, timeout=30)
         self.assertEqual(p.returncode, 0)
-        cfg = json.loads(p.stdout)["mcpServers"]["tuf-control"]
+        cfg = json.loads(p.stdout)["mcpServers"]["asusius"]
         self.assertTrue(cfg["command"])
         self.assertIn("mcp", cfg["args"])
 

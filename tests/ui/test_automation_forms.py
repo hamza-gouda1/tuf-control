@@ -4,9 +4,9 @@
 import unittest
 from types import SimpleNamespace
 
-from tuf_control.automation import forms
-from tuf_control.automation.rules import Rule
-from tuf_control.effects.preview import EffectPreview
+from asusius.automation import forms
+from asusius.automation.rules import Rule
+from asusius.effects.preview import EffectPreview
 
 
 class FormsTests(unittest.TestCase):

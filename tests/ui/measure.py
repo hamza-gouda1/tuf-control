@@ -111,23 +111,23 @@ def inner(args) -> int:
     fake = os.environ.get("TUF_MEASURE_FAKE")
     if fake:
         sys.path.insert(0, str(SRC))
-        from tuf_control.backends.fake import build_fake_tree
-        os.environ["TUF_CONTROL_FAKE_ROOT"] = str(build_fake_tree(Path(fake) / "root"))
-        from tuf_control.automation.config import CONFIG_DIR_ENV, RUNTIME_DIR_ENV
+        from asusius.backends.fake import build_fake_tree
+        os.environ["ASUSIUS_FAKE_ROOT"] = str(build_fake_tree(Path(fake) / "root"))
+        from asusius.automation.config import CONFIG_DIR_ENV, RUNTIME_DIR_ENV
         os.environ[CONFIG_DIR_ENV] = str(Path(fake) / "config")
         os.environ[RUNTIME_DIR_ENV] = str(Path(fake) / "run")
     import gi
     gi.require_version("Gtk", "4.0")
     from gi.repository import GLib
 
-    from tuf_control.ui.app import TufControlApp
-    app = TufControlApp()
+    from asusius.ui.app import AsusiusApp
+    app = AsusiusApp()
     result: dict = {"renderer": args.renderer, "fake": bool(fake), "pid": os.getpid()}
 
     def keyboard_steps(win):
         """Keyboard page CPU: hardware effect, static software effect, animated one."""
-        from tuf_control.effects.registry import EFFECTS
-        from tuf_control.ui import widgets
+        from asusius.effects.registry import EFFECTS
+        from asusius.ui import widgets
         draws = {"n": 0}
         orig = widgets.KeyboardPreview._draw
 

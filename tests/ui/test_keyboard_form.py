@@ -4,10 +4,10 @@
 palettes, the Two colours switch for single-colour (TUF) firmware, and what Apply writes."""
 import unittest
 
-from tuf_control.backends.fake import FakeBackend, build_fake_tree
-from tuf_control.controller import Controller
-from tuf_control.core import KbdEffect
-from tuf_control.ui import viewmodels as vm
+from asusius.backends.fake import FakeBackend, build_fake_tree
+from asusius.controller import Controller
+from asusius.core import KbdEffect
+from asusius.ui import viewmodels as vm
 
 WINE, GOLD, BLUE = (142, 42, 68), (201, 174, 134), (0, 0, 255)
 

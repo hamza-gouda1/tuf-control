@@ -5,9 +5,9 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from tuf_control import helper
-from tuf_control.backends.util import FallbackWriter, RecordingWriter
-from tuf_control.core import PrivilegeRequired
+from asusius import helper
+from asusius.backends.util import FallbackWriter, RecordingWriter
+from asusius.core import PrivilegeRequired
 
 
 def mk(root: Path, rel: str, text: str = "0") -> Path:

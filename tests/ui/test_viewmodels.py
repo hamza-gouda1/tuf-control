@@ -5,9 +5,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tuf_control.backends.fake import FakeBackend, build_fake_tree
-from tuf_control.controller import Controller
-from tuf_control.core import (
+from asusius.backends.fake import FakeBackend, build_fake_tree
+from asusius.controller import Controller
+from asusius.core import (
     BackendUnavailable,
     FanCurve,
     GpuAction,
@@ -18,7 +18,7 @@ from tuf_control.core import (
     Profile,
     ValidationError,
 )
-from tuf_control.ui import viewmodels as vm
+from asusius.ui import viewmodels as vm
 
 CPU = FanCurve.from_lists("CPU", [39, 48, 51, 55, 62, 71, 80, 97],
                           [28, 53, 65, 116, 158, 180, 217, 255])
