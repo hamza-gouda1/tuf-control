@@ -324,7 +324,8 @@ class NotificationTests(unittest.TestCase):
         from gi.repository import Gio
         app = mock.Mock()
         app.list_actions.return_value = ["updates"]
-        with mock.patch.object(Gio.DesktopAppInfo, "new", return_value=app):
+        with mock.patch.object(notify.shutil, "which", return_value=None), \
+                mock.patch.object(Gio.DesktopAppInfo, "new", return_value=app):
             notify._launch_app()
         app.launch_action.assert_called_once_with("updates", None)
 

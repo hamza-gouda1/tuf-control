@@ -10,7 +10,7 @@ trap 'rm -rf "$T"' EXIT
 export HOME=$T/home XDG_DATA_HOME=$T/home/.local/share XDG_STATE_HOME=$T/home/.local/state
 unset ASUSIUS_BIN_DIR DBUS_SESSION_BUS_ADDRESS XDG_CURRENT_DESKTOP XDG_SESSION_TYPE
 # never talk to the real systemd user manager from the tests
-export ASUSIUS_NO_SYSTEMD=1
+export ASUSIUS_NO_SYSTEMD=1 ASUSIUS_SKIP_DEP_CHECK=1
 mkdir -p "$HOME/.local/bin"
 # GNOME shortcuts go to a keyfile settings backend inside the temp HOME, never the real dconf
 export GSETTINGS_BACKEND=keyfile XDG_CONFIG_HOME=$T/home/.config
@@ -347,7 +347,7 @@ case "$*" in
 esac
 STUB
 chmod +x "$T/bad-py-bin/python3"
-if PATH="$T/bad-py-bin:$PATH" "$ROOT/install.sh" >"$T/dep.out" 2>"$T/dep.err"; then
+if ASUSIUS_SKIP_DEP_CHECK='' PATH="$T/bad-py-bin:$PATH" "$ROOT/install.sh" >"$T/dep.out" 2>"$T/dep.err"; then
     fail "missing dependency check did not fail"
 fi
 grep -q "sudo apt install" "$T/dep.err" || fail "apt install hint missing"
