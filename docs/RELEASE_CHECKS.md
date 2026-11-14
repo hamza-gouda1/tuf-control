@@ -50,11 +50,8 @@ workflow (or upload directly), then pin `sha256sums` in `packaging/arch/PKGBUILD
 the AUR package. Keep new development under `[Unreleased]`; published tags and archives remain
 immutable.
 
-### GitHub maintenance notes (from `v0.2.0` release audit)
+### GitHub maintenance notes (resolved in `v0.2.1`)
 
-- **`v0.2.0` GitHub Release (`7b0caa3`)**: tagged 4 commits behind `main` (`5241630`) while CI
-  (`brand-palette` + `Unit tests`) was failing, and its release notes still reference
-  `tuf-control-0.2.0.tar.gz` with a mismatched SHA256 checksum. Update/mark `v0.2.0` superseded
-  once `v0.2.1` is published from merged, green `main`.
-- **Open GitHub Issue `#3`**: still advises users to run `tuf-control capabilities --json`;
-  update the comment/instructions to `asusius capabilities --json`.
+- **`v0.2.0` GitHub Release (`7b0caa3`)**: superseded by **`v0.2.1`**, with `v0.2.0`
+  release notes updated to reference `asusius-0.2.0.tar.gz` and its matching SHA-256.
+- **GitHub Issue `#3`**: updated to instruct testers to run `asusius capabilities --json`.

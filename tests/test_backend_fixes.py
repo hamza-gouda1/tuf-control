@@ -703,6 +703,7 @@ class UpdatesFixTests(unittest.TestCase):
             self.assertIn("6.11.7-arch1-1", inst)
             self.assertIsNotNone(system.kernel_item("6.11.5-300.fc41.x86_64", inst))
             self.assertIsNotNone(system.kernel_item("6.11.6-arch1-1", inst))
+        self.assertIsNone(system._UKI_RE.search("0.0.0-" + "+-" * 500 + "!"))
 
     def test_distro_pkgs_and_agent_tool_source_filter(self):
         from asusius.updates import agent_tool, check, distro_pkgs

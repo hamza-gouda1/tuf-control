@@ -17,7 +17,7 @@ _FEDORA_TAIL = re.compile(r"^(\d+(?:\.\d+)*)\.(fc\d+|el\d+(?:_\d+)?)\.(.+)$")
 _NUM_TAIL = re.compile(r"^(\d+(?:\.\d+)*)(?:-(.+))?$")
 _KOTD_TAIL = re.compile(r"^(\d+(?:\.\d+)*)\.[A-Za-z0-9_.]+-(.+)$")
 _NAMED_TAIL = re.compile(r"^([A-Za-z]+)(\d+(?:\.\d+)*)(?:-(\d+))?(?:-(.+))?$")
-_UKI_RE = re.compile(r"(\d+\.\d+\.\d+(?:-[A-Za-z0-9_+.-]+)*)$")
+_UKI_RE = re.compile(r"(\d+\.\d+\.\d+(?:-[A-Za-z0-9_+.-]+)?)$")
 
 
 def parse_kernel(release: str) -> tuple[tuple[int, ...], str] | None:
