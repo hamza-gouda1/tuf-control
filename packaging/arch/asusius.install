@@ -1,0 +1,15 @@
+post_install() {
+  echo ":: Asusius user setup:"
+  echo "   Enable background automation & keyboard effects:"
+  echo "     systemctl --user enable --now asusiusd.service"
+  echo "   Enable the GNOME Quick Settings / touchpad gestures extension:"
+  echo "     gnome-extensions enable asusius-quick@hamza-gouda"
+  echo "   (On Wayland, log out and back in first if GNOME Shell was already running.)"
+  echo "   For ASUS hardware controls (fans, RGB, charge limit), install and enable asusd:"
+  echo "     sudo systemctl enable --now asusd"
+}
+
+post_upgrade() {
+  echo ":: Asusius upgraded. Restart the user daemon and GNOME session if needed:"
+  echo "     systemctl --user try-restart asusiusd.service"
+}

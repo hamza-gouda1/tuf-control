@@ -33,5 +33,28 @@ they are not a controlled comparison with another application.
 
 Before tagging, move shipped changes from `[Unreleased]` to a dated version section in
 `CHANGELOG.md` and update the AppStream `<releases>` version/date to the publication date.
-Keep new development under `[Unreleased]`. Run the complete gates on the exact commit to
-be tagged, then use a new annotated tag; published tags and archives remain immutable.
+Verify version sync (`pyproject.toml`, `src/asusius/__init__.py`, `packaging/arch/PKGBUILD`,
+`data/Asusius.metainfo.xml`, `CHANGELOG.md`), desktop/AppStream validation, `python3 -m build`,
+unit tests, `ruff`, `shellcheck`, `tests/test_install.sh`, and `gjs` extension tests on the exact
+commit to be tagged (and make sure CI passes on GitHub before publishing).
+
+Then create a new annotated tag (`git tag -a vX.Y.Z -m "Asusius vX.Y.Z"`), build the clean
+deterministic source archive:
+
+    rm -rf dist
+    python3 tools/release_archive.py --tag vX.Y.Z --out dist
+    (cd dist && sha256sum -c SHA256SUMS)
+
+Publish the `dist/asusius-X.Y.Z.tar.gz` and `dist/SHA256SUMS` assets via the `Release archives`
+workflow (or upload directly), then pin `sha256sums` in `packaging/arch/PKGBUILD` before updating
+the AUR package. Keep new development under `[Unreleased]`; published tags and archives remain
+immutable.
+
+### GitHub maintenance notes (from `v0.2.0` release audit)
+
+- **`v0.2.0` GitHub Release (`7b0caa3`)**: tagged 4 commits behind `main` (`5241630`) while CI
+  (`brand-palette` + `Unit tests`) was failing, and its release notes still reference
+  `tuf-control-0.2.0.tar.gz` with a mismatched SHA256 checksum. Update/mark `v0.2.0` superseded
+  once `v0.2.1` is published from merged, green `main`.
+- **Open GitHub Issue `#3`**: still advises users to run `tuf-control capabilities --json`;
+  update the comment/instructions to `asusius capabilities --json`.

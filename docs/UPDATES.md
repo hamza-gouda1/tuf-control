@@ -113,8 +113,9 @@ enabled). Selecting a unit shows its description, unit file, main PID and since-
 Start / Stop / Restart / Enable / Disable.
 
 * Listing: one `ListUnits` D-Bus call per refresh (every 3 s, only while the page is visible;
-  the rows are dropped when it is hidden), `ListUnitFiles` every tenth refresh, PID and memory
-  from the unit's cgroup files. No root.
+  the rows are dropped when it is hidden), `ListUnitFiles` on first load, after unit file
+  enable/disable changes, and every tenth refresh (if a `ListUnitFiles` call fails, previously
+  cached file states are preserved), plus PID and memory from the unit's cgroup files. No root.
 * Actions: systemd's own D-Bus API (`StartUnit`, `StopUnit`, `RestartUnit`,
   `EnableUnitFiles`/`DisableUnitFiles` + `Reload`); user units on the session bus, system units
   on the system bus with interactive authorisation, so systemd asks polkit. Every action has a

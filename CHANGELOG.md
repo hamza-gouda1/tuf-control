@@ -4,6 +4,40 @@ All notable changes to this project. Format follows Keep a Changelog; versions f
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-11-14
+
+### Added
+- Brand assets: refreshed application icon, GNOME symbolic icon
+  (`io.github.hamzagouda.Asusius-symbolic.svg`), and dark/light README hero headers.
+- Upfront runtime dependency checks in `install.sh` (`python3 >= 3.12`, GTK 4,
+  libadwaita, PangoCairo, `glib-compile-schemas`) with per-distro package install hints.
+- Packaging and CI gates for desktop/AppStream validation, wheel/sdist build checks,
+  and version synchronization across package metadata, AppStream, Arch `PKGBUILD`,
+  and `asusius.__version__`.
+- Optional `[qa]` extra in `pyproject.toml` (including `Pillow`) and Arch `asusius.install`
+  post-install setup instructions.
+
+### Changed
+- **Safer keybind defaults**: `install.sh` no longer binds `XF86AudioMicMute` or the
+  Copilot key unless `--with-mic-key` or `--with-copilot-key` is passed explicitly.
+- GNOME Shell extension installation checks the active desktop environment, attempts
+  `gnome-extensions enable` when already registered, and gives explicit Wayland re-login
+  guidance instead of silently skipping missing schema compilers.
+- Arch `PKGBUILD` moves `asusctl` to `optdepends` alongside `gst-plugins-base`,
+  `gst-python`, `playerctl`, and `python-numpy`.
+- Expanded GNOME Shell compatibility metadata and refreshed documentation for hardware
+  compatibility, agent grants, and release verification.
+
+### Fixed
+- `asusius-gui` wrapper now executes `python3 -m asusius.ui "$@"` cleanly instead of
+  running `-c` (fixing `sys.argv[0]` / process metadata).
+- `install.sh` substitutes the chosen `--bin-dir` into `asusiusd.service`, excludes
+  `.mimosa`/`__pycache__` when copying sources, guards `systemctl --user` in
+  non-systemd/container environments, installs symbolic icons cleanly, and warns on
+  leftover elevated helpers during `--uninstall`.
+- `pyproject.toml` bundles UI SVG icon assets in package data; CI avoids PEP 668
+  `--user` pip failures on Ubuntu 24.04 and handles fork PR checkouts gracefully.
+
 ## [0.2.0] - 2026-11-12
 
 ### Changed

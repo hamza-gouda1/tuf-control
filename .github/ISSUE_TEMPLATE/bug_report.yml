@@ -12,7 +12,7 @@ body:
     id: stack
     attributes:
       label: Software
-      description: Distribution, kernel, asusd version (`asusctl --version`), GNOME Shell version
+      description: "Distribution, kernel, desktop/session (`echo $XDG_CURRENT_DESKTOP $XDG_SESSION_TYPE`), GNOME Shell version, asusd version (`asusctl --version`), Asusius version / install method"
     validations: {required: true}
   - type: textarea
     id: what

@@ -4,6 +4,8 @@
   <id>io.github.hamzagouda.Asusius</id>
   <metadata_license>CC0-1.0</metadata_license>
   <url type="homepage">https://github.com/hamza-gouda1/asusius</url>
+  <url type="bugtracker">https://github.com/hamza-gouda1/asusius/issues</url>
+  <url type="vcs-browser">https://github.com/hamza-gouda1/asusius</url>
   <project_license>GPL-3.0-or-later</project_license>
   <name>Asusius</name>
   <summary>Fans, power, graphics and lighting for ASUS laptops</summary>
@@ -29,18 +31,19 @@
   <screenshots>
     <screenshot type="default">
       <caption>Dashboard with live processor, graphics and battery readings</caption>
-      <image type="source">https://raw.githubusercontent.com/hamza-gouda1/asusius/v0.1.1/docs/screenshots/dashboard-dark.png</image>
+      <image type="source">https://raw.githubusercontent.com/hamza-gouda1/asusius/main/docs/screenshots/dashboard-dark.png</image>
     </screenshot>
     <screenshot>
       <caption>Performance profiles and available hardware controls</caption>
-      <image type="source">https://raw.githubusercontent.com/hamza-gouda1/asusius/v0.1.1/docs/screenshots/performance-dark.png</image>
+      <image type="source">https://raw.githubusercontent.com/hamza-gouda1/asusius/main/docs/screenshots/performance-dark.png</image>
     </screenshot>
     <screenshot>
       <caption>Keyboard lighting effects and their preview</caption>
-      <image type="source">https://raw.githubusercontent.com/hamza-gouda1/asusius/v0.1.1/docs/screenshots/keyboard-effects-dark.png</image>
+      <image type="source">https://raw.githubusercontent.com/hamza-gouda1/asusius/main/docs/screenshots/keyboard-effects-dark.png</image>
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.2.1" date="2026-11-14"/>
     <release version="0.2.0" date="2026-11-12"/>
     <release version="0.1.2" date="2026-11-07"/>
     <release version="0.1.1" date="2026-11-04"/>

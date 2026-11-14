@@ -1,19 +1,26 @@
 # Maintainer: Hamza Gouda <hraafat357@gmail.com>
 # NOT yet built or tested on Arch. Build it in a clean chroot (extra-x86_64-build) before
-# submitting to the AUR. Publish the deterministic release asset before building.
+# submitting to the AUR. Publish the deterministic release asset and set sha256sums before uploading.
 pkgname=asusius
-pkgver=0.2.0
+pkgver=0.2.1
 pkgrel=1
 pkgdesc='Control app for ASUS TUF/ROG laptops: profiles, fans, keyboard lighting, GPU mode, telemetry'
 arch=('any')
 url='https://github.com/hamza-gouda1/asusius'
 license=('GPL-3.0-or-later')
-depends=('python' 'python-gobject' 'python-cairo' 'gtk4' 'libadwaita' 'asusctl' 'polkit')
-optdepends=('gnome-shell: Quick Settings profile toggle'
-            'supergfxctl: GPU mode switching through supergfxd')
+depends=('python' 'python-gobject' 'python-cairo' 'gtk4' 'libadwaita' 'polkit')
+optdepends=('asusctl: ASUS fan curves, Aura RGB, AniMe Matrix and charge limits via asusd'
+            'supergfxctl: GPU mode switching through supergfxd'
+            'gnome-shell: Quick Settings profile toggle and multi-finger touchpad gestures'
+            'playerctl: MPRIS media control actions for touchpad gestures'
+            'gst-plugins-base: Touchpad gesture audio feedback'
+            'gst-python: Touchpad gesture audio feedback pipeline'
+            'python-numpy: Numeric/audio array helpers')
 makedepends=('glib2' 'python-build' 'python-installer' 'python-setuptools' 'python-wheel')
+install="$pkgname.install"
 source=("$url/releases/download/v$pkgver/$pkgname-$pkgver.tar.gz")
-sha256sums=('2d9cf011b088fa08c9fcae873f2dbd8cfc981bc09b1eaa81fe56b7d6bcc75964')
+# Pin exact SHA256 from dist/SHA256SUMS after tagging v$pkgver.
+sha256sums=('SKIP')
 
 build() {
   cd "$pkgname-$pkgver"
@@ -33,6 +40,10 @@ package() {
     "$pkgdir/usr/share/metainfo/io.github.hamzagouda.Asusius.metainfo.xml"
   install -Dm0644 data/icons/hicolor/scalable/apps/io.github.hamzagouda.Asusius.svg \
     "$pkgdir/usr/share/icons/hicolor/scalable/apps/io.github.hamzagouda.Asusius.svg"
+  if [[ -f data/icons/hicolor/scalable/apps/io.github.hamzagouda.Asusius-symbolic.svg ]]; then
+    install -Dm0644 data/icons/hicolor/scalable/apps/io.github.hamzagouda.Asusius-symbolic.svg \
+      "$pkgdir/usr/share/icons/hicolor/scalable/apps/io.github.hamzagouda.Asusius-symbolic.svg"
+  fi
   install -Dm0644 data/systemd/asusiusd.service \
     "$pkgdir/usr/lib/systemd/user/asusiusd.service"
 

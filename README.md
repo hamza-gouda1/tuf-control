@@ -1,9 +1,17 @@
-# Asusius
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/brand/asusius-hero-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="docs/brand/asusius-hero-light.svg">
+    <img src="docs/brand/asusius-hero-dark.svg" alt="Asusius" width="560">
+  </picture>
+</p>
 
-[![ci](https://github.com/hamza-gouda1/asusius/actions/workflows/ci.yml/badge.svg)](https://github.com/hamza-gouda1/asusius/actions/workflows/ci.yml)
-![Python 3.12](https://img.shields.io/badge/python-3.12-3776ab)
-![GTK 4 + Libadwaita](https://img.shields.io/badge/GTK%204-Libadwaita-4a86cf)
-![License](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)
+<p align="center">
+  <a href="https://github.com/hamza-gouda1/asusius/actions/workflows/ci.yml"><img src="https://github.com/hamza-gouda1/asusius/actions/workflows/ci.yml/badge.svg" alt="ci"></a>
+  <img src="https://img.shields.io/badge/python-3.12+-3776ab" alt="Python 3.12+">
+  <img src="https://img.shields.io/badge/GTK%204-Libadwaita-4a86cf" alt="GTK 4 + Libadwaita">
+  <img src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue" alt="License">
+</p>
 
 A native control app for ASUS TUF and ROG laptops on Linux: performance profile, power
 limits, fan curves, GPU mode, battery charge limit, keyboard lighting and display options,
@@ -84,8 +92,9 @@ so this table can be filled in with real results.
 | Model | Status | Notes |
 | :--- | :--- | :--- |
 | TUF Gaming F16 FX608JHR | Tested | Power limits unavailable (missing kernel table entry); everything else works |
-| Other TUF / ROG laptops with asusd | Untested | Expected to work where asusd and supergfxd expose the same D-Bus interfaces |
-| Laptops without asusd | Not supported | The app needs asusd for profiles, fans and keyboard lighting |
+| Other TUF / ROG laptops with asusd | Untested | Expected to work where `asusd` and `supergfxd` expose the same D-Bus interfaces |
+| ASUS laptops via kernel sysfs (without `asusd`) | Partial (experimental) | `platform_profile`, battery charge threshold, and supported `asus-armoury`/`asus::kbd_backlight` controls can work directly or via the optional polkit helper; full multi-point fan curves and Aura modes rely on `asusd` |
+| Generic Linux laptops (non-ASUS / no `asusd`) | Partial (Monitor, Updates, Services, Gestures) | CPU/memory/GPU/storage/network monitoring, process control, system/user services, updates, and GNOME touchpad gestures work without ASUS hardware; ASUS profile/fan/RGB/charge-limit controls remain unavailable or fall back to standard `platform_profile`/PPD |
 
 ## Limitations
 
@@ -112,33 +121,37 @@ so this table can be filled in with real results.
   development; tests simulate transactions and verify installed-version results. Firmware
   pending a restart is reported separately from a confirmed installed version.
 - The GUI and Shell integration target Wayland; X11 is untested.
-- GNOME Shell 46 is the only version the Quick Settings extension declares.
+- Hardware-tested on GNOME Shell 46 (Ubuntu 24.04); the Quick Settings extension targets GNOME Shell 45–49.
 
 ## Install
 
 Try the released GUI with simulated data first: [two-minute hardware-free quickstart](docs/QUICKSTART.md).
 
-    git clone --branch v0.2.0 --depth 1 https://github.com/hamza-gouda1/asusius.git
+    git clone --branch v0.2.1 --depth 1 https://github.com/hamza-gouda1/asusius.git
     cd asusius
     ./install.sh --dry-run
     ./install.sh
+    # On Wayland, log out and back in first if GNOME Shell does not list the new extension yet:
     gnome-extensions enable asusius-quick@hamza-gouda
 
 Install instructions pin the tested release tag. Contributors can clone `main` with
 `git clone --branch main https://github.com/hamza-gouda1/asusius.git`; see [CONTRIBUTING.md](CONTRIBUTING.md).
 
-See [docs/INSTALL.md](docs/INSTALL.md). User-level, no root, no downloads. The optional polkit
-helper is printed with `./install.sh --system` and never run for you.
+See [docs/INSTALL.md](docs/INSTALL.md) for prerequisite packages across Ubuntu/Debian, Fedora,
+Arch Linux and openSUSE. `./install.sh` checks required Python 3.12 / GTK 4 / Libadwaita
+dependencies upfront, installs at user level under `~/.local` with no root and no downloads,
+and prints the optional root-only polkit helper commands with `./install.sh --system`.
 
-The installer also binds the Armoury Crate key (XF86Launch3) to Asusius, takes over an existing
-XF86Launch1 shortcut only when it still opens the retired asus-control app, and binds the Copilot
-key to Claude when that app is installed. With the Focus Keys extension from bordeaux-gnome
-installed and enabled,
-those go into its shortcut list, so a press brings the open window to the front instead of a
-"Asusius is ready" notification, and earlier custom shortcuts for them are migrated away;
-without it they are GNOME custom shortcuts. Skip them with `--no-hotkey`, pick another key with
-`--hotkey=KEYSYM`. The Quick Settings extension also shows the new profile in an OSD when Fn+F5
-changes it. Details in [docs/INSTALL.md](docs/INSTALL.md).
+By default, the installer binds the Armoury Crate key (`XF86Launch3`) to Asusius (and
+retargets an existing `XF86Launch1` shortcut only if it still points to the retired
+`asus-control` app). Your microphone mute key (`XF86AudioMicMute`) and Copilot key are left
+untouched unless you explicitly opt in with `--with-mic-key` or `--with-copilot-key`. With
+the Focus Keys extension from bordeaux-gnome installed and enabled, app shortcuts go into
+its shortcut list instead, so a second press raises the open window instead of showing an
+"Asusius is ready" notification; without it they are standard GNOME custom shortcuts. Skip
+hotkeys with `--no-hotkey`, or pick another key with `--hotkey=KEYSYM`. The Quick Settings
+extension also shows the new profile in an OSD when Fn+F5 changes it. Details in
+[docs/INSTALL.md](docs/INSTALL.md).
 
 ## Usage
 
@@ -203,8 +216,9 @@ Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/UI.md](docs/UI.md).
 
 ## Development
 
-    PYTHONPATH=src python3 -m unittest discover -s tests
-    shellcheck install.sh uninstall.sh tests/test_install.sh && bash tests/test_install.sh
+    PYTHONPATH=src python3 -m unittest discover -s tests -v
+    shellcheck -S warning install.sh uninstall.sh tests/test_install.sh && bash tests/test_install.sh
+    desktop-file-validate data/Asusius.desktop && appstreamcli validate --no-net data/Asusius.metainfo.xml
     gjs -m tests/test_quick_profiles.js
     gjs -m tests/test_gestures.js
 

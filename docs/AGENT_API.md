@@ -104,7 +104,7 @@ by the client and not by this document.
    curve rules), and the Controller is asked in dry-run mode which backend would receive
    what. The answer (`would.sends`) is exactly what a real write sends.
 4. **Approval for every real write.** `dry_run: false` needs one of:
-   - a **standing grant**: `asusius agent grant control-basic --for 1h` (15 min to
+   - a **standing grant**: `asusius agent grant control-basic --for 1h` (1 min to
      24 h, stored with its expiry in `agent.json`); it covers control-basic tools only;
    - a **per-call approval**: the server queues the request (id, tool, validated
      parameters, the agent's reason, claimed client name, server session and OS-reported

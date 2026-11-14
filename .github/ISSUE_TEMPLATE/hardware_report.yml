@@ -5,7 +5,8 @@ body:
   - type: input
     id: model
     attributes:
-      label: Laptop model
+      label: Laptop model and vendor
+      description: "`cat /sys/class/dmi/id/{sys_vendor,product_name,bios_version}`"
     validations: {required: true}
   - type: textarea
     id: caps

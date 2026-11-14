@@ -1,6 +1,6 @@
 # Two-minute hardware-free quickstart
 
-This launches the released Asusius 0.1.2 interface with simulated laptop data. It does not
+This launches the released Asusius 0.2.1 interface with simulated laptop data. It does not
 need an ASUS laptop, `asusd`, or `supergfxd`. It needs Linux, Python 3.12+, GTK 4, Libadwaita
 1.5, PyGObject, and a running graphical session.
 
@@ -23,7 +23,7 @@ when you close the demo window.
   set -eu
   demo_dir=$(mktemp -d)
   trap 'rm -r -- "$demo_dir"' EXIT
-  git clone --branch v0.2.0 --depth 1 https://github.com/hamza-gouda1/asusius.git "$demo_dir/asusius"
+  git clone --branch v0.2.1 --depth 1 https://github.com/hamza-gouda1/asusius.git "$demo_dir/asusius"
   export HOME="$demo_dir/home"
   export XDG_CONFIG_HOME="$HOME/.config"
   export XDG_DATA_HOME="$HOME/.local/share"

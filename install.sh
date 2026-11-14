@@ -38,14 +38,15 @@ FOCUS_SCHEMA=org.gnome.shell.extensions.focus-keys
 FOCUS_SCHEMAS=$DATA_HOME/gnome-shell/extensions/$FOCUS_UUID/schemas
 CLAUDE_ID=com.anthropic.Claude
 
-DRY=0 UNINSTALL=0 SYSTEM=0 WITH_EXT=1 WITH_HOTKEY=1 WITH_COPILOT=1 WITH_MIC=1 WITH_FOCUS=1 \
-WITH_DAEMON=1
+DRY=0 UNINSTALL=0 SYSTEM=0 WITH_EXT=1 WITH_HOTKEY=1 WITH_COPILOT=0 WITH_MIC=0 WITH_FOCUS=1 \
+WITH_DAEMON=1 EXT_ENABLED=0
 
 usage() {
     cat <<USAGE
 Usage: ./install.sh [--dry-run] [--uninstall] [--system] [--no-extension]
                   [--no-hotkey] [--hotkey=KEYSYM]
-                  [--no-copilot-key] [--copilot-key=ACCEL] [--no-mic-key] [--mic-key=KEYSYM]
+                  [--with-copilot-key] [--copilot-key=ACCEL]
+                  [--with-mic-key] [--mic-key=KEYSYM]
                   [--no-focus-keys] [--no-daemon]
 
   (default)       install for the current user under ~/.local (no root, no downloads)
@@ -61,16 +62,17 @@ Usage: ./install.sh [--dry-run] [--uninstall] [--system] [--no-extension]
   --hotkey=KEYSYM use another key than XF86Launch3 for that shortcut. An existing custom
                   shortcut on XF86Launch1 that runs the retired asus-control app is
                   retargeted to Asusius (old values saved, restored by --uninstall)
-  --no-copilot-key  do not bind the Copilot key to the Claude desktop app
+  --with-copilot-key  opt in to binding the Copilot key to the Claude desktop app
+  --no-copilot-key    do not bind the Copilot key (default)
   --copilot-key=ACCEL  other key for that (default <Shift><Super>XF86TouchpadOff)
-  --no-mic-key    do not bind the mic key to play/pause (this also leaves the
-                  mic-mute settings of GNOME alone)
+  --with-mic-key      opt in to binding the mic key to play/pause (silences GNOME mic-mute)
+  --no-mic-key        do not bind the mic key (default; leaves GNOME mic-mute untouched)
   --mic-key=KEYSYM  other key for play/pause (default XF86AudioMicMute)
   --no-focus-keys use GNOME custom shortcuts for the app keys even when the Focus Keys
                   extension (bordeaux-gnome) is installed. With it, the Armoury keys
-                  (XF86Launch3 and XF86Launch1) and the Copilot key go into its shortcut
-                  list instead, so a second press brings the open window to the front;
-                  our earlier custom shortcuts for them are removed
+                  (XF86Launch3 and XF86Launch1) and the optional Copilot key go into its
+                  shortcut list instead, so a second press brings the open window to the
+                  front; our earlier custom shortcuts for them are removed
   --no-daemon     do not install or start asusiusd (the per-user automation and
                   keyboard-effects service). Without it, software keyboard effects and
                   rules run only while you start the daemon yourself, and they do not
@@ -86,8 +88,10 @@ for arg in "$@"; do
         --no-extension) WITH_EXT=0 ;;
         --no-hotkey) WITH_HOTKEY=0 ;;
         --hotkey=*) HOTKEY=${arg#--hotkey=} ;;
+        --with-copilot-key) WITH_COPILOT=1 ;;
         --no-copilot-key) WITH_COPILOT=0 ;;
         --copilot-key=*) COPILOT_KEY=${arg#--copilot-key=} ;;
+        --with-mic-key) WITH_MIC=1 ;;
         --no-mic-key) WITH_MIC=0 ;;
         --mic-key=*) MIC_KEY=${arg#--mic-key=} ;;
         --no-focus-keys) WITH_FOCUS=0 ;;
@@ -200,15 +204,113 @@ refresh_caches() {
     fi
 }
 
+is_gnome_desktop() {
+    local d=${XDG_CURRENT_DESKTOP:-}
+    [ -z "$d" ] && return 0
+    case ${d,,} in *gnome*) return 0 ;; esac
+    return 1
+}
+
+systemd_user_available() {
+    [ -z "${ASUSIUS_NO_SYSTEMD:-}" ] || return 1
+    command -v systemctl >/dev/null 2>&1 || return 1
+    systemctl --user show-environment >/dev/null 2>&1
+}
+
+print_distro_install_hints() {
+    cat >&2 <<'HINTS'
+Install required system packages first:
+  Ubuntu / Debian: sudo apt install python3 python3-gi python3-gi-cairo gir1.2-gtk-4.0 gir1.2-adw-1 gir1.2-pango-1.0 libglib2.0-bin
+  Fedora:          sudo dnf install python3 python3-gobject gtk4 libadwaita cairo-gobject glib2
+  Arch Linux:      sudo pacman -S python python-gobject python-cairo gtk4 libadwaita glib2
+  openSUSE:        sudo zypper install python3-gobject python3-gobject-cairo typelib-1_0-Gtk-4_0 typelib-1_0-Adw-1 typelib-1_0-Pango-1.0 glib2-tools
+HINTS
+}
+
+check_deps() {
+    [ -z "${ASUSIUS_SKIP_DEP_CHECK:-}" ] || return 0
+    local missing=() gi_report
+    if ! command -v python3 >/dev/null 2>&1; then
+        missing+=("python3 (>= 3.12)")
+    elif ! python3 -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 12) else 1)'; then
+        missing+=("python3 >= 3.12 (found $(python3 -c 'import sys; print(".".join(map(str, sys.version_info[:3])))'))")
+    else
+        gi_report=$(python3 - <<'PY' 2>/dev/null || true
+missing = []
+try:
+    import gi
+except Exception:
+    missing.append("PyGObject (gi)")
+else:
+    for ns, ver in (("Gtk", "4.0"), ("Adw", "1"), ("PangoCairo", "1.0")):
+        try:
+            gi.require_version(ns, ver)
+        except Exception:
+            missing.append(f"{ns} {ver}")
+try:
+    import cairo  # noqa: F401
+except Exception:
+    missing.append("pycairo (cairo)")
+if missing:
+    print(", ".join(missing))
+PY
+)
+        if [ -n "$gi_report" ]; then
+            missing+=("$gi_report")
+        fi
+    fi
+
+    if [ "${#missing[@]}" -gt 0 ]; then
+        echo "Missing required runtime dependencies: ${missing[*]}" >&2
+        print_distro_install_hints
+        if [ "$DRY" = 0 ]; then
+            exit 1
+        fi
+    fi
+
+    if [ "$WITH_EXT" = 1 ] && is_gnome_desktop && ! command -v glib-compile-schemas >/dev/null 2>&1; then
+        say "WARNING: glib-compile-schemas not found; extension schemas will remain uncompiled."
+        say "  Ubuntu/Debian: sudo apt install libglib2.0-bin | Fedora/Arch: glib2 | openSUSE: glib2-tools"
+    fi
+
+    if ! command -v asusd >/dev/null 2>&1 && ! command -v asusctl >/dev/null 2>&1; then
+        say "note: asusd/asusctl not found; generic sensors, battery and updates still work, while ASUS fan curves and Aura lighting require asusd."
+    fi
+    if ! command -v supergfxd >/dev/null 2>&1 && ! command -v supergfxctl >/dev/null 2>&1; then
+        say "note: supergfxd/supergfxctl not found; GPU mode switching requires supergfxd."
+    fi
+    if ! command -v pkexec >/dev/null 2>&1; then
+        say "note: pkexec (polkit) not found; privileged direct sysfs writes will not elevate."
+    fi
+}
+
 install_extension() {
     local src=$ROOT/extension/$EXT_UUID
+    if ! is_gnome_desktop; then
+        say "extension: skipped (desktop is '${XDG_CURRENT_DESKTOP}', not GNOME)"
+        return 0
+    fi
     say "extension $EXT_DIR"
     snapshot_asset extension "$EXT_DIR"
     act rm -rf "$EXT_DIR"
     act mkdir -p "$EXT_DIR"
     act cp -r "$src/." "$EXT_DIR/"
-    if [ -d "$EXT_DIR/schemas" ] && command -v glib-compile-schemas >/dev/null 2>&1; then
-        act glib-compile-schemas "$EXT_DIR/schemas"
+    if [ -d "$EXT_DIR/schemas" ]; then
+        if command -v glib-compile-schemas >/dev/null 2>&1; then
+            act glib-compile-schemas "$EXT_DIR/schemas"
+        else
+            say "WARNING: glib-compile-schemas not found; skipping schema compilation for $EXT_UUID (extension settings will fail until compiled)."
+        fi
+    fi
+    if [ "$DRY" = 0 ] && [ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ] \
+            && [ -z "${GSETTINGS_BACKEND:-}" ] \
+            && command -v gnome-extensions >/dev/null 2>&1; then
+        if gnome-extensions list 2>/dev/null | grep -qxF "$EXT_UUID"; then
+            if gnome-extensions enable "$EXT_UUID" >/dev/null 2>&1; then
+                EXT_ENABLED=1
+                say "extension $EXT_UUID enabled"
+            fi
+        fi
     fi
 }
 
@@ -396,7 +498,10 @@ PY
 collect_migrate() {
     local p
     for p in "${KB_CUR[@]}"; do
-        case $p in "$KB_BASE/asusius/" | "$KB_BASE/asusius-claude/") MIGRATE+=("$p") ;; esac
+        case $p in
+            "$KB_BASE/asusius/") MIGRATE+=("$p") ;;
+            "$KB_BASE/asusius-claude/") [ "$WITH_COPILOT" = 1 ] && MIGRATE+=("$p") ;;
+        esac
     done
     if [ "$HOTKEY" = XF86Launch3 ]; then takeover_launch1 remove; fi
 }
@@ -487,6 +592,10 @@ claim_mic_key() {
 
 install_hotkey() {
     local raw p k keep=()
+    if ! is_gnome_desktop; then
+        say "shortcuts: skipped (desktop is '${XDG_CURRENT_DESKTOP}', not GNOME)"
+        return 0
+    fi
     if ! kb_available; then
         say "shortcuts: gsettings or the GNOME media-keys schema is missing, skipping"
         return 0
@@ -605,10 +714,28 @@ install_daemon() {
     say "daemon $DAEMON_UNIT"
     if [ "$DRY" = 0 ]; then
         mkdir -p "$(dirname "$DAEMON_UNIT")"
-        { printf '# %s\n' "$MARK"; cat "$ROOT/data/systemd/asusiusd.service"; } >"$DAEMON_UNIT"
+        python3 - "$ROOT/data/systemd/asusiusd.service" "$DAEMON_UNIT" "$BIN_DIR" "$MARK" <<'PYTHON'
+from pathlib import Path
+import sys
+
+src, dst, bin_dir, marker = sys.argv[1:]
+escaped_bin = bin_dir.replace("%", "%%")
+path_value = f"{escaped_bin}:/usr/local/bin:/usr/bin:/bin"
+if any(ch.isspace() or ch in '"\\' for ch in path_value):
+    quoted = path_value.replace("\\", "\\\\").replace('"', '\\"')
+    env_line = f'Environment="PATH={quoted}"'
+else:
+    env_line = f"Environment=PATH={path_value}"
+
+lines = []
+for line in Path(src).read_text(encoding="utf-8").splitlines():
+    if line.startswith("Environment=PATH="):
+        line = env_line
+    lines.append(line)
+Path(dst).write_text(f"# {marker}\n" + "\n".join(lines) + "\n", encoding="utf-8")
+PYTHON
     fi
-    if command -v systemctl >/dev/null 2>&1 && [ "$DRY" = 0 ] \
-            && [ -z "${ASUSIUS_NO_SYSTEMD:-}" ]; then
+    if [ "$DRY" = 0 ] && systemd_user_available; then
         if [ ! -f "$state" ]; then
             enabled=$(systemctl --user is-enabled asusiusd.service 2>/dev/null) || true
             active=$(systemctl --user is-active asusiusd.service 2>/dev/null) || true
@@ -617,14 +744,16 @@ install_daemon() {
         fi
         act systemctl --user daemon-reload
         act systemctl --user enable --now asusiusd.service
+    elif [ "$DRY" = 0 ] && [ -z "${ASUSIUS_NO_SYSTEMD:-}" ]; then
+        say "daemon: systemd user manager not available (container or non-systemd session); unit written to $DAEMON_UNIT"
+        say "  enable later in a systemd session with: systemctl --user enable --now asusiusd.service"
     fi
 }
 
 restore_daemon_state() {
     local state=$BACKUP_DIR/daemon-state enabled active
     [ -f "$state" ] && [ "$DRY" = 0 ] || return 0
-    [ -z "${ASUSIUS_NO_SYSTEMD:-}" ] || return 0
-    command -v systemctl >/dev/null 2>&1 || return 0
+    systemd_user_available || return 0
     enabled=$(sed -n '1p' "$state")
     active=$(sed -n '2p' "$state")
     systemctl --user daemon-reload
@@ -636,24 +765,39 @@ restore_daemon_state() {
     rm -f "$state"
 }
 
+copy_package() {
+    say "package $APP_DIR/asusius"
+    if [ "$DRY" = 1 ]; then
+        say "+ copy $ROOT/src/asusius -> $APP_DIR/asusius (excluding .mimosa, __pycache__, *.pyc)"
+        return 0
+    fi
+    mkdir -p "$APP_DIR"
+    python3 - "$ROOT/src/asusius" "$APP_DIR/asusius" <<'PYTHON'
+import shutil
+import sys
+
+shutil.copytree(
+    sys.argv[1],
+    sys.argv[2],
+    ignore=shutil.ignore_patterns(".mimosa", "__pycache__", "*.pyc", "*.pyo"),
+)
+PYTHON
+}
+
 do_install() {
-    local app_literal
-    command -v python3 >/dev/null 2>&1 || { echo "python3 is required" >&2; exit 1; }
+    local app_literal sym_icon helper_found=0 helper
+    check_deps
     say "installing asusius for $USER ($([ "$DRY" = 1 ] && echo dry run || echo for real))"
     snapshot_asset package "$APP_DIR"
     act rm -rf "$APP_DIR/asusius"
-    act mkdir -p "$APP_DIR"
-    act cp -r "$ROOT/src/asusius" "$APP_DIR/asusius"
-    if [ "$DRY" = 0 ]; then
-        find "$APP_DIR" -name __pycache__ -type d -prune -exec rm -rf {} +
-    fi
+    copy_package
     app_literal=$(python3 -c 'import shlex,sys; print(shlex.quote(sys.argv[1]))' "$APP_DIR")
     write_launcher "$BIN_DIR/asusius" \
         "PYTHONPATH=$app_literal\"\${PYTHONPATH:+:\$PYTHONPATH}\" exec python3 -m asusius \"\$@\""
     write_launcher "$BIN_DIR/asusius-mcp" \
         "PYTHONPATH=$app_literal\"\${PYTHONPATH:+:\$PYTHONPATH}\" exec python3 -m asusius mcp \"\$@\""
     write_launcher "$BIN_DIR/asusius-gui" \
-        "PYTHONPATH=$app_literal\"\${PYTHONPATH:+:\$PYTHONPATH}\" exec python3 -c 'from asusius.ui.app import main; raise SystemExit(main())' \"\$@\""
+        "PYTHONPATH=$app_literal\"\${PYTHONPATH:+:\$PYTHONPATH}\" exec python3 -m asusius.ui \"\$@\""
     write_launcher "$BIN_DIR/asusiusd" \
         "PYTHONPATH=$app_literal\"\${PYTHONPATH:+:\$PYTHONPATH}\" exec python3 -m asusius.daemon \"\$@\""
     write_desktop
@@ -661,36 +805,62 @@ do_install() {
     snapshot_asset metainfo "$DATA_HOME/metainfo/$APP_ID.metainfo.xml"
     act install -Dm0644 "$ROOT/data/icons/hicolor/scalable/apps/$APP_ID.svg" \
         "$DATA_HOME/icons/hicolor/scalable/apps/$APP_ID.svg"
+    sym_icon=$ROOT/data/icons/hicolor/scalable/apps/$APP_ID-symbolic.svg
+    if [ -f "$sym_icon" ]; then
+        snapshot_asset icon_symbolic "$DATA_HOME/icons/hicolor/scalable/apps/$APP_ID-symbolic.svg"
+        act install -Dm0644 "$sym_icon" \
+            "$DATA_HOME/icons/hicolor/scalable/apps/$APP_ID-symbolic.svg"
+    fi
     act install -Dm0644 "$ROOT/data/Asusius.metainfo.xml" "$DATA_HOME/metainfo/$APP_ID.metainfo.xml"
     if [ "$WITH_EXT" = 1 ]; then install_extension; fi
     if [ "$WITH_DAEMON" = 1 ]; then install_daemon; fi
     refresh_caches
     if [ "$WITH_HOTKEY" = 1 ]; then install_hotkey; fi
     say
-    say "done. Run: $BIN_DIR/asusius status   (make sure $BIN_DIR is on your PATH)"
-    if [ "$WITH_DAEMON" = 1 ] && command -v systemctl >/dev/null 2>&1; then
-        say "daemon: asusiusd unit installed (automation, keyboard effects and update"
+    case ":$PATH:" in
+        *":$BIN_DIR:"*) say "done. Run: asusius status" ;;
+        *)
+            say "done. Run: $BIN_DIR/asusius status"
+            say "WARNING: $BIN_DIR is not in your PATH. Add it to your shell profile (~/.bashrc or ~/.zshrc):"
+            say "  export PATH=\"$BIN_DIR:\$PATH\"" ;;
+    esac
+    if [ "$WITH_DAEMON" = 1 ] && [ "$DRY" = 0 ] && systemd_user_available; then
+        say "daemon: asusiusd unit enabled (automation, keyboard effects and update"
         say "  checks run at login; systemctl --user status asusiusd shows it)"
     fi
-    if [ "$WITH_EXT" = 1 ]; then
-        say "Quick Settings extension copied; enable it yourself with:"
-        say "  gnome-extensions enable $EXT_UUID   (log out and in if GNOME does not list it yet)"
+    if [ "$WITH_EXT" = 1 ] && is_gnome_desktop; then
+        if [ "$EXT_ENABLED" = 1 ]; then
+            say "Quick Settings extension enabled ($EXT_UUID)."
+        elif [ "${XDG_SESSION_TYPE:-}" = x11 ]; then
+            say "Quick Settings extension copied; restart GNOME Shell (Alt+F2 -> r) or log out and in, then run:"
+            say "  gnome-extensions enable $EXT_UUID"
+        else
+            say "Quick Settings extension copied; on Wayland log out and back in first, then enable it with:"
+            say "  gnome-extensions enable $EXT_UUID"
+        fi
+    fi
+    if [ "${XDG_SESSION_TYPE:-}" = x11 ]; then
+        say "note: X11 session detected; GNOME Wayland is recommended for native touchpad gesture handling."
+    fi
+    for helper in /usr/libexec/asusius-helper /usr/lib/asusius/asusius-helper; do
+        if [ -e "$helper" ]; then helper_found=1; break; fi
+    done
+    if [ "$SYSTEM" = 0 ] && [ "$helper_found" = 0 ]; then
+        say "note: optional root-only sysfs writes through pkexec need the helper (run ./install.sh --system to inspect sudo commands)."
     fi
 }
 
 do_uninstall() {
     say "removing asusius for $USER"
-    local f
+    local f helper found_helpers=()
     # the unit file goes no matter what; the manager is only told when we may talk to it
     if [ -e "$BACKUP_DIR/assets/daemon/managed" ]; then
-        if command -v systemctl >/dev/null 2>&1 && [ "$DRY" = 0 ] \
-                && [ -z "${ASUSIUS_NO_SYSTEMD:-}" ]; then
-            act systemctl --user disable --now asusiusd.service
+        if [ "$DRY" = 0 ] && systemd_user_available; then
+            act systemctl --user disable --now asusiusd.service || true
         fi
         restore_asset daemon "$DAEMON_UNIT"
-        if command -v systemctl >/dev/null 2>&1 && [ "$DRY" = 0 ] \
-                && [ -z "${ASUSIUS_NO_SYSTEMD:-}" ]; then
-            act systemctl --user daemon-reload
+        if [ "$DRY" = 0 ] && systemd_user_available; then
+            act systemctl --user daemon-reload || true
         fi
     fi
     for f in "$BIN_DIR/asusius" "$BIN_DIR/asusius-gui" "$BIN_DIR/asusius-mcp" \
@@ -700,12 +870,20 @@ do_uninstall() {
         restore "$f"
     done
     restore_asset icon "$DATA_HOME/icons/hicolor/scalable/apps/$APP_ID.svg"
+    restore_asset icon_symbolic "$DATA_HOME/icons/hicolor/scalable/apps/$APP_ID-symbolic.svg"
     restore_asset metainfo "$DATA_HOME/metainfo/$APP_ID.metainfo.xml"
     restore_asset package "$APP_DIR"
     restore_asset extension "$EXT_DIR"
     restore_daemon_state
     refresh_caches
     uninstall_hotkey
+    for helper in /usr/libexec/asusius-helper /usr/lib/asusius/asusius-helper; do
+        if [ -e "$helper" ]; then found_helpers+=("$helper"); fi
+    done
+    if [ "${#found_helpers[@]}" -gt 0 ]; then
+        say "WARNING: root-level helper still installed: ${found_helpers[*]}"
+        say "  remove it with: sudo rm -f /usr/libexec/asusius-helper /usr/lib/asusius/asusius-helper /usr/share/polkit-1/actions/io.github.hamzagouda.asusius.policy"
+    fi
     say "done. Original files and managed shortcuts were restored; app configuration was retained."
 }
 

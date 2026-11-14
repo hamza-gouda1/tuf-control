@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "asusius"
-version = "0.2.0"
+version = "0.2.1"
 description = "Control core for ASUS TUF/ROG laptops on Linux"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -17,6 +17,7 @@ dependencies = []
 [project.optional-dependencies]
 dbus = ["PyGObject"]
 gui = ["PyGObject", "pycairo"]
+qa = ["PyGObject", "pycairo", "Pillow"]
 dev = ["pytest", "ruff"]
 
 [project.scripts]
@@ -31,7 +32,7 @@ asusius-gui = "asusius.ui.app:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-"asusius.ui" = ["*.css"]
+"asusius.ui" = ["*.css", "icons/hicolor/scalable/apps/*.svg"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

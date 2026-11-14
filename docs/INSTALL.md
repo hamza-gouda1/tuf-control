@@ -1,31 +1,38 @@
 # Install
 
-Requirements: Linux with an ASUS TUF/ROG laptop, Python 3.12+, PyGObject, GTK 4 and
-Libadwaita 1.5 (for the app). For full control: `asusd` (asusctl 6.x) and `supergfxd`.
-Nothing is downloaded by the installer.
+Requirements: Linux, Python 3.12+, PyGObject, GTK 4, Libadwaita 1.5, and `glib-compile-schemas` (for the GNOME Shell extension).
+For ASUS hardware controls (fan curves, Aura RGB, GPU mux, charge limits): an ASUS TUF/ROG laptop with `asusd` (asusctl 6.x), `supergfxd`, and/or supported kernel sysfs drivers (`asus-nb-wmi`, `asus-armoury`). On non-ASUS machines or without `asusd`, system monitoring, process/service management, updates, and GNOME gestures remain available.
+Nothing is downloaded by the installer; `./install.sh` verifies Python/GTK4/Libadwaita dependencies upfront and prints exact distro install commands if anything is missing:
+
+- **Ubuntu / Debian**: `sudo apt install python3 python3-gi python3-gi-cairo gir1.2-gtk-4.0 gir1.2-adw-1 gir1.2-pango-1.0 libglib2.0-bin`
+- **Fedora**: `sudo dnf install python3 python3-gobject gtk4 libadwaita cairo-gobject glib2`
+- **Arch Linux**: `sudo pacman -S python python-gobject python-cairo gtk4 libadwaita glib2` (optional `packaging/arch/PKGBUILD` puts `asusctl`, `playerctl`, `gst-plugins-base`, `gst-python`, `python-numpy` in `optdepends`)
+- **openSUSE**: `sudo zypper install python3-gobject python3-gobject-cairo typelib-1_0-Gtk-4_0 typelib-1_0-Adw-1 typelib-1_0-Pango-1_0 glib2-tools`
 
 ## User install (no root)
 
     ./install.sh --dry-run     # see what would happen
     ./install.sh               # copies into ~/.local, adds launchers and the .desktop file
-    asusius status         # ~/.local/bin must be on PATH
+    asusius status             # ~/.local/bin must be on PATH
     asusius-gui
 
-Files: `~/.local/share/asusius/`, `~/.local/bin/asusius{,-gui}`, desktop entry, icon,
-metainfo, and the extension in `~/.local/share/gnome-shell/extensions/`. Files that already exist
-and are not ours are backed up to `~/.local/state/asusius/backup/` and restored by
-`./uninstall.sh` (or `./install.sh --uninstall`). Skip the extension with `--no-extension`. The per-user `asusiusd` service is installed
-and started by default (`--no-daemon` skips it). Its original unit and enabled/active state
-are restored on uninstall. `ASUSIUS_NO_SYSTEMD=1` installs files without contacting the
-manager, for isolated tests. `XDG_CONFIG_HOME` is respected for the user unit.
+Files: `~/.local/share/asusius/`, `~/.local/bin/asusius{,-gui,-mcp,d}`, desktop entry,
+app & symbolic icons, metainfo, and the extension in `~/.local/share/gnome-shell/extensions/`.
+Files that already exist and are not ours are backed up to `~/.local/state/asusius/backup/`
+and restored by `./uninstall.sh` (or `./install.sh --uninstall`). Skip the extension with
+`--no-extension` (non-GNOME desktops skip the extension and GNOME shortcuts automatically).
+The per-user `asusiusd` service is installed with the configured `--bin-dir` (`ASUSIUS_BIN_DIR`)
+in `PATH` and started by default (`--no-daemon` skips it; container/non-systemd environments
+install the unit without failing). Its original unit and enabled/active state are restored on
+uninstall. `ASUSIUS_NO_SYSTEMD=1` installs files without contacting the manager, for isolated
+tests. `XDG_CONFIG_HOME` is respected for the user unit.
 
 ## Quick Settings extension
 
     gnome-extensions enable asusius-quick@hamza-gouda
 
-GNOME Shell 46 only. On Wayland a new extension appears after you log out and in. It talks to
-`xyz.ljones.Asusd` and falls back to power-profiles-daemon. It never sets colours: it follows the
-shell theme.
+Targets GNOME Shell 45–49 (hardware-tested on GNOME Shell 46). On Wayland, a newly copied
+extension appears only after you log out and back in; if GNOME Shell already lists it, `./install.sh` enables it for you. It talks to `xyz.ljones.Asusd` and falls back to power-profiles-daemon. It never sets colours: it follows the shell theme.
 
 When the profile changes outside its menu, for example with **Fn+F5** (asusd cycles the platform
 profile and announces it with `PropertiesChanged`) or from another app, it shows the new profile
@@ -43,13 +50,14 @@ instead (on any workspace), or start the app when it is not running.
 When it is installed for your user **and enabled** (bordeaux-gnome's `./install.sh` does both),
 `./install.sh` writes our keys into its shortcut list instead of making custom shortcuts:
 
-| Key | Opens |
-| --- | --- |
-| XF86Launch3 (Armoury Crate key, or the `--hotkey` you chose) | Asusius |
-| XF86Launch1 (the other Armoury key code, only with the default `--hotkey`) | Asusius |
-| Copilot key, `<Shift><Super>XF86TouchpadOff` (`--copilot-key`) | Claude (`com.anthropic.Claude.desktop`) |
+| Key | Opens | Flag |
+| --- | --- | --- |
+| XF86Launch3 (Armoury Crate key, or the `--hotkey` you chose) | Asusius | Default (`--no-hotkey` disables) |
+| XF86Launch1 (the other Armoury key code, only with the default `--hotkey`) | Asusius | Default (`--no-hotkey` disables) |
+| Copilot key, `<Shift><Super>XF86TouchpadOff` | Claude (`com.anthropic.Claude.desktop`) | Opt-in (`--with-copilot-key`, `--copilot-key=ACCEL`) |
 
-The mic key stays a custom shortcut (`playerctl play-pause` is a command, not an app). Entries you
+The mic mute key (`XF86AudioMicMute`) and GNOME mic-mute binding are left untouched by default.
+Pass `--with-mic-key` (or `--mic-key=KEYSYM`) to bind it to `playerctl play-pause` as a custom shortcut. Entries you
 already have are kept; a key used by one of your own custom shortcuts is skipped with a note. Our
 entries are listed in `~/.local/state/asusius/backup/focus-keys.added` and `--uninstall`
 removes exactly those (the list as it was before is in `focus-keys.orig`).
@@ -110,4 +118,5 @@ The helper accepts only `write <path> <value>` for: `platform_profile`, asus-arm
 ## Uninstall
 
     ./uninstall.sh
-    sudo rm -f /usr/libexec/asusius-helper /usr/share/polkit-1/actions/io.github.hamzagouda.asusius.policy
+    # If you previously installed the optional root helper (--system), remove it with:
+    sudo rm -f /usr/libexec/asusius-helper /usr/lib/asusius/asusius-helper /usr/share/polkit-1/actions/io.github.hamzagouda.asusius.policy

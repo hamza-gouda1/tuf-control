@@ -19,12 +19,12 @@ PALETTE_REPOSITORY = "bordeaux-gnome"
 
 
 def _is_project_repository(repo: Path) -> bool:
-    """Accept a Asusius checkout even when its directory keeps a stale name.
+    """Accept an Asusius checkout even when its directory keeps a stale name.
 
     ``pyproject.toml`` declares the project identity, so a checkout of this
     repository is recognized by content rather than by directory name.
     """
-    if repo.name in (PROJECT_NAME, PALETTE_REPOSITORY):
+    if repo.name.lower() in (PROJECT_NAME, PALETTE_REPOSITORY):
         return True
     try:
         metadata = (repo / "pyproject.toml").read_text(encoding="utf-8")
@@ -36,7 +36,7 @@ def _is_project_repository(repo: Path) -> bool:
 def build_archive(repo: Path, tag: str, output: Path) -> tuple[Path, str]:
     repo = repo.resolve()
     if not _is_project_repository(repo):
-        raise ValueError("expected a Asusius or Bordeaux GNOME repository")
+        raise ValueError("expected an Asusius or Bordeaux GNOME repository")
     if not re.fullmatch(r"v\d+\.\d+\.\d+", tag):
         raise ValueError("tag must be a vMAJOR.MINOR.PATCH version")
     ref = f"refs/tags/{tag}"
@@ -44,6 +44,8 @@ def build_archive(repo: Path, tag: str, output: Path) -> tuple[Path, str]:
                    check=True, stdout=subprocess.DEVNULL)
     name = f"{PROJECT_NAME}-{tag[1:]}"
     output.mkdir(parents=True, exist_ok=True)
+    for stale in output.glob("*.tar.gz"):
+        stale.unlink()
     archive = output / f"{name}.tar.gz"
     with tempfile.TemporaryFile() as source:
         subprocess.run(["git", "archive", "--format=tar", f"--prefix={name}/", ref],
