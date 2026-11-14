@@ -17,14 +17,31 @@ release = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(release)
 
 
-def _tag_exists(tag: str) -> bool:
+def _tag_commit(tag: str) -> str | None:
     result = subprocess.run(
         ["git", "rev-parse", "--verify", "--quiet", f"refs/tags/{tag}^{{commit}}"],
         cwd=REPO,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        text=True,
+        capture_output=True,
     )
-    return result.returncode == 0
+    return result.stdout.strip() if result.returncode == 0 else None
+
+
+def _tag_exists(tag: str) -> bool:
+    return _tag_commit(tag) is not None
+
+
+def _head_matches_tag(tag: str) -> bool:
+    tag_sha = _tag_commit(tag)
+    if tag_sha is None:
+        return False
+    head = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", "HEAD^{commit}"],
+        cwd=REPO,
+        text=True,
+        capture_output=True,
+    )
+    return head.returncode == 0 and head.stdout.strip() == tag_sha
 
 
 def _latest_release_tag() -> str:
@@ -77,7 +94,7 @@ class ReleaseArchiveTests(unittest.TestCase):
             if release._is_project_repository(REPO):
                 expected = re.search(r"sha256sums=\('([^']+)'\)", packaging)
                 self.assertIsNotNone(expected)
-                if tagged_pkgver:
+                if tagged_pkgver and not (_head_matches_tag(pkg_tag) and expected[1] == "SKIP"):
                     self.assertEqual(expected[1], digest)
                 else:
                     self.assertRegex(expected[1], r"^(?:SKIP|[0-9a-f]{64})$")
