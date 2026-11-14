@@ -6,9 +6,16 @@ from gi.repository import Adw, GLib, Gtk
 
 from ...core import Profile
 from ..tasks import run_bg
-from ..viewmodels import PROFILE_INFO, PROFILE_ORDER, power_limits_view, snap_to_step
+from ..viewmodels import (
+    PROFILE_INFO,
+    PROFILE_ORDER,
+    fmt_num,
+    fmt_temp,
+    power_limits_view,
+    snap_to_step,
+)
 from ..widgets import label
-from .base import Page, a11y_name, button, info_row, prefs_page
+from .base import Page, a11y_name, button, prefs_page
 
 
 class ProfileCards(Gtk.Box):
@@ -24,7 +31,10 @@ class ProfileCards(Gtk.Box):
             title, sub, icon = PROFILE_INFO[prof]
             box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
             top = Gtk.Box(spacing=8)
-            top.append(Gtk.Image.new_from_icon_name(icon))
+            badge = Gtk.Box()
+            badge.add_css_class("card-icon-badge")
+            badge.append(Gtk.Image.new_from_icon_name(icon))
+            top.append(badge)
             top.append(Gtk.Box(hexpand=True))
             tick = Gtk.Image.new_from_icon_name("object-select-symbolic")
             tick.add_css_class("card-tick")
@@ -69,6 +79,13 @@ class PerformancePage(Page):
         g1 = Adw.PreferencesGroup(title="Profile",
                                   description="Sets fan behaviour and firmware power targets.")
         g1.add(self.cards)
+        live_strip = Gtk.Box(spacing=8, margin_top=10, halign=Gtk.Align.START)
+        self.live_temp_pill = label("", ("live-pill", "numeric"), visible=False)
+        self.live_power_pill = label("", ("live-pill", "numeric"), visible=False)
+        self.live_gov_pill = label("", ("live-pill",), visible=False)
+        for p in (self.live_temp_pill, self.live_power_pill, self.live_gov_pill):
+            live_strip.append(p)
+        g1.add(live_strip)
         self.limits = Adw.PreferencesGroup(title="Power limits")
         self.limit_rows: list = []
         self.scales: dict[str, tuple] = {}
@@ -86,6 +103,7 @@ class PerformancePage(Page):
 
     def refresh(self) -> None:
         self.cards.set_profile(self.win.profile)
+        self._sync_live_chips()
 
         def load():
             try:
@@ -96,24 +114,47 @@ class PerformancePage(Page):
 
         run_bg(load, done=self._show_limits)
 
+    def on_telemetry(self, t) -> None:
+        self._sync_live_chips(t)
+
+    def _sync_live_chips(self, t=None) -> None:
+        if t is None:
+            t = self.win.telemetry()
+        if t.cpu_temp_c is not None:
+            self.live_temp_pill.set_label(f"CPU {fmt_temp(t.cpu_temp_c)}")
+            self.live_temp_pill.set_visible(True)
+        if t.cpu_power_w is not None:
+            self.live_power_pill.set_label(f"Package {fmt_num(t.cpu_power_w, 1)} W")
+            self.live_power_pill.set_visible(True)
+        try:
+            gov = self.win.hub.sampler.cpu.policy().get("governor")
+        except Exception:
+            gov = None
+        if gov:
+            self.live_gov_pill.set_label(f"Governor: {gov}")
+            self.live_gov_pill.set_visible(True)
+
     def _show_limits(self, lims) -> None:
         self._clear_limits()
         view = power_limits_view(self.cap("power_limits"), lims)
         if not view.available:
             self.limits.set_description(None)
-            row = info_row("Not provided by the kernel driver",
-                           "Not available right now: the firmware did not report usable "
-                           "power limits. If the asusd service is stopped, start it and "
-                           "restart Asusius.")
-            row.set_tooltip_text(view.reason or None)
-            note = info_row("Why nothing is shown",
-                            "Without the real minimum and maximum, any slider would be a guess. "
-                            "Asusius never writes guessed power values. See "
-                            "docs/upstream/FX608JHR-power-limits.md for the upstream request.",
-                            "security-high-symbolic")
-            for r in (row, note):
-                self.limits.add(r)
-                self.limit_rows.append(r)
+            exp = Adw.ExpanderRow(
+                title="Why aren't power limits shown?",
+                subtitle="Firmware did not expose writable min/max bounds")
+            exp.add_prefix(Gtk.Image.new_from_icon_name("security-high-symbolic"))
+            exp.set_tooltip_text(view.reason or None)
+            retry = button("Retry", "flat", on_click=self.refresh)
+            retry.set_valign(Gtk.Align.CENTER)
+            exp.add_suffix(retry)
+            detail = Adw.ActionRow(
+                subtitle="Asusius only exposes power sliders when the kernel and firmware "
+                         "provide verified safe limits, rather than guessing values. "
+                         "If asusd was just started, click Retry.")
+            detail.set_subtitle_lines(0)
+            exp.add_row(detail)
+            self.limits.add(exp)
+            self.limit_rows.append(exp)
             return
         self.limits.set_description("Bounds come from the firmware. Changes apply after you "
                                     "confirm.")

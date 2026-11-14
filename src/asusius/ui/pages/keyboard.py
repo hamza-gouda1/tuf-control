@@ -51,6 +51,7 @@ class KeyboardPage(Page):
         self.bri_row = Adw.ActionRow(title="Brightness")
         self.bri_box = Gtk.Box(valign=Gtk.Align.CENTER)
         self.bri_box.add_css_class("linked")
+        self.bri_box.add_css_class("bri-toggle")
         self.bri_buttons = []
         first = None
         for i, name in enumerate(BRIGHTNESS_NAMES):
@@ -76,13 +77,15 @@ class KeyboardPage(Page):
         self.mode_row.connect("notify::selected", self._mode_picked)
         self.palette_row = Adw.ActionRow(title="Palette", subtitle="Sets Colour 1 and Colour 2")
         self.palette_row.add_suffix(palette_buttons(PALETTES, self._palette))
-        self.c1 = Gtk.ColorDialogButton(dialog=Gtk.ColorDialog(with_alpha=False),
-                                        valign=Gtk.Align.CENTER)
+        self.c1 = Gtk.ColorDialogButton(
+            dialog=Gtk.ColorDialog(title="Choose colour", with_alpha=False),
+            valign=Gtk.Align.CENTER)
         self.c1.connect("notify::rgba", self._edit)
         self.c1_row = Adw.ActionRow(title="Colour 1")
         self.c1_row.add_suffix(self.c1)
-        self.c2 = Gtk.ColorDialogButton(dialog=Gtk.ColorDialog(with_alpha=False),
-                                        valign=Gtk.Align.CENTER)
+        self.c2 = Gtk.ColorDialogButton(
+            dialog=Gtk.ColorDialog(title="Choose colour", with_alpha=False),
+            valign=Gtk.Align.CENTER)
         self.c2.connect("notify::rgba", self._edit)
         self.c2_row = Adw.ActionRow(title="Colour 2")
         self.c2_row.add_suffix(self.c2)
@@ -121,13 +124,19 @@ class KeyboardPage(Page):
     # -- data -----------------------------------------------------------------------------
     def refresh(self) -> None:
         run_bg(lambda: self.ctl.get_kbd_brightness()[0], done=self._got_bri,
-               error=lambda e: (self.bri_row.set_sensitive(False),
-                                self.bri_row.set_subtitle(
-                                    "Not available right now: the keyboard brightness "
-                                    "could not be read. Check that the asusd service is "
-                                    "running, then restart Asusius.")))
+               error=self._bri_failed)
         run_bg(lambda: self.ctl.get_kbd_rgb()[0], done=self._got_rgb, error=self._rgb_failed)
         self.soft.refresh()
+
+    def on_hidden(self) -> None:
+        self.soft.on_hidden()
+
+    def _bri_failed(self, exc) -> None:
+        self.bri_row.set_sensitive(False)
+        self.bri_row.set_subtitle(
+            "Not available right now: keyboard brightness could not be read. Check that the "
+            "asusd service is running, then press Refresh.")
+        self.bri_row.set_tooltip_text(str(exc))
 
     def on_telemetry(self, t) -> None:
         self.soft.on_telemetry(t)
@@ -141,6 +150,9 @@ class KeyboardPage(Page):
     def _got_bri(self, val) -> None:
         cur, mx = val
         self.brightness = cur
+        self.bri_row.set_sensitive(True)
+        self.bri_row.set_subtitle("")
+        self.bri_row.set_tooltip_text(None)
         self._quiet = True
         for i, b in enumerate(self.bri_buttons):
             b.set_visible(i <= mx)
@@ -153,8 +165,8 @@ class KeyboardPage(Page):
         for r in self.fx_rows:
             r.set_sensitive(False)
         self.fx_err.set_subtitle(
-            "Not available right now: the asusd service is not running, so the keyboard "
-            "effects cannot be read. Start it, then restart Asusius.")
+            "Not available right now: the asusd service did not answer, so hardware keyboard "
+            "effects cannot be read. Start it, then refresh.")
         self.fx_err.set_visible(True)
         self.fx_err.set_tooltip_text(str(exc))
         self.preview.set_opacity(0.4)  # nothing to show: not a lit keyboard
@@ -217,7 +229,10 @@ class KeyboardPage(Page):
 
     def describe(self) -> None:
         note = self.hw_note
-        if self.form.controls.breathe == "blend" and note == HW_NOTE:
+        if note == HW_NOTE and self.soft.active:
+            note = ("Paused while a software effect is selected below; choose Off there to "
+                    "resume firmware lighting.")
+        elif self.form.controls.breathe == "blend" and note == HW_NOTE:
             note = ("The firmware breathes Colour 1; Two colours adds the fade to Colour 2 "
                     "in software.")
         self.fx.set_description(note)

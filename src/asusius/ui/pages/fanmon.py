@@ -7,6 +7,7 @@ from gi.repository import Gtk
 
 from ...telemetry import fmt
 from ..charts import Line, legend
+from ..viewmodels import fmt_temp, gpu_vendor_title, temp_unit_label, temp_value
 from ..widgets import label
 from .base import button
 from .monitor_base import WINDOW_S, MonitorPage, Panel, StatGrid, note, set_text
@@ -59,7 +60,8 @@ class FanMonitorPage(MonitorPage):
                            Line("temp.disk.nvme0n1.0", "NVMe", "slate", fill=False),
                            Line("temp.dimm0", "memory", "sage", fill=False)]
         self.temp_chart = self.chart(self.temp_lines, y_fixed=(20, 100),
-                                     fmt=lambda v: f"{v:.0f}°", height=170)
+                                     fmt=lambda v: f"{temp_value(v)}{temp_unit_label()}",
+                                     height=170)
         tp.append(self.temp_chart)
         self.temps = StatGrid(2, 4)
         tp.append(self.temps)
@@ -67,10 +69,14 @@ class FanMonitorPage(MonitorPage):
         tp.append(note("The dGPU temperature is only read while it is awake. The fans are "
                        "set by the firmware from its curve; edit the curves in Fan curves."))
 
+    def refresh_temperature_unit(self) -> None:
+        self.temp_chart.queue_draw()
+        self.update()
+
     def _temps(self) -> list[tuple[str, str]]:
         info = self.hub.info.get("sensors") or {}
         out = [("temp.cpu", "CPU package")]
-        out.append(("dgpu.temp", "NVIDIA GPU"))
+        out.append(("dgpu.temp", gpu_vendor_title(self.hub.info.get("dgpu"), "dgpu")))
         for disk, labels in (info.get("nvme") or {}).items():
             for i, lab in enumerate(labels):
                 out.append((f"temp.disk.{disk}.{i}", f"{disk} {lab}"))
@@ -94,7 +100,7 @@ class FanMonitorPage(MonitorPage):
             peak = self.session_peak[key]
             g.set("share", fmt.pct(100 * v / peak) if v is not None and peak else "–")
             t = st.last(temp_key)
-            g.set("temp", fmt.temp(t) if t is not None else
+            g.set("temp", fmt_temp(t) if t is not None else
                   ("asleep" if temp_key == "dgpu.temp" else "–"))
         missing = [k for k in ("cpu", "gpu") if k not in fans]
         set_text(self.missing, ("No sensor for: " + ", ".join(missing) + " fan.")
@@ -111,7 +117,7 @@ class FanMonitorPage(MonitorPage):
                 self.temp_lines[2].key = nv
         for k, _lab in keys:
             v = st.last(k)
-            self.temps.set(k, fmt.temp(v) if v is not None else
+            self.temps.set(k, fmt_temp(v) if v is not None else
                            ("asleep" if k == "dgpu.temp" else "–"))
         set_text(self.sub, f"{len(fans)} fans · {len(keys)} temperature sensors · hwmon")
         self.redraw()

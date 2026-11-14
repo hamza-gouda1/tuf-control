@@ -12,9 +12,11 @@ import re
 from collections import deque
 from dataclasses import dataclass, field
 
+from . import prefs
 from ..core import (
     BackendError,
     BackendUnavailable,
+    Capability,
     FanCurve,
     FanPoint,
     GpuAction,
@@ -98,6 +100,30 @@ def column_totals(cpu, mem_pct, swap_pct, drive_pct, gpu_pct, vram_pct) -> dict[
 
 def fmt_rpm(value: int | None) -> str:
     return DASH if value is None else f"{int(value):,}".replace(",", " ")
+
+
+def to_display_temp(celsius: float | None, unit: str | None = None) -> float | None:
+    if celsius is None or (isinstance(celsius, float) and math.isnan(celsius)):
+        return None
+    u = (unit or prefs.get_temp_unit()).upper()
+    return celsius * 9.0 / 5.0 + 32.0 if u == "F" else float(celsius)
+
+
+def temp_unit_label(unit: str | None = None) -> str:
+    u = (unit or prefs.get_temp_unit()).upper()
+    return "°F" if u == "F" else "°C"
+
+
+def temp_value(celsius: float | None, digits: int = 0, unit: str | None = None) -> str:
+    v = to_display_temp(celsius, unit)
+    return DASH if v is None else f"{v:.{digits}f}"
+
+
+def fmt_temp(celsius: float | None, digits: int = 0, unit: str | None = None) -> str:
+    v = to_display_temp(celsius, unit)
+    if v is None:
+        return DASH
+    return nb(f"{v:.{digits}f} {temp_unit_label(unit)}")
 
 
 def humanize_error(exc: BaseException) -> str:
@@ -497,10 +523,13 @@ DGPU_POWER_TEXT = {
 
 # -- keyboard -----------------------------------------------------------------------------------
 
-AURA_MODES: dict[int, str] = {
-    0: "Static", 1: "Breathe", 2: "Colour cycle", 3: "Rainbow wave", 4: "Star", 5: "Rain",
-    6: "Highlight", 7: "Laser", 8: "Ripple", 10: "Pulse", 11: "Comet", 12: "Flash",
-}
+try:
+    from ..core.models import AURA_MODES  # canonical table when available in core
+except ImportError:
+    AURA_MODES: dict[int, str] = {
+        0: "Static", 1: "Breathe", 2: "Colour cycle", 3: "Rainbow wave", 4: "Star", 5: "Rain",
+        6: "Highlight", 7: "Laser", 8: "Ripple", 10: "Pulse", 11: "Comet", 12: "Flash",
+    }
 # which inputs each mode takes, as asusctl 6.3 builds them (asusctl/src/aura_cli.rs:
 # SingleColour, TwoColourSpeed, SingleSpeed, SingleSpeedDirection, StarsTwoColour, ...)
 MODE_USES_COLOUR2 = {1, 4}
@@ -926,3 +955,104 @@ def build_apply_config(state, connector: str, mode_id: str):
             entries.append((conn, mid, {}))
         out.append((int(x), int(y), float(scale), int(transform), bool(primary), entries))
     return out
+
+
+# -- fan curve presets & hardware/readiness helpers --------------------------------------------
+
+FAN_PRESETS: dict[str, list[tuple[int, int]]] = {
+    "Silent": [(30, 0), (45, 0), (55, 25), (65, 51), (75, 89), (85, 133), (95, 178), (105, 217)],
+    "Balanced": [(30, 15), (45, 31), (55, 64), (65, 102), (72, 140), (80, 178), (88, 217), (96, 255)],
+    "Cool": [(25, 26), (40, 51), (50, 90), (60, 133), (68, 178), (76, 217), (84, 242), (92, 255)],
+    "Turbo": [(25, 51), (38, 89), (48, 128), (58, 178), (66, 217), (74, 242), (82, 255), (90, 255)],
+}
+
+
+def fan_preset_curve(name: str, fan: str = "CPU", enabled: bool = True) -> FanCurve:
+    pts = FAN_PRESETS[name]
+    return FanCurve(fan, [FanPoint(t, p) for t, p in pts], enabled=enabled).validate()
+
+
+def apply_fan_preset(model: FanCurveModel, name: str) -> None:
+    """Populate a FanCurveModel from a named preset while retaining clean revert history."""
+    curve = fan_preset_curve(name, fan=model.fan, enabled=True)
+    model.points = [(p.temp, p.pwm) for p in curve.points]
+    model.enabled = True
+
+
+def cpu_vendor_info(static: dict | None, policy: dict | None) -> dict[str, str]:
+    """Vendor-neutral CPU presentation labels (handles Intel, AMD Ryzen and generic CPUs)."""
+    model = ((static or {}).get("model") or "").lower()
+    driver = ((policy or {}).get("driver") or "").lower()
+    is_amd = "amd" in driver or "amd" in model or "ryzen" in model or "epyc" in model
+    if is_amd:
+        return {
+            "vendor": "amd",
+            "pstate_title": "amd-pstate" if "amd" in driver else "P-state status",
+            "temp_tip": "k10temp / ACPI package sensor",
+            "rapl_note": ("Package power is unavailable: the kernel restricts energy counters "
+                          "to root or this AMD CPU does not expose powercap / hwmon energy."),
+        }
+    return {
+        "vendor": "intel" if ("intel" in driver or "intel" in model) else "generic",
+        "pstate_title": "intel_pstate" if "intel" in driver else "P-state status",
+        "temp_tip": "coretemp Package thermal sensor",
+        "rapl_note": ("Package power is not measured: the kernel restricts energy counters "
+                      "to root or this CPU does not expose /sys/class/powercap."),
+    }
+
+
+def gpu_vendor_title(info: dict | None, kind: str) -> str:
+    """Clean GPU sidebar/heading name adapting across Intel, AMD and NVIDIA."""
+    data = info or {}
+    name = (data.get("name") or "").lower()
+    driver = (data.get("driver") or "").lower()
+    if kind == "igpu":
+        if "amd" in driver or "radeon" in name or "amd" in name:
+            return "AMD graphics"
+        return "Intel graphics"
+    if ("amd" in driver or "amdgpu" in driver or "radeon" in name) and "nvidia" not in name:
+        return "AMD graphics"
+    if "intel" in name and "nvidia" not in name:
+        return "Intel Arc graphics"
+    return "NVIDIA graphics"
+
+
+def dashboard_readiness(caps: dict | None, caps_error: str | None,
+                        svc_status: dict | None, fake: bool = False) -> dict | None:
+    """Return a gentle first-run/diagnostic banner spec when setup needs attention."""
+    if caps_error:
+        return {
+            "id": "caps-error",
+            "icon": "dialog-warning-symbolic",
+            "title": "Could not probe all hardware capabilities",
+            "body": f"{caps_error}. Live telemetry continues; retry detection when ready.",
+            "action": "retry_caps",
+            "action_label": "Retry detection",
+        }
+    if fake or caps is None:
+        return None
+    hw_keys = (Capability.PROFILE.value, Capability.FAN_CURVES.value,
+               Capability.KBD_RGB.value, Capability.KBD_BRIGHTNESS.value)
+    if caps and not any((caps.get(k) or {}).get("available") for k in hw_keys):
+        return {
+            "id": "no-asusd",
+            "icon": "dialog-information-symbolic",
+            "title": "ASUS hardware controls unavailable",
+            "body": ("No ASUS firmware features responded (check that asusd is running if "
+                     "you are on a supported ASUS laptop). Monitoring, display, and updates "
+                     "still work normally."),
+            "action": "open_about",
+            "action_label": "View support matrix",
+        }
+    if svc_status is not None and not svc_status.get("running", True):
+        return {
+            "id": "daemon-stopped",
+            "icon": "system-run-symbolic",
+            "title": "Background service is not running",
+            "body": ("Start asusiusd for automation rules, software lighting gradients, "
+                     "and background update notifications."),
+            "action": "start_daemon",
+            "action_label": "Start service",
+        }
+    return None
+

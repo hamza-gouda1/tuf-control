@@ -168,11 +168,16 @@ class AutomationPage(Page):
         else:
             sub = "Stopped. Rules and software effects are paused."
         self.svc_row.set_subtitle(sub)
-        if st.get("config_error"):
-            self.cfg_err.set_subtitle(f"The service kept the last good config. Fix the "
-                                      f"settings file and it loads again on its own "
-                                      f"({st['config_error']})")
+        err = st.get("config_error")
+        if err:
+            self.cfg_err.set_subtitle(
+                "The service kept the last good config. Fix the settings file and it loads "
+                f"again on its own ({esc(str(err))})")
+            self.cfg_err.set_tooltip_text(str(err))
             self.cfg_err.set_visible(True)
+        else:
+            self.cfg_err.set_visible(False)
+            self.cfg_err.set_tooltip_text(None)
         self._mark_active()
         self._build_activity()
 
@@ -302,12 +307,27 @@ class AutomationPage(Page):
         def done(msg):
             self.svc_btn.set_sensitive(True)
             self.win.toast("Service stopped" if running else "Service started")
-            GLib.timeout_add(700, lambda: (self.poll_status(), False)[1])
+            prev = getattr(self, "_after_timer", 0)
+            if prev:
+                GLib.source_remove(prev)
+
+            def fire() -> bool:
+                self._after_timer = 0
+                self.poll_status()
+                return False
+
+            self._after_timer = GLib.timeout_add(700, fire)
 
         def fail(exc):
             self.svc_btn.set_sensitive(True)
             self.win.toast_error(exc)
         run_bg(self.client.stop if running else self.client.start, done=done, error=fail)
+
+    def on_hidden(self) -> None:
+        tid = getattr(self, "_after_timer", 0)
+        if tid:
+            GLib.source_remove(tid)
+            self._after_timer = 0
 
     def open_editor(self, rid: str | None) -> RuleDialog:
         rule = next((r for r in self.rules if r.id == rid), None)

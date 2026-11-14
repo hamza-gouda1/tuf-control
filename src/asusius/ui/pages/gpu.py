@@ -11,7 +11,7 @@ from ..viewmodels import (
     DGPU_POWER_TEXT,
     GPU_MODE_INFO,
     GPU_UI_ORDER,
-    fmt_num,
+    fmt_temp,
     gpu_action_text,
     gpu_switch_requirement,
 )
@@ -24,6 +24,7 @@ class GpuPage(Page):
     def __init__(self, win) -> None:
         super().__init__(win)
         self.status = None
+        self._switching = False
         self.banner = Adw.Banner(revealed=False)
         self.modes = Adw.PreferencesGroup(
             title="GPU mode", description="Handled by supergfxd. Some switches need a restart.")
@@ -105,12 +106,12 @@ class GpuPage(Page):
 
     def _sync(self):
         st, target = self.status, self._target()
-        self.switch_btn.set_sensitive(bool(st and target is not None and
+        self.switch_btn.set_sensitive(bool(not self._switching and st and target is not None and
                                            target is not (st.pending_mode or st.mode)))
 
     def _switch(self):
         st, target = self.status, self._target()
-        if not st or target is None:
+        if self._switching or not st or target is None:
             return
         need = gpu_switch_requirement(st.mode, target)
         name = GPU_MODE_INFO[target][0]
@@ -126,13 +127,23 @@ class GpuPage(Page):
             body = f"Cancel the pending switch and stay on {name}."
 
         def go():
+            self._switching = True
+            self._sync()
+
             def done(res):
+                self._switching = False
                 action = res.value if res is not None else None
                 msg = gpu_action_text(action, target) or f"Switched to {name}"
                 self.win.toast(msg)
                 self.refresh()
-            run_bg(lambda: self.ctl.set_gpu_mode(target), done=done,
-                   error=lambda e: (self.win.toast_error(e), self.refresh()))
+
+            def fail(e):
+                self._switching = False
+                self._sync()
+                self.win.toast_error(e)
+                self.refresh()
+
+            run_bg(lambda: self.ctl.set_gpu_mode(target), done=done, error=fail)
 
         self.win.confirm(f"Switch to {name}?", body,
                          "Switch and restart later" if need == "reboot" else "Switch", go,
@@ -140,7 +151,7 @@ class GpuPage(Page):
 
     def on_telemetry(self, t) -> None:
         asleep = t.gpu_runtime not in (None, "active")
-        self.temp_val.set_label("–" if asleep else f"{fmt_num(t.gpu_temp_c)} °C")
+        self.temp_val.set_label("–" if asleep else fmt_temp(t.gpu_temp_c))
         self.draw_val.set_label("–" if asleep else f"{fmt_num(t.gpu_power_w, 1)} W")
         self.power_row.set_subtitle(DGPU_LOST_TEXT if t.gpu_runtime == "error" else "")
         if t.gpu_runtime:

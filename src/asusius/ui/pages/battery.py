@@ -89,23 +89,41 @@ class BatteryPage(Page):
         run_bg(lambda: self.ctl.get_battery_threshold()[0], done=self._got_limit,
                error=self._limit_failed)
         run_bg(lambda: self.ctl.read(Capability.BATTERY_HEALTH)[0], done=self._got_health,
-               error=lambda e: self.h_val.set_label("Unavailable"))
+               error=self._health_failed)
+
+    def on_hidden(self) -> None:
+        if self._pending:
+            GLib.source_remove(self._pending)
+            self._pending = None
 
     def _limit_failed(self, exc) -> None:
         self.limit_err.set_subtitle(
             "Not available right now: the charge limit could not be read. Check that the "
-            "asusd service is running, then restart Asusius.")
+            "asusd service is running, then press Refresh.")
         self.limit_err.set_visible(True)
         self.limit_err.set_tooltip_text(str(exc))
         self.scale.set_sensitive(False)
         self.presets.set_sensitive(False)
+        self.oneshot.set_sensitive(False)
 
     def _got_limit(self, value: int) -> None:
+        self.limit_err.set_visible(False)
+        self.limit_err.set_tooltip_text(None)
+        self.scale.set_sensitive(True)
+        self.presets.set_sensitive(True)
+        self.oneshot.set_sensitive(True)
         self.current = value
         self._quiet = True
         self.adj.set_value(value)
         self._quiet = False
         self._label(value)
+
+    def _health_failed(self, exc) -> None:
+        self.h_val.set_label("Unavailable")
+        self.h_val.set_tooltip_text(str(exc))
+        self.level.set_value(0)
+        self.cap_val.set_label("–")
+        self.cyc_val.set_label("–")
 
     def _label(self, v: int) -> None:
         self.big.set_label(f"{v}%")

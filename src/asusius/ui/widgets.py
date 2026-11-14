@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) Hamza Gouda
-"""Custom widgets: sparkline, stat tile, fan-curve canvas, keyboard preview."""
+"""Custom widgets: fan-curve canvas, keyboard preview and palette swatches."""
 from __future__ import annotations
 
 import math
@@ -11,15 +11,14 @@ from gi.repository import Adw, GLib, Gtk, Pango, PangoCairo
 from . import theme
 from .viewmodels import (
     CurveGeometry,
-    bubble_rect,
     FanCurveModel,
-    History,
+    FrameGate,
+    bubble_rect,
+    is_animated,
+    preview_colour,
     pwm_to_pct,
-    smooth_path,
-    smooth_values,
 )
 from ..core import FanCurve, KbdEffect
-from .viewmodels import FrameGate, is_animated, preview_colour
 
 
 def label(text: str = "", css: tuple[str, ...] = (), xalign: float = 0.0, **kw) -> Gtk.Label:
@@ -27,119 +26,6 @@ def label(text: str = "", css: tuple[str, ...] = (), xalign: float = 0.0, **kw) 
     for c in css:
         lab.add_css_class(c)
     return lab
-
-
-class Sparkline(Gtk.DrawingArea):
-    """Smooth area graph over a History window; redraws on demand."""
-
-    def __init__(self, history: History, floor: float | None = 0.0, min_span: float = 10.0,
-                 height: int = 92) -> None:
-        super().__init__()
-        self.history, self.floor, self.min_span = history, floor, min_span
-        self.add_css_class("sparkline")
-        self.set_content_height(height)
-        self.set_hexpand(True)
-        self.set_draw_func(self._draw)
-        self.now: float | None = None  # fixed clock for screenshots/tests
-
-    def _draw(self, _area, cr, w, h):
-        pal = theme.colours()
-        now = self.now if self.now is not None else time.monotonic()
-        pts = smooth_values(self.history.normalized(now))
-        # baseline grid: three faint lines
-        cr.set_line_width(1)
-        cr.set_source_rgba(*pal["grid"])
-        for k in (0.25, 0.5, 0.75):
-            y = round(h * k) + 0.5
-            cr.move_to(0, y)
-            cr.line_to(w, y)
-        cr.stroke()
-        if len(pts) < 2:
-            return
-        lo, hi = self.history.bounds(self.floor, self.min_span)
-        pad = 3.0
-        xy = [(x * w, pad + (1 - (v - lo) / (hi - lo)) * (h - 2 * pad)) for x, v in pts]
-        segs = smooth_path(xy)
-
-        def path():
-            cr.move_to(*xy[0])
-            for s in segs:
-                cr.curve_to(*s)
-
-        import cairo
-        path()
-        cr.line_to(xy[-1][0], h)
-        cr.line_to(xy[0][0], h)
-        cr.close_path()
-        grad = cairo.LinearGradient(0, 0, 0, h)
-        r, g, b = pal["fill"]
-        grad.add_color_stop_rgba(0, r, g, b, 0.38 if theme.is_dark() else 0.22)
-        grad.add_color_stop_rgba(1, r, g, b, 0.0)
-        cr.set_source(grad)
-        cr.fill()
-        path()
-        cr.set_source_rgb(*pal["line"])
-        cr.set_line_width(2.0)
-        cr.set_line_join(cairo.LINE_JOIN_ROUND)
-        cr.set_line_cap(cairo.LINE_CAP_ROUND)
-        cr.stroke()
-        # live point
-        x, y = xy[-1]
-        cr.set_source_rgb(*pal["line"])
-        cr.arc(min(x, w - 3.5), y, 3.2, 0, 2 * math.pi)
-        cr.fill()
-
-
-class Tile(Gtk.Box):
-    """Dashboard card: title, big tabular number with unit, sub line, optional graph."""
-
-    def __init__(self, title: str, icon: str, unit: str, history: History | None = None,
-                 floor: float | None = 0.0, min_span: float = 10.0) -> None:
-        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-        self.add_css_class("tile")
-        self.set_hexpand(True)
-        head = Gtk.Box(spacing=8)
-        img = Gtk.Image.new_from_icon_name(icon)
-        img.add_css_class("tile-icon")
-        head.append(img)
-        head.append(label(title, ("tile-title",), hexpand=True))
-        self.badge = label("", ("pill",))
-        self.badge.set_visible(False)
-        head.append(self.badge)
-        self.append(head)
-        row = Gtk.Box(spacing=6, margin_top=6)
-        self.value = label("–", ("stat-value",))
-        self.value.set_valign(Gtk.Align.BASELINE_FILL if hasattr(Gtk.Align, "BASELINE_FILL")
-                              else Gtk.Align.BASELINE)
-        self.unit = label(unit, ("stat-unit",))
-        self.unit.set_valign(Gtk.Align.END)
-        row.append(self.value)
-        row.append(self.unit)
-        self.extra = Gtk.Box(spacing=18, halign=Gtk.Align.END, hexpand=True,
-                             valign=Gtk.Align.END)
-        row.append(self.extra)
-        self.append(row)
-        self.sub = label("", ("stat-sub",), ellipsize=Pango.EllipsizeMode.END)
-        self.append(self.sub)
-        self.graph = Sparkline(history, floor, min_span) if history is not None else None
-        if self.graph:
-            self.append(self.graph)
-
-    def add_mini(self, caption: str) -> Gtk.Label:
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        val = label("–", ("mini-value", "numeric"), xalign=1.0)
-        box.append(val)
-        box.append(label(caption, ("mini-label",), xalign=1.0))
-        self.extra.append(box)
-        return val
-
-    def set_badge(self, text: str | None, css: str = "") -> None:
-        self.badge.set_visible(bool(text))
-        self.badge.set_label(text or "")
-        for c in ("accent", "gold"):
-            self.badge.remove_css_class(c)
-        if css:
-            self.badge.add_css_class(css)
 
 
 FAN_CURVE_KEYBOARD_HELP = ("Move between points with [ and ] (or , and .). "
@@ -353,9 +239,12 @@ class FanCurveCanvas(Gtk.DrawingArea):
             tw, th = layout.get_pixel_size()
             bx, by, bw, bh = bubble_rect(x, y, tw, th, w, h, g.left, g.right)
             _round_rect(cr, bx, by, bw, bh, 7)
-            cr.set_source_rgba(*pal["line"], 0.95)
-            cr.fill()
-            cr.set_source_rgb(1, 0.97, 0.96)
+            cr.set_source_rgba(*pal["fill"], 0.96)
+            cr.fill_preserve()
+            cr.set_source_rgba(*pal["line"], 0.55)
+            cr.set_line_width(1.0)
+            cr.stroke()
+            cr.set_source_rgb(1.0, 0.96, 0.95)
             cr.move_to(bx + 8, by + 4)
             PangoCairo.show_layout(cr, layout)
 
@@ -369,15 +258,31 @@ def _round_rect(cr, x, y, w, h, r):
     cr.close_path()
 
 
+# Realistic 6-row staggered laptop keyboard specification: (height_ratio, [(width_units, tag), ...])
+# Tag strings: "ESC", "W", "A", "S", "D" get accent keycap styling; "SPC" renders a glowing bar;
+# None renders a gap spacer without drawing a keycap.
+_KEY_SPEC: list[tuple[float, list[tuple[float, str | None]]]] = [
+    (0.72, [(1.2, "ESC"), (0.35, None), (0.95, ""), (0.95, ""), (0.95, ""), (0.95, ""),
+            (0.25, None), (0.95, ""), (0.95, ""), (0.95, ""), (0.95, ""), (0.25, None),
+            (0.95, ""), (0.95, ""), (0.95, ""), (0.95, ""), (0.25, None), (1.15, "")]),
+    (1.0, [(1.0, "")] * 13 + [(2.0, "")]),
+    (1.0, [(1.5, ""), (1.0, ""), (1.0, "W")] + [(1.0, "")] * 10 + [(1.5, "")]),
+    (1.0, [(1.75, ""), (1.0, "A"), (1.0, "S"), (1.0, "D")] + [(1.0, "")] * 9 + [(2.25, "")]),
+    (1.0, [(2.25, "")] + [(1.0, "")] * 10 + [(1.75, ""), (1.0, ""), (1.0, "")]),
+    (1.04, [(1.25, ""), (1.0, "FN"), (1.0, ""), (1.25, ""), (5.5, "SPC"),
+            (1.0, ""), (1.0, ""), (1.0, ""), (1.0, ""), (1.0, "")]),
+]
+_WASD_TAGS = frozenset({"W", "A", "S", "D"})
+
+
 class KeyboardPreview(Gtk.DrawingArea):
-    """Animated approximation of the hardware effect on a stylised key grid.
+    """Animated approximation of the hardware effect on a stylised staggered laptop deck.
 
     Static effects are drawn once (on change, resize or theme switch). Animated ones are
     redrawn from one ~15 fps timer (10 when frames are slow) that exists only while the
-    widget is mapped and the window is visible. Key geometry is cached per size and the
-    colour is computed once per frame (once per column/row for the rainbow wave)."""
+    widget is mapped, brightness is nonzero, and the window is visible."""
 
-    COLS, ROWS = 15, 5
+    COLS, ROWS = 15, 6
 
     def __init__(self) -> None:
         super().__init__()
@@ -385,7 +290,7 @@ class KeyboardPreview(Gtk.DrawingArea):
         self.brightness = 3
         self.breathe = "alternate"  # how Breathe looks on this keyboard (preview_colour)
         self.add_css_class("kbd-preview")
-        self.set_content_height(132)
+        self.set_content_height(152)
         self.set_hexpand(True)
         self.set_draw_func(self._draw)
         self.gate = FrameGate()
@@ -433,7 +338,8 @@ class KeyboardPreview(Gtk.DrawingArea):
                     and not r.get_property("suspended"))
 
     def _sync(self) -> None:
-        want = self._shown() and is_animated(self.effect) \
+        lit = self.brightness > 0 or type(self) is not KeyboardPreview
+        want = self._shown() and lit and is_animated(self.effect) \
             and not Adw.StyleManager.get_default().get_high_contrast()
         if want and self._timer is None:
             self.queue_draw()
@@ -465,18 +371,30 @@ class KeyboardPreview(Gtk.DrawingArea):
     # -- drawing ----------------------------------------------------------------------------
     def _layout(self, w: int, h: int) -> list:
         if self._geom is None or self._geom[0] != (w, h):
-            pad, gap = 14.0, 5.0
-            kw = (w - 2 * pad - gap * (self.COLS - 1)) / self.COLS
-            kh = (h - 2 * pad - gap * (self.ROWS - 1)) / self.ROWS
+            pad_x = 14.0 if w >= 380 else 10.0
+            pad_y = 12.0
+            gap_x = 4.0 if w >= 420 else 2.5
+            gap_y = 4.0
+            inner_w = max(40.0, w - 2 * pad_x)
+            inner_h = max(40.0, h - 2 * pad_y)
+            total_hr = sum(hr for hr, _ in _KEY_SPEC)
+            unit_h = (inner_h - gap_y * (len(_KEY_SPEC) - 1)) / total_hr
             keys = []
-            for row in range(self.ROWS):
-                for col in range(self.COLS):
-                    x, y, ww = pad + col * (kw + gap), pad + row * (kh + gap), kw
-                    if row == self.ROWS - 1 and 4 <= col <= 9:  # space bar
-                        if col != 4:
-                            continue
-                        ww = kw * 6 + gap * 5
-                    keys.append((x, y, ww, kh, (x + ww / 2) / w, (y + kh / 2) / h))
+            y = pad_y
+            for hr, row in _KEY_SPEC:
+                kh = max(4.0, unit_h * hr)
+                n_gaps = sum(1 for _, tag in row if tag is not None) - 1
+                total_u = sum(u for u, _ in row)
+                unit_w = max(2.0, (inner_w - max(0, n_gaps) * gap_x) / total_u)
+                x = pad_x
+                for u, tag in row:
+                    ww = u * unit_w
+                    if tag is not None:
+                        keys.append((x, y, ww, kh, (x + ww / 2) / w, (y + kh / 2) / h, tag))
+                        x += ww + gap_x
+                    else:
+                        x += ww
+                y += kh + gap_y
             self._geom = ((w, h), keys)
         return self._geom[1]
 
@@ -484,16 +402,25 @@ class KeyboardPreview(Gtk.DrawingArea):
         start = time.perf_counter()
         t = self.fixed_t if self.fixed_t is not None else time.monotonic() - self.t0
         dark = theme.is_dark()
+        # outer brushed chassis + recessed tray well
         _round_rect(cr, 0, 0, w, h, 14)
-        cr.set_source_rgb(*((0.07, 0.05, 0.06) if dark else (0.16, 0.12, 0.13)))
+        cr.set_source_rgb(*((0.06, 0.048, 0.055) if dark else (0.14, 0.11, 0.12)))
         cr.fill()
+        _round_rect(cr, 0.5, 0.5, w - 1, h - 1, 14)
+        cr.set_source_rgba(1, 1, 1, 0.09 if dark else 0.16)
+        cr.set_line_width(1.0)
+        cr.stroke()
+        _round_rect(cr, 7, 7, max(10, w - 14), max(10, h - 14), 9)
+        cr.set_source_rgb(*((0.032, 0.026, 0.030) if dark else (0.075, 0.058, 0.064)))
+        cr.fill()
+
         eff, bri = self.effect, self.brightness
         wave = eff.mode == 3  # only the rainbow wave depends on the key position
         vertical = eff.direction in (2, 3)
         cache: dict[float, tuple] = {}
         flat = None if wave else preview_colour(eff, t, 0.0, bri, self.breathe)
-        cr.set_line_width(1)
-        for x, y, ww, kh, px, py in self._layout(w, h):
+        layout = None
+        for x, y, ww, kh, px, py, tag in self._layout(w, h):
             if wave:
                 pos = round(py if vertical else px, 3)
                 col = cache.get(pos)
@@ -501,11 +428,51 @@ class KeyboardPreview(Gtk.DrawingArea):
                     col = cache[pos] = preview_colour(eff, t, pos, bri)
             else:
                 col = flat
-            _round_rect(cr, x, y, ww, kh, 4)
-            cr.set_source_rgb(0.12 + col[0] * 0.88, 0.10 + col[1] * 0.88, 0.11 + col[2] * 0.88)
+            glow = max(col)
+            rad = min(4.2, kh * 0.28, ww * 0.25)
+            if glow > 0.03:
+                _round_rect(cr, x - 1.5, y - 0.8, ww + 3.0, kh + 2.8, rad + 1.2)
+                cr.set_source_rgba(col[0], col[1], col[2], 0.22 * min(1.0, glow))
+                cr.fill()
+            # keycap base skirt + slightly darker matte keytop
+            _round_rect(cr, x, y, ww, kh, rad)
+            if tag == "ESC":
+                cr.set_source_rgb(0.24 + col[0] * 0.55, 0.09 + col[1] * 0.35, 0.13 + col[2] * 0.42)
+            elif tag in _WASD_TAGS:
+                cr.set_source_rgb(0.14 + col[0] * 0.62, 0.13 + col[1] * 0.62, 0.14 + col[2] * 0.62)
+            else:
+                cr.set_source_rgb(0.10 + col[0] * 0.50, 0.088 + col[1] * 0.50, 0.095 + col[2] * 0.50)
             cr.fill_preserve()
-            cr.set_source_rgba(1, 1, 1, 0.06)
+            cr.set_line_width(1.1 if tag in _WASD_TAGS else 0.9)
+            if glow > 0.03:
+                cr.set_source_rgba(0.2 + col[0] * 0.8, 0.2 + col[1] * 0.8, 0.2 + col[2] * 0.8,
+                                   0.72 if tag in _WASD_TAGS else 0.48)
+            else:
+                cr.set_source_rgba(1, 1, 1, 0.18 if tag in _WASD_TAGS else 0.09)
             cr.stroke()
+            # top bevel catchlight
+            if ww > 8 and kh > 8:
+                cr.move_to(x + rad, y + 1.2)
+                cr.line_to(x + ww - rad, y + 1.2)
+                cr.set_source_rgba(1, 1, 1, 0.12 if tag in _WASD_TAGS else 0.07)
+                cr.set_line_width(1.0)
+                cr.stroke()
+            if tag == "SPC" and glow > 0.02:
+                bar_w = ww * 0.36
+                _round_rect(cr, x + (ww - bar_w) / 2, y + kh * 0.42, bar_w, 2.2, 1.1)
+                cr.set_source_rgba(min(1.0, col[0] + 0.15), min(1.0, col[1] + 0.15),
+                                   min(1.0, col[2] + 0.15), 0.95)
+                cr.fill()
+            elif tag in _WASD_TAGS and ww >= 16 and kh >= 14:
+                if layout is None:
+                    layout = PangoCairo.create_layout(cr)
+                    layout.set_font_description(Pango.FontDescription.from_string("Sans Bold 7"))
+                layout.set_text(tag, -1)
+                tw, th = layout.get_pixel_size()
+                cr.set_source_rgba(0.7 + col[0] * 0.3, 0.68 + col[1] * 0.3, 0.68 + col[2] * 0.3,
+                                   0.90 if glow > 0.05 else 0.55)
+                cr.move_to(x + (ww - tw) / 2, y + (kh - th) / 2 - 0.5)
+                PangoCairo.show_layout(cr, layout)
         self.gate.add_cost(time.perf_counter() - start)
 
 

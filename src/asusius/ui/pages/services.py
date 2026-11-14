@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from gi.repository import Adw, Gio, GLib, GObject, Gtk, Pango
+from gi.repository import Gio, GLib, GObject, Gtk, Pango
 
 from ...services.backend import make_backend
 from ...services.units import OPERATIONS, Unit, allowed_ops, counts, filter_units, sort_units
@@ -72,6 +72,7 @@ class ServicesPage(Page):
         self._ticks = 0
         self._busy = False
         self._shown = False
+        self._after_id = 0
         self.selected: Unit | None = None
         self.last_dialog = None
 
@@ -196,6 +197,9 @@ class ServicesPage(Page):
     def on_hidden(self) -> None:
         """Drop the rows; nothing runs until the page is shown again."""
         self._shown = False
+        if self._after_id:
+            GLib.source_remove(self._after_id)
+            self._after_id = 0
         self.store.remove_all()
         self.rows.clear()
         self.units = []
@@ -225,8 +229,8 @@ class ServicesPage(Page):
         def fail(exc):
             self._busy = False
             self.summary.set_label(f"The {scope} unit list could not be read from systemd. "
-                                   "Try again by switching the scope or reopening this "
-                                   "page.")
+                                   "Try switching the scope or pressing Ctrl+R.")
+            self.summary.set_tooltip_text(str(exc))
 
         run_bg(be.list_units, force_files, done=done, error=fail)
 
@@ -401,9 +405,16 @@ class ServicesPage(Page):
 
     def _act(self, u: Unit, op: str) -> None:
         be = self.backend()
-        self.win.run_write(lambda: be.act(u, op), f"{OP_LABELS[op]}: {u.name}",
-                           after=lambda _r: GLib.timeout_add(600, self._after_act))
+
+        def schedule(_r) -> None:
+            if self._after_id:
+                GLib.source_remove(self._after_id)
+            self._after_id = GLib.timeout_add(600, self._after_act)
+
+        self.win.run_write(lambda: be.act(u, op), f"{OP_LABELS[op]}: {u.name}", after=schedule)
 
     def _after_act(self) -> bool:
-        self.refresh(force_files=True)
+        self._after_id = 0
+        if self._shown:
+            self.refresh(force_files=True)
         return GLib.SOURCE_REMOVE

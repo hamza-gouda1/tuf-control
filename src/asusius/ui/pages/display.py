@@ -2,7 +2,7 @@
 # Copyright (C) Hamza Gouda
 from __future__ import annotations
 
-from gi.repository import Adw, Gtk
+from gi.repository import Adw, GLib, Gtk
 
 from ..display_config import make_display_config
 from ..tasks import run_bg
@@ -38,8 +38,10 @@ class DisplayPage(Page):
 
         self.vrr = Adw.PreferencesGroup(title="Variable refresh rate")
         self.vrr_row = info_row(
-            "Set in GNOME", "VRR is experimental in GNOME 46+. Enable the "
-            "“variable-refresh-rate” Mutter feature, then choose it in Settings › Displays.",
+            "Enable in desktop settings",
+            "On GNOME 46+ enable the “variable-refresh-rate” Mutter feature and choose it in "
+            "Settings › Displays; on KDE Plasma, Sway, or Hyprland turn on Adaptive Sync in "
+            "your compositor settings.",
             "preferences-desktop-display-symbolic")
         self.vrr.add(self.vrr_row)
         self.set_child(prefs_page(self.panel, self.vrr))
@@ -51,13 +53,16 @@ class DisplayPage(Page):
 
     def _state_failed(self, exc) -> None:
         self.rate_row.set_sensitive(False)
-        self.msg.set_subtitle("The desktop's display service did not report the screen's "
-                              "current mode, so the controls are off. Restart Asusius "
-                              "to try again.")
+        self.msg.set_subtitle(
+            "The desktop's display service did not report the screen's current mode "
+            "(available under GNOME/Mutter; use your compositor's display settings elsewhere). "
+            "Press Ctrl+R to try again.")
         self.msg.set_visible(True)
         self.msg.set_tooltip_text(str(exc))
 
     def _got_state(self, state) -> None:
+        self.msg.set_visible(False)
+        self.msg.set_tooltip_text(None)
         self.state = state
         mons = parse_display_state(state)
         self.monitor = next((m for m in mons if m.builtin), mons[0] if mons else None)
@@ -86,27 +91,29 @@ class DisplayPage(Page):
             self.rate_box.append(b)
         self._quiet = False
         self.rate_row.set_sensitive(True)
-        self.vrr_row.set_title("Supported by this panel" if m.vrr_supported else "Set in GNOME")
+        self.vrr_row.set_title("Supported by this panel" if m.vrr_supported
+                               else "Enable in desktop settings")
 
     def _pick_rate(self, b, mode) -> None:
         if self._quiet or not b.get_active() or self.state is None or self.monitor is None:
             return
         prev = self.monitor.current
+        conn = self.monitor.connector
 
         def ok(_res):
-            self.win.toast(f"Refresh rate set to {mode.label}",
-                           undo=(lambda: self._apply(prev)) if prev else None)
+            undo = (lambda c=conn, mid=prev.id: self._apply_mode(c, mid)) if prev else None
+            self.win.toast(f"Refresh rate set to {mode.label}", undo=undo)
             self.refresh()
 
         def fail(exc):
             self.win.toast_error(exc)
             self.refresh()
 
-        self.dc.set_mode(self.state, self.monitor.connector, mode.id, ok, fail)
+        self.dc.set_mode(self.state, conn, mode.id, ok, fail)
 
-    def _apply(self, mode) -> None:
-        if self.state and self.monitor:
-            self.dc.set_mode(self.state, self.monitor.connector, mode.id,
+    def _apply_mode(self, connector: str, mode_id: str) -> None:
+        if self.state:
+            self.dc.set_mode(self.state, connector, mode_id,
                              lambda _r: self.refresh(), self.win.toast_error)
 
     def _attrs(self, attrs, exc=None) -> None:
@@ -114,11 +121,15 @@ class DisplayPage(Page):
         self._quiet = True
         if od is None:
             self.overdrive.set_sensitive(False)
-            self.overdrive.set_subtitle("Panel overdrive is not available on this laptop" +
-                                        (f" (the firmware settings could not be read: {exc})"
-                                         if exc else ""))
+            detail = GLib.markup_escape_text(str(exc)) if exc else ""
+            self.overdrive.set_subtitle(
+                "Panel overdrive is not available on this laptop"
+                + (f" (firmware settings could not be read: {detail})" if detail else ""))
+            self.overdrive.set_tooltip_text(str(exc) if exc else None)
         else:
             self.overdrive.set_sensitive(True)
+            self.overdrive.set_subtitle("Faster pixel response, less motion blur")
+            self.overdrive.set_tooltip_text(None)
             self.overdrive.set_active(str(od.current) == "1")
         self._quiet = False
 

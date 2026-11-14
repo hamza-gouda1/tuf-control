@@ -34,7 +34,26 @@
 .profile-chip { background-color: alpha(@accent_bg_color, 0.35); }
 .profile-chip:hover { background-color: alpha(@accent_bg_color, 0.48); }
 .profile-card:checked { background-color: alpha(@accent_bg_color, 0.30); }
+.profile-card:checked .card-icon-badge {
+  background-color: alpha(@accent_bg_color, 0.38);
+  color: @window_fg_color;
+}
 .pill.accent { background-color: alpha(@accent_bg_color, 0.4); color: @window_fg_color; }
+.linked > button { border-color: alpha(#EEE7E4, 0.15); }
+button.suggested-action:disabled {
+  background-color: alpha(@accent_bg_color, 0.38);
+  color: alpha(@window_fg_color, 0.74);
+}
+.quick-pill.accent {
+  background-color: alpha(@accent_bg_color, 0.34);
+  color: @window_fg_color;
+  border-color: alpha(@accent_color, 0.36);
+}
+.quick-pill.accent:hover { background-color: alpha(@accent_bg_color, 0.48); }
+.setup-card {
+  background-color: alpha(@gold_color, 0.12);
+  border-color: alpha(@gold_color, 0.32);
+}
 
 /* the softer secondary text that is fine on dark */
 .dim-label, .subtitle, row.property > box.header > box.title > .title, .stat-unit, .mini-label, .about-version { opacity: 0.55; }

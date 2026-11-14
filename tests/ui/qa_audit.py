@@ -11,7 +11,6 @@ contrast is too low. Focus order and focus-ring checks are in `focus_order` / `f
 """
 from __future__ import annotations
 
-import os
 import re
 
 import gi

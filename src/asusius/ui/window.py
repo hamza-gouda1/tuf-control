@@ -13,12 +13,19 @@ from ..core import Capability, Profile, Telemetry
 from .live import LiveHub
 from .pages.base import Page
 from .tasks import run_bg
-from .viewmodels import PROFILE_INFO, PROFILE_ORDER, battery_icon, humanize_error, \
-    power_state_text
+from .viewmodels import (
+    PROFILE_INFO,
+    PROFILE_ORDER,
+    battery_icon,
+    gpu_vendor_title,
+    humanize_error,
+    power_state_text,
+)
 from .widgets import label
 
 PARK_AFTER_S = 30  # a hidden monitor detail page is destroyed after this long
 PROFILE_EVERY = 2  # ticks between profile reads (the header chip follows outside changes)
+_UNCHANGED = object()
 
 # (key, sidebar title, icon, module, class); pages are imported and built on first visit
 MONITOR = [
@@ -30,7 +37,7 @@ MONITOR = [
     ("dgpu", "NVIDIA graphics", "applications-graphics-symbolic", "gpu_monitor",
      "NvidiaGpuPage"),
     ("igpu", "Intel graphics", "video-display-symbolic", "gpu_monitor", "IntelGpuPage"),
-    ("fanmon", "Fans & temps", "weather-windy-symbolic", "fanmon", "FanMonitorPage"),
+    ("fanmon", "Fans & temperatures", "weather-windy-symbolic", "fanmon", "FanMonitorPage"),
     ("storage", "Storage", "drive-harddisk-solidstate-symbolic", "storage", "StoragePage"),
     ("network", "Network", "network-transmit-receive-symbolic", "network", "NetworkPage"),
 ]
@@ -85,11 +92,17 @@ class MainWindow(Adw.ApplicationWindow):
         self.set_size_request(360, 480)
         self.ctl = ctl
         self.caps: dict | None = None
+        self.caps_error: str | None = None
         self.profile: Profile | None = None
         self.fake = bool(os.environ.get(FAKE_ROOT_ENV))
         self._profile_busy = False
         self._profile_reading = False
         self.current: str | None = None
+        self._trim_id: int | None = None
+        self._park_ids: dict[str, int] = {}
+        self._reveal_id: int | None = None
+        self._updates_checking = False
+        self._hw_sig: tuple | None = None
         self.hub = LiveHub(os.environ.get(FAKE_ROOT_ENV) or None)
         self.hub.listeners.append(self._on_sample)
         _load_monitor_css()
@@ -104,6 +117,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.SINGLE)
         self.list.add_css_class("navigation-sidebar")
         self.rows: dict[str, Gtk.ListBoxRow] = {}
+        self._row_titles: dict[str, Gtk.Label] = {}
         for section, items in NAV:
             for i, (key, title, icon, _m, _c) in enumerate(items):
                 row = Gtk.ListBoxRow()
@@ -111,7 +125,9 @@ class MainWindow(Adw.ApplicationWindow):
                 row.section = section if i == 0 else None
                 box = Gtk.Box(spacing=12)
                 box.append(Gtk.Image.new_from_icon_name(icon))
-                box.append(label(title, hexpand=key == "updates"))
+                title_lbl = label(title, hexpand=key == "updates")
+                self._row_titles[key] = title_lbl
+                box.append(title_lbl)
                 if key == "updates":  # count of pending updates, from the cached check
                     self.updates_badge = label("", ("nav-badge", "numeric"), xalign=0.5,
                                                visible=False, valign=Gtk.Align.CENTER)
@@ -152,6 +168,9 @@ class MainWindow(Adw.ApplicationWindow):
         head = Adw.HeaderBar()
         self.title = Adw.WindowTitle(title="Dashboard")
         head.set_title_widget(self.title)
+        self._install_window_actions()
+        head.pack_end(self._header_menu())
+        head.pack_end(self._jump_button())
         head.pack_end(self._profile_chip())
         head.pack_end(self._power_indicator())
         self.content_tv.add_top_bar(head)
@@ -176,6 +195,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.tight.add_setter(self.split, "collapsed", True)
         self.tight.add_setter(self.pw_box, "visible", False)
         self.tight.add_setter(self.chip_label, "visible", False)
+        self.tight.add_setter(self.jump_btn, "visible", False)
         self.add_breakpoint(self.tight)
 
         self.list.select_row(self.rows["dashboard"])
@@ -233,17 +253,29 @@ class MainWindow(Adw.ApplicationWindow):
     def _park(self, key: str) -> bool:
         """Destroy a monitor page nobody is looking at; it is rebuilt (quickly) on return.
         The history lives in the shared store, so nothing is lost."""
+        self._park_ids.pop(key, None)
         page = self.pages.get_built(key)
         if page is not None and key != self.current:
             self.responders = [f for f in self.responders if getattr(
                 f, "__self__", None) is not page]
             self.stack.remove(page)
             del self.pages.built[key]
-            GLib.timeout_add_seconds(1, self._trim)
+            self._schedule_trim(1)
         return GLib.SOURCE_REMOVE
 
-    @staticmethod
-    def _trim() -> bool:
+    def _schedule_park(self, key: str) -> None:
+        old_id = self._park_ids.pop(key, None)
+        if old_id is not None:
+            GLib.source_remove(old_id)
+        self._park_ids[key] = GLib.timeout_add_seconds(PARK_AFTER_S, self._park, key)
+
+    def _schedule_trim(self, delay_s: int = 2) -> None:
+        if self._trim_id is not None:
+            GLib.source_remove(self._trim_id)
+        self._trim_id = GLib.timeout_add_seconds(delay_s, self._trim)
+
+    def _trim(self) -> bool:
+        self._trim_id = None
         import gc
 
         from .lean import trim
@@ -268,10 +300,12 @@ class MainWindow(Adw.ApplicationWindow):
             if hasattr(old, "on_hidden"):
                 old.on_hidden()
             if getattr(old, "is_monitor_page", False) and old.key != "dashboard":
-                GLib.timeout_add_seconds(PARK_AFTER_S, self._park, old.key)
-            GLib.timeout_add_seconds(2, self._trim)
+                self._schedule_park(old.key)
+            self._schedule_trim(2)
         self.current = row.key
-        GLib.idle_add(self._reveal_row, row)
+        if self._reveal_id is not None:
+            GLib.source_remove(self._reveal_id)
+        self._reveal_id = GLib.idle_add(self._reveal_row, row)
         self.stack.set_visible_child_name(row.key)
         self.title.set_title(page.title)
         self.title.set_tooltip_text(page.title)
@@ -283,6 +317,7 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _reveal_row(self, row) -> bool:
         """Keep the selected sidebar row on screen (a short window scrolls the list)."""
+        self._reveal_id = None
         vp = self.side_scroll.get_child()
         if row.get_mapped() and vp is not None and hasattr(vp, "scroll_to"):
             vp.scroll_to(row, None)
@@ -291,6 +326,7 @@ class MainWindow(Adw.ApplicationWindow):
     def show_page(self, key: str) -> None:
         row = self.rows.get(key)
         if row is not None:
+            row.set_visible(True)
             self.list.select_row(row)
             self.split.set_show_content(True)
 
@@ -304,20 +340,47 @@ class MainWindow(Adw.ApplicationWindow):
             self.hub.stop()
 
     # -- data --------------------------------------------------------------------------------
+    def retry_caps(self) -> None:
+        self.caps_error = None
+        self._load_caps()
+
+    def _fallback_caps(self, exc: BaseException) -> dict:
+        msg = str(exc).strip() or type(exc).__name__
+        return {c.value: {"available": False, "backend": None, "fallbacks": [],
+                          "unavailable": {"probe": msg}} for c in Capability}
+
     def _load_caps(self) -> None:
         def done(caps):
             self.caps = caps
+            self.caps_error = None
             self._read_profile()
             for page in self.pages.built.values():
                 if page.loaded:
                     page.refresh()
             if self.current:
                 self.pages[self.current].on_shown()
-            if not caps["profile"]["available"]:
-                self.chip.set_sensitive(False)
+            avail = bool(caps.get("profile", {}).get("available"))
+            self.chip.set_sensitive(avail)
+            if not avail:
                 self.chip_label.set_label("Profile unavailable")
 
-        run_bg(self.ctl.capabilities, done=done, error=self.toast_error)
+        def fail(exc):
+            self.caps_error = humanize_error(exc)
+            self.caps = self._fallback_caps(exc)
+            self.chip.set_sensitive(False)
+            self.chip_label.set_label("Profile unavailable")
+            for page in self.pages.built.values():
+                if page.loaded:
+                    page.refresh()
+            if self.current:
+                self.pages[self.current].on_shown()
+            t = Adw.Toast(title=GLib.markup_escape_text(self._toast_text(self.caps_error)),
+                          timeout=6)
+            t.set_button_label("Retry")
+            t.connect("button-clicked", lambda *_: self.retry_caps())
+            self.toasts.add_toast(t)
+
+        run_bg(self.ctl.capabilities, done=done, error=fail)
 
     def _read_profile(self) -> None:
         if self._profile_reading:
@@ -364,25 +427,58 @@ class MainWindow(Adw.ApplicationWindow):
         self.updates_badge.set_tooltip_text(f"{n} updates available" if n else None)
 
     def _poll_updates_badge(self) -> None:
-        """stat() the update cache (written by asusiusd or the Updates page); read it
-        only when it changed."""
-        from ..updates.check import cache_path
-        try:
-            st = cache_path().stat()
-            sig = (st.st_mtime_ns, st.st_size)
-        except OSError:
-            sig = None
-        if sig == self._updates_sig:
+        """stat() the update cache off-thread (written by asusiusd or Updates) and update badge."""
+        if self._updates_checking:
             return
-        self._updates_sig = sig
+        self._updates_checking = True
+        prev_sig = self._updates_sig
 
-        def read():
-            from ..updates.check import load_report
+        def check():
+            from ..updates.check import cache_path, load_report
+            try:
+                st = cache_path().stat()
+                sig = (st.st_mtime_ns, st.st_size)
+            except OSError:
+                sig = None
+            if sig == prev_sig:
+                return sig, _UNCHANGED
             rep = load_report()
-            return rep.total if rep else None
-        run_bg(read, done=self.set_updates_count, error=lambda e: None)
+            return sig, (rep.total if rep else None)
+
+        def done(res):
+            self._updates_checking = False
+            sig, count = res
+            self._updates_sig = sig
+            if count is not _UNCHANGED:
+                self.set_updates_count(count)
+
+        def fail(_exc):
+            self._updates_checking = False
+
+        run_bg(check, done=done, error=fail)
+
+    def _sync_sidebar_hardware(self, info: dict) -> None:
+        ig = info.get("igpu") or {}
+        dg = info.get("dgpu") or {}
+        if not ig and not dg:
+            return
+        ig_present = bool(ig.get("present", True))
+        dg_present = bool(dg.get("present", True)) or dg.get("runtime") == "error"
+        ig_title = gpu_vendor_title(ig, "igpu")
+        dg_title = gpu_vendor_title(dg, "dgpu")
+        sig = (ig_present, ig_title, dg_present, dg_title, self.current)
+        if sig == self._hw_sig:
+            return
+        self._hw_sig = sig
+        if "igpu" in self._row_titles:
+            self._row_titles["igpu"].set_label(ig_title)
+            self.rows["igpu"].set_visible(ig_present or self.current == "igpu")
+        if "dgpu" in self._row_titles:
+            self._row_titles["dgpu"].set_label(dg_title)
+            self.rows["dgpu"].set_visible(dg_present or self.current == "dgpu")
 
     def _on_sample(self, hub) -> None:
+        self._sync_sidebar_hardware(hub.info)
         self._updates_ticks += 1
         if self._updates_ticks % 30 == 0:
             self._poll_updates_badge()
@@ -403,6 +499,141 @@ class MainWindow(Adw.ApplicationWindow):
             page.on_telemetry(t)
 
     # -- header widgets ---------------------------------------------------------------------
+    def _install_window_actions(self) -> None:
+        for name, cb in (("quick-jump", lambda *_: self._show_quick_jump()),
+                         ("shortcuts", lambda *_: self._show_shortcuts()),
+                         ("refresh-all", lambda *_: self.refresh_all()),
+                         ("about", lambda *_: self.show_page("about"))):
+            act = Gio.SimpleAction.new(name, None)
+            act.connect("activate", cb)
+            self.add_action(act)
+
+    def _jump_button(self) -> Gtk.Widget:
+        btn = Gtk.Button(icon_name="system-search-symbolic",
+                         tooltip_text="Jump to page (Ctrl+K)", valign=Gtk.Align.CENTER)
+        btn.add_css_class("flat")
+        btn.connect("clicked", lambda *_: self._show_quick_jump())
+        self.jump_btn = btn
+        return btn
+
+    def _header_menu(self) -> Gtk.Widget:
+        menu = Gio.Menu()
+        appearance = Gio.Menu()
+        appearance.append("Follow system", "app.scheme::system")
+        appearance.append("Dark", "app.scheme::dark")
+        appearance.append("Light", "app.scheme::light")
+        menu.append_submenu("Appearance", appearance)
+
+        units = Gio.Menu()
+        units.append("Celsius (°C)", "app.temp_unit::C")
+        units.append("Fahrenheit (°F)", "app.temp_unit::F")
+        menu.append_submenu("Temperature unit", units)
+
+        actions = Gio.Menu()
+        actions.append("Jump to page…", "win.quick-jump")
+        actions.append("Keyboard shortcuts", "win.shortcuts")
+        actions.append("Refresh", "win.refresh-all")
+        actions.append("About Asusius", "win.about")
+        menu.append_section(None, actions)
+
+        btn = Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu,
+                             tooltip_text="Menu & preferences", valign=Gtk.Align.CENTER)
+        btn.add_css_class("flat")
+        return btn
+
+    def refresh_all(self) -> None:
+        self._load_caps()
+        if self.current:
+            page = self.pages.get_built(self.current)
+            if page is not None:
+                page.refresh()
+
+    def refresh_temperature_unit(self) -> None:
+        t = self.telemetry()
+        self.on_telemetry(t)
+        if self.current:
+            page = self.pages.get_built(self.current)
+            if page is not None:
+                if getattr(page, "is_monitor_page", False):
+                    page.update()
+                else:
+                    page.refresh()
+
+    def _show_quick_jump(self) -> None:
+        dlg = Adw.Dialog(title="Jump to page", content_width=420, content_height=460)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10,
+                      margin_top=14, margin_bottom=14, margin_start=14, margin_end=14)
+        hdr = Adw.HeaderBar(show_title=True)
+        tv = Adw.ToolbarView()
+        tv.add_top_bar(hdr)
+        search = Gtk.SearchEntry(placeholder_text="Filter pages…")
+        box.append(search)
+        lb = Gtk.ListBox(selection_mode=Gtk.SelectionMode.SINGLE)
+        lb.add_css_class("quick-jump-list")
+        entries: list[tuple[Gtk.ListBoxRow, str, str]] = []
+        for section, items in NAV:
+            for key, title, icon, _m, _c in items:
+                display = self._row_titles[key].get_label() if key in self._row_titles else title
+                row = Gtk.ListBoxRow()
+                row.key = key
+                rbox = Gtk.Box(spacing=12)
+                rbox.append(Gtk.Image.new_from_icon_name(icon))
+                rbox.append(label(display, hexpand=True))
+                rbox.append(label(section, ("pill", "dim"), valign=Gtk.Align.CENTER))
+                row.set_child(rbox)
+                lb.append(row)
+                entries.append((row, display.lower(), f"{section.lower()} {key}"))
+        scroller = Gtk.ScrolledWindow(child=lb, vexpand=True,
+                                      hscrollbar_policy=Gtk.PolicyType.NEVER)
+        box.append(scroller)
+        tv.set_content(box)
+        dlg.set_child(tv)
+
+        def filter_rows(*_):
+            q = search.get_text().strip().lower()
+            first = None
+            for row, d_lo, meta in entries:
+                vis = (not q) or (q in d_lo) or (q in meta)
+                row.set_visible(vis)
+                if vis and first is None:
+                    first = row
+            if first is not None:
+                lb.select_row(first)
+
+        def activate_key(row):
+            if row is not None and row.get_visible():
+                dlg.close()
+                self.show_page(row.key)
+
+        search.connect("search-changed", filter_rows)
+        search.connect("activate", lambda *_: activate_key(lb.get_selected_row()))
+        lb.connect("row-activated", lambda _lb, row: activate_key(row))
+        filter_rows()
+        dlg.present(self)
+        search.grab_focus()
+        self.last_dialog = dlg
+
+    def _show_shortcuts(self) -> None:
+        win = Gtk.ShortcutsWindow(transient_for=self, modal=True)
+        sec_nav = Gtk.ShortcutsSection(section_name="navigation", title="General", visible=True)
+        grp_app = Gtk.ShortcutsGroup(title="Window & navigation", visible=True)
+        for accel, desc in (("<Control>k", "Jump to page"),
+                            ("<Control>r", "Refresh active page"),
+                            ("<Control>question", "Keyboard shortcuts"),
+                            ("<Control>w", "Close window"),
+                            ("<Control>q", "Quit Asusius")):
+            grp_app.append(Gtk.ShortcutsShortcut(accelerator=accel, title=desc, visible=True))
+        sec_nav.append(grp_app)
+        grp_fans = Gtk.ShortcutsGroup(title="Fan curve editor", visible=True)
+        for accel, desc in (("bracketleft bracketright", "Select previous / next point"),
+                            ("Left Right", "Adjust point temperature"),
+                            ("Up Down", "Adjust point fan speed")):
+            grp_fans.append(Gtk.ShortcutsShortcut(accelerator=accel, title=desc, visible=True))
+        sec_nav.append(grp_fans)
+        win.add_section(sec_nav)
+        win.present()
+        self.last_dialog = win
+
     def _profile_chip(self) -> Gtk.Widget:
         act = Gio.SimpleAction.new_stateful("profile", GLib.VariantType.new("s"),
                                             GLib.Variant("s", ""))
@@ -531,6 +762,18 @@ class MainWindow(Adw.ApplicationWindow):
         self.last_dialog = dlg
 
     def _on_close(self, *_):
+        if self._trim_id is not None:
+            GLib.source_remove(self._trim_id)
+            self._trim_id = None
+        if self._reveal_id is not None:
+            GLib.source_remove(self._reveal_id)
+            self._reveal_id = None
+        for sid in list(self._park_ids.values()):
+            GLib.source_remove(sid)
+        self._park_ids.clear()
+        for page in list(self.pages.built.values()):
+            if hasattr(page, "on_hidden"):
+                page.on_hidden()
         self.hub.close()
         return False
 
@@ -539,7 +782,7 @@ _css_loaded = False
 
 
 def _load_monitor_css() -> None:
-    """monitor.css: styles for the monitor pages, kept apart from the shared style.css."""
+    """monitor.css and system.css, both with @MONO@ resolved to the detected monospace font."""
     global _css_loaded
     if _css_loaded:
         return
@@ -549,9 +792,10 @@ def _load_monitor_css() -> None:
     from gi.repository import Gdk
 
     from .theme import mono_family
-    css = (Path(__file__).with_name("monitor.css")).read_text().replace("@MONO@",
-                                                                        mono_family())
-    css += "\n" + Path(__file__).with_name("system.css").read_text()  # updates, services
+    mono = mono_family()
+    here = Path(__file__).resolve()
+    css = here.with_name("monitor.css").read_text().replace("@MONO@", mono)
+    css += "\n" + here.with_name("system.css").read_text().replace("@MONO@", mono)
     prov = Gtk.CssProvider()
     prov.load_from_string(css)
     Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), prov,

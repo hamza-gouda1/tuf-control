@@ -47,6 +47,7 @@ class AgentAccessPage(Page):
         self._ticks = 0
         self._sigs: tuple = ()
         self._busy = False
+        self._stat_busy = False
         self.pending_rows: list[Gtk.Widget] = []
         self.last_dialog = None
 
@@ -63,13 +64,13 @@ class AgentAccessPage(Page):
         self.master.connect("notify::active", self._on_master)
         self.level = Adw.ComboRow(title="Access level", model=Gtk.StringList.new(
             [policy.LEVEL_TITLES[x] for x in present.PAGE_LEVELS]))
-        self.level.set_subtitle_lines(0)
         self.level.connect("notify::selected", self._on_level)
+        self.level_help = info_row("About this level", "", "dialog-information-symbolic")
         self.high = Adw.SwitchRow(title="High-risk tools",
                                   subtitle="Fan curves, GPU mode, power limits, restore "
                                            "defaults. Each call needs your approval.")
         self.high.connect("notify::active", self._on_high)
-        for r in (self.master, self.level, self.high):
+        for r in (self.master, self.level, self.level_help, self.high):
             self.access_g.add(r)
 
         # standing approval
@@ -120,7 +121,7 @@ class AgentAccessPage(Page):
         self.connect_g.add(cmd)
         self.connect_g.add(info_row(
             "Speaks the Model Context Protocol over stdio",
-            "Tools, resources and prompts are listed in docs/AGENT_API.md. Scripts can use "
+            "Tools, resources and prompts are declared directly over MCP; scripts can use "
             "“asusius agent …” and “--json” instead.", "dialog-information-symbolic"))
 
         self.set_child(prefs_page(self.access_g, self.pending_g, self.standing_g,
@@ -155,10 +156,20 @@ class AgentAccessPage(Page):
         self._ticks += 1
         if self._ticks % FORCE_EVERY == 0:
             self._sigs = ()
-        if self._ticks % CHECK_EVERY:
+        if self._ticks % CHECK_EVERY or self._stat_busy:
             return
-        if tuple(_sig(p) for p in self._paths()) != self._sigs:
-            self.refresh()
+        self._stat_busy = True
+        paths = self._paths()
+
+        def check():
+            return tuple(_sig(p) for p in paths)
+
+        def done(sigs):
+            self._stat_busy = False
+            if self.loaded and self.win.current == self.key and sigs != self._sigs:
+                self.refresh()
+
+        run_bg(check, done=done, error=lambda _e: setattr(self, "_stat_busy", False))
 
     def _got(self, res) -> None:
         self._busy = False
@@ -170,7 +181,7 @@ class AgentAccessPage(Page):
         self.master.set_subtitle(esc(present.master_subtitle(acc)))
         lvl = acc.level if acc.level in present.PAGE_LEVELS else "read"
         self.level.set_selected(present.PAGE_LEVELS.index(lvl))
-        self.level.set_subtitle(esc(present.LEVEL_HELP[lvl]))
+        self.level_help.set_subtitle(esc(present.LEVEL_HELP[lvl]))
         self.level.set_tooltip_text(f"Access level: {policy.LEVEL_TITLES[lvl]}")
         self.high.set_active(acc.high_risk_tools)
         self._quiet = False
@@ -181,8 +192,7 @@ class AgentAccessPage(Page):
         self.st_row.set_subtitle(esc(present.standing_text(acc)))
         self.st_dur.set_visible(g is None)
         self.st_btn.set_label("End now" if g else "Allow")
-        if g:
-            self.st_btn.remove_css_class("suggested-action")
+        (self.st_btn.remove_css_class if g else self.st_btn.add_css_class)("suggested-action")
         self.st_row.set_sensitive(on)
         self._build_pending(pending)
         self._build_activity(audit)

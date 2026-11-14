@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) Hamza Gouda
-"""Detail pages for the Intel iGPU and the NVIDIA dGPU."""
+"""Detail pages for integrated (Intel / AMD) and discrete GPUs."""
 from __future__ import annotations
 
 from gi.repository import Gtk, Pango
@@ -9,7 +9,7 @@ from ...telemetry import fmt
 from ...telemetry.gpu_intel import ENGINE_NAMES
 from ...telemetry.util import join, read_str
 from ..charts import Line, legend
-from ..viewmodels import DGPU_LOST_TEXT
+from ..viewmodels import DGPU_LOST_TEXT, fmt_temp, gpu_vendor_title
 from ..widgets import label
 from .monitor_base import MonitorPage, StatGrid, note, set_text
 
@@ -80,12 +80,13 @@ class ProcTable(Gtk.Box):
 
 
 class IntelGpuPage(MonitorPage):
-    key, title = "igpu", "Intel graphics"
+    key, title = "igpu", "Integrated graphics"
 
     def __init__(self, win) -> None:
         super().__init__(win)
         ig = self.hub.sampler.igpu
-        self.name, self.sub, self.pills = self.header(ig.name or "Intel graphics", "")
+        self.name, self.sub, self.pills = self.header(
+            gpu_vendor_title({"name": getattr(ig, "name", "")}, "igpu"), "")
         p = self.panel("Utilisation", suffix=legend([("render engine busy", "primary"),
                                                      ("GT awake (not in RC6)", "gold")]))
         p.append(self.chart([Line("igpu.util", "render"),
@@ -101,9 +102,9 @@ class IntelGpuPage(MonitorPage):
                               ("throttle", "Throttling", "throttle_reason_status")):
             self.stats.add(key, cap, tip)
         p.append(self.stats)
-        p.append(note("Utilisation is summed from the per-client engine time the i915/xe "
-                      "driver publishes in /proc/<pid>/fdinfo, for processes this app may "
-                      "read (your session). The iGPU has no VRAM: it shares system memory."))
+        p.append(note("Utilisation is summed from the per-client engine time the DRM driver "
+                      "(i915 / xe / amdgpu) publishes in /proc/<pid>/fdinfo, for processes this "
+                      "app may read (your session). The iGPU shares system memory."))
         fp = self.panel("Clock", suffix=legend([("actual MHz", "primary"),
                                                 ("requested MHz", "gold")]))
         fp.append(self.chart([Line("igpu.freq", "actual"),
@@ -123,9 +124,10 @@ class IntelGpuPage(MonitorPage):
     def update(self) -> None:
         st = self.hub.store
         ig = self.hub.info.get("igpu") or {}
+        set_text(self.name, ig.get("name") or gpu_vendor_title(ig, "igpu"))
         if not ig.get("present"):
-            set_text(self.sub, "The kernel reports no Intel graphics device, so this page "
-                               "has nothing to show.")
+            set_text(self.sub, "No integrated graphics device is reported by the kernel, so "
+                               "this page has nothing to show.")
             return
         set_text(self.sub, f"{ig.get('driver')} · {ig.get('pdev')} · shares system memory")
         g = self.stats
@@ -200,15 +202,19 @@ class NvidiaGpuPage(MonitorPage):
     def fit_width(self, level: int) -> None:
         self.procs.set_show_pid(level < 3)
 
+    def refresh_temperature_unit(self) -> None:
+        self.update()
+
     def update(self) -> None:
         st = self.hub.store
         dg = self.hub.info.get("dgpu") or {}
+        vendor = gpu_vendor_title(dg, "dgpu")
         g = self.stats
         # PCI power errors are meaningful even when NVML could not initialise.
         # Check them before the missing-backend state so recovery advice stays visible.
         if dg.get("state") == "lost" or dg.get("runtime") == "error":
-            set_text(self.name, dg.get("name") or "NVIDIA graphics")
-            set_text(self.sub, "NVIDIA graphics are unavailable until the laptop restarts.")
+            set_text(self.name, dg.get("name") or vendor)
+            set_text(self.sub, f"{vendor} is unavailable until the laptop restarts.")
             set_text(self.state_label, "Unavailable")
             self.sleep_note.set_visible(True)
             set_text(self.sleep_note, DGPU_LOST_TEXT)
@@ -221,15 +227,16 @@ class NvidiaGpuPage(MonitorPage):
             self.redraw()
             return
         if not dg.get("present") or not dg.get("backend"):
-            set_text(self.sub, "The NVIDIA driver could not provide readings. Check that "
-                               "it is installed and working, then reopen this page.")
+            set_text(self.name, dg.get("name") or vendor)
+            set_text(self.sub, f"No readings from {vendor}. Check that the driver is "
+                               "installed and working, then reopen this page.")
             self.sleep_note.set_visible(False)
             self.sub.set_tooltip_text(dg.get("reason") or None)
             set_text(self.state_label, "Unavailable")
             self.procs.set_rows([])
             return
         self.sub.set_tooltip_text(None)
-        set_text(self.name, dg.get("name") or "NVIDIA graphics")
+        set_text(self.name, dg.get("name") or vendor)
         stt = dg.get("state")
         rs, ps = dg.get("runtime"), dg.get("power_state")
         set_text(self.sub, f"{dg.get('addr')} · read through "
@@ -282,7 +289,7 @@ class NvidiaGpuPage(MonitorPage):
             self.vram_chart.y_fixed = (0, total / (1 << 30))
         g.set("gr", f"{fmt.num(q.get('gr_mhz'))} / {fmt.num(sta.get('max_gr_mhz'))} MHz")
         g.set("mem", f"{fmt.num(q.get('mem_mhz'))} MHz")
-        g.set("temp", fmt.temp(q.get("temp")))
+        g.set("temp", fmt_temp(q.get("temp")))
         g.set("power", f"{fmt.watts(q.get('power'))} · {fmt.watts(q.get('power_limit'), 0)}")
         g.set("pstate", f"P{q['pstate']}" if q.get("pstate") is not None else "–")
         fan = q.get("fan")

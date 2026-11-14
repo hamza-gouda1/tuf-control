@@ -28,8 +28,8 @@ COLUMNS = [  # key, title, width chars, tooltip
     ("mem", "Memory", 8, "Private memory: resident minus shared pages (statm)"),
     ("swap", "Swap", 8, "Swapped-out memory of the process (VmSwap in /proc/PID/status)"),
     ("disk", "Drive", 9, "Read + write at the storage layer, per second (your processes only)"),
-    ("gpu", "GPU", 5, "Busiest engine on the iGPU (DRM fdinfo) or SM use on the dGPU (NVML)"),
-    ("vram", "GPU memory", 9, "dGPU memory (NVML)"),
+    ("gpu", "GPU", 5, "Busiest engine on the iGPU (DRM fdinfo) or dGPU"),
+    ("vram", "GPU memory", 9, "dGPU memory"),
 ]
 SORT_KEYS = {
     "name": lambda r: r.name.lower(),
@@ -190,6 +190,8 @@ class ProcessesPage(MonitorPage):
         self.rows: dict = {}
         self.apps: dict[str, tuple[str, object] | None] = {}  # app id -> (name, gicon)
         self._dindex: dict | None = None
+        self._dindex_busy = False
+        self._quit_timer = 0
         self._aligned = False
         self.view = "apps"
         self._gen = -1
@@ -207,11 +209,15 @@ class ProcessesPage(MonitorPage):
 
     # -- visibility --------------------------------------------------------------------
     def on_shown(self) -> None:
+        self._warm_desktop_index()
         self.hub.want_processes(True)
         super().on_shown()
 
     def on_hidden(self) -> None:
         """Release everything: the walk stops and the rows are dropped."""
+        if self._quit_timer:
+            GLib.source_remove(self._quit_timer)
+            self._quit_timer = 0
         self.hub.want_processes(False)
         self.root_store.remove_all()
         self.rows.clear()
@@ -309,15 +315,35 @@ class ProcessesPage(MonitorPage):
         self.apps[app_id] = found
         return found
 
+    def _warm_desktop_index(self) -> None:
+        """Pre-index installed .desktop entries off the main thread."""
+        if self._dindex is not None or self._dindex_busy:
+            return
+        self._dindex_busy = True
+
+        def build():
+            return desktop_index(
+                (info, info.get_id() or "", info.get_startup_wm_class(),
+                 info.get_string("Exec") or "")
+                for info in Gio.AppInfo.get_all()
+                if isinstance(info, Gio.DesktopAppInfo))
+
+        def done(idx):
+            self._dindex_busy = False
+            if self._dindex is None:
+                self._dindex = idx
+                self.apps.clear()
+                if self.hub.procs:
+                    self._rebuild(force=True)
+
+        from ..tasks import run_bg
+        run_bg(build, done=done, error=lambda _e: setattr(self, "_dindex_busy", False))
+
     def _desktop_index(self) -> dict:
-        """Built once, on first need: every installed app by id, StartupWMClass and exec."""
+        """Return the cached desktop index, warming in background if not ready yet."""
         if self._dindex is None:
-            def entries():
-                for info in Gio.AppInfo.get_all():
-                    if isinstance(info, Gio.DesktopAppInfo):
-                        yield (info, info.get_id() or "", info.get_startup_wm_class(),
-                               info.get_string("Exec") or "")
-            self._dindex = desktop_index(entries())
+            self._warm_desktop_index()
+            return {}
         return self._dindex
 
     def _mode_changed(self, b, key):
@@ -597,6 +623,7 @@ class ProcessesPage(MonitorPage):
         self.win.toast(f"Asked {what} to quit")
 
         def check():
+            self._quit_timer = 0
             left = [(p, s) for p, s in targets if alive(p, s)]
             if left:
                 self.win.confirm(f"{what} is still running",
@@ -606,4 +633,6 @@ class ProcessesPage(MonitorPage):
                                  destructive=True)
             return GLib.SOURCE_REMOVE
 
-        GLib.timeout_add(3000, check)
+        if self._quit_timer:
+            GLib.source_remove(self._quit_timer)
+        self._quit_timer = GLib.timeout_add(3000, check)

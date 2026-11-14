@@ -41,7 +41,12 @@ checkbutton check:checked, checkbutton radio:checked {
   color: @gold_color;
 }
 switch:checked { background-color: @accent_bg_color; }
-.linked > button.toggle:checked { background-color: @accent_bg_color; color: @accent_fg_color; }
+.linked > button { border-color: alpha(@window_fg_color, 0.14); }
+.linked > button.toggle:checked {
+  background-color: @accent_bg_color;
+  color: @accent_fg_color;
+  border-color: @accent_bg_color;
+}
 switch:checked > slider { background-color: @accent_fg_color; }
 
 /* numerals */
@@ -150,6 +155,85 @@ button.palette-button { padding: 4px; min-width: 0; min-height: 0; }
 
 /* destructive action tone in dialogs stays default; suggested uses burgundy */
 button.suggested-action { background-color: @accent_bg_color; color: @accent_fg_color; }
+button.suggested-action:disabled {
+  background-color: alpha(@accent_bg_color, 0.20);
+  color: alpha(@window_fg_color, 0.72);
+}
+
+/* Adwaita banner action buttons: keep pill padding instead of flush vertical stretch */
+banner button {
+  margin-top: 6px;
+  margin-bottom: 6px;
+  margin-end: 8px;
+  min-height: 30px;
+  padding: 4px 14px;
+  border-radius: 999px;
+}
+
+/* Dashboard quick-control strip, setup banner & preset chips */
+.quick-pill {
+  border-radius: 999px;
+  padding: 4px 12px;
+  min-height: 30px;
+  font-size: 0.86em;
+  font-weight: 600;
+  background-color: alpha(@window_fg_color, 0.06);
+  border: 1px solid @tile_border;
+}
+.quick-pill:hover { background-color: alpha(@window_fg_color, 0.11); }
+.quick-pill.accent {
+  background-color: alpha(@accent_bg_color, 0.15);
+  border-color: alpha(@accent_bg_color, 0.35);
+  color: @accent_color;
+}
+.quick-pill.accent:hover { background-color: alpha(@accent_bg_color, 0.22); }
+.quick-pill.gold {
+  background-color: alpha(@gold_color, 0.18);
+  border-color: alpha(@gold_color, 0.38);
+  color: @window_fg_color;
+}
+
+.setup-card {
+  padding: 14px 16px;
+  border-radius: 14px;
+  background-color: alpha(@gold_color, 0.10);
+  border: 1px solid alpha(@gold_color, 0.38);
+}
+
+.preset-chip {
+  border-radius: 999px;
+  padding: 3px 12px;
+  min-height: 28px;
+  font-size: 0.85em;
+  font-weight: 600;
+  background-color: alpha(@window_fg_color, 0.06);
+  border: 1px solid @tile_border;
+}
+.preset-chip:hover { background-color: alpha(@accent_bg_color, 0.14); border-color: alpha(@accent_bg_color, 0.32); }
+
+.card-icon-badge {
+  border-radius: 10px;
+  padding: 7px;
+  background-color: alpha(@window_fg_color, 0.06);
+}
+.profile-card:checked .card-icon-badge {
+  background-color: alpha(@accent_bg_color, 0.20);
+  color: @accent_color;
+}
+.live-pill {
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 0.84em;
+  font-weight: 600;
+  background-color: alpha(@window_fg_color, 0.06);
+  border: 1px solid @tile_border;
+}
+
+.quick-jump-list > row {
+  border-radius: 10px;
+  padding: 8px 12px;
+  margin: 2px 6px;
+}
 
 /* Secondary text. Light: Adwaita's 55 % is only ~3.7:1 on white, below WCAG AA (4.5:1);
    72 % is ~5:1. style-dark.css puts the original softer values back (they pass on dark). */
@@ -164,3 +248,4 @@ headerbar { min-height: 50px; }
 .content-area list.boxed-list > row { min-height: 60px; }
 .content-area button, .content-area dropdown > button { min-height: 36px; }
 .content-area switch { min-height: 28px; }
+.bri-toggle > button { padding: 4px 10px; min-width: 0; }

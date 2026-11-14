@@ -7,7 +7,7 @@ from pathlib import Path
 
 from gi.repository import Adw, Gdk, Gtk, Pango, PangoCairo
 
-from ..brand_palette import BURGUNDY, GOLD, PALETTE
+from ..brand_palette import PALETTE
 
 HERE = Path(__file__).resolve().parent
 _mono_family: str | None = None

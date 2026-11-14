@@ -5,12 +5,22 @@ from __future__ import annotations
 
 from gi.repository import Gtk, Pango
 
-from ...core import Capability
 from ...telemetry import fmt
+from .. import prefs
 from ..charts import Line
-from ..viewmodels import GPU_MODE_INFO, PROFILE_INFO
+from ..tasks import run_bg
+from ..viewmodels import (
+    GPU_MODE_INFO,
+    PROFILE_INFO,
+    PROFILE_ORDER,
+    dashboard_readiness,
+    fmt_rpm,
+    fmt_temp,
+    gpu_vendor_title,
+    temp_unit_label,
+    temp_value,
+)
 from ..widgets import label
-from .base import pill
 from .monitor_base import WINDOW_S, MonitorPage, set_text
 
 GIB = 1 << 30
@@ -69,6 +79,8 @@ class MetricCard(Gtk.Box):
         cap.set_ellipsize(Pango.EllipsizeMode.END)
         cap.set_tooltip_text(caption)
         box.append(cap)
+        self.cap_labels = getattr(self, "cap_labels", {})
+        self.cap_labels[caption] = cap
         self.extra.append(box)
         return val
 
@@ -97,15 +109,48 @@ class DashboardPage(MonitorPage):
     def __init__(self, win) -> None:
         super().__init__(win)
         self.gpu_mode = self.threshold = self.health = None
+        self._svc_status = None
+        self._setup_spec = None
+        self._toggling_bat = False
         self.heading, self.caption, _ = self.header("Overview", "Live readings, last two minutes")
-        self.pills = Gtk.Box(spacing=6, halign=Gtk.Align.START)
+
+        self.pills = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE, homogeneous=False,
+                                 min_children_per_line=1, max_children_per_line=6,
+                                 column_spacing=8, row_spacing=6, halign=Gtk.Align.FILL)
         self.body.append(self.pills)
+
+        # dismissible setup / readiness card (shown only when a diagnostic needs action)
+        self.setup_card = Gtk.Box(spacing=12, valign=Gtk.Align.CENTER, visible=False)
+        self.setup_card.add_css_class("setup-card")
+        self.setup_icon = Gtk.Image.new_from_icon_name("dialog-information-symbolic")
+        self.setup_icon.set_valign(Gtk.Align.START)
+        self.setup_card.append(self.setup_icon)
+        stexts = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, hexpand=True)
+        self.setup_title = label("", ("panel-title",), wrap=True,
+                                 wrap_mode=Pango.WrapMode.WORD_CHAR)
+        self.setup_body = label("", ("section-caption",), wrap=True,
+                                wrap_mode=Pango.WrapMode.WORD_CHAR)
+        stexts.append(self.setup_title)
+        stexts.append(self.setup_body)
+        self.setup_card.append(stexts)
+        self.setup_btn = Gtk.Button(valign=Gtk.Align.CENTER)
+        self.setup_btn.add_css_class("pill-button")
+        self.setup_btn.connect("clicked", lambda *_: self._run_setup_action())
+        self.setup_card.append(self.setup_btn)
+        dismiss = Gtk.Button(icon_name="window-close-symbolic", valign=Gtk.Align.START,
+                             tooltip_text="Dismiss setup hint")
+        dismiss.add_css_class("flat")
+        dismiss.add_css_class("circular")
+        dismiss.connect("clicked", lambda *_: self._dismiss_setup())
+        self.setup_card.append(dismiss)
+        self.body.append(self.setup_card)
+
         pct = dict(y_fixed=(0, 100), fmt=lambda v: f"{v:.0f}%")
         rpm = dict(y_fixed=(0, 7000), fmt=lambda v: f"{v / 1000:g}k")
         rate = dict(floor=0, min_span=1e6, fmt=fmt.axis_rate)
         C = MetricCard
         self.cpu = C(self, "cpu", "Processor", "computer-symbolic", [Line("cpu.total")], **pct)
-        self.cpu_temp = self.cpu.mini("°C pkg")
+        self.cpu_temp = self.cpu.mini("pkg")
         self.cpu_freq = self.cpu.mini("GHz avg")
         self.mem = C(self, "memory", "Memory", "media-flash-symbolic",
                      [Line("mem.in_use", scale=1 / GIB)], floor=0, min_span=16,
@@ -118,19 +163,19 @@ class DashboardPage(MonitorPage):
         self.igpu_awake = self.igpu.mini("% awake")
         self.dgpu = C(self, "dgpu", "NVIDIA graphics", "applications-graphics-symbolic",
                       [Line("dgpu.util")], **pct)
-        self.dgpu_temp = self.dgpu.mini("°C")
+        self.dgpu_temp = self.dgpu.mini("gpu_t")
         self.dgpu_power = self.dgpu.mini("W")
         self.fan_cpu = C(self, "fanmon", "CPU fan", "weather-windy-symbolic",
                          [Line("fan.cpu")], **rpm)
-        self.fan_cpu_t = self.fan_cpu.mini("°C cpu")
+        self.fan_cpu_t = self.fan_cpu.mini("cpu_t")
         self.fan_gpu = C(self, "fanmon", "GPU fan", "weather-windy-symbolic",
                          [Line("fan.gpu", color="gold")], **rpm)
-        self.fan_gpu_t = self.fan_gpu.mini("°C gpu")
+        self.fan_gpu_t = self.fan_gpu.mini("gpu_fan_t")
         self.disk = C(self, "storage", "Storage", "drive-harddisk-solidstate-symbolic",
                       [Line("disk.read", "read"),
                        Line("disk.write", "write", color="gold", fill=False)], **rate)
         self.disk_w = self.disk.mini("write")
-        self.disk_t = self.disk.mini("°C")
+        self.disk_t = self.disk.mini("disk_t")
         self.net = C(self, "network", "Network", "network-transmit-receive-symbolic",
                      [Line("net.rx", "down"), Line("net.tx", "up", color="gold", fill=False)],
                      **rate)
@@ -139,6 +184,7 @@ class DashboardPage(MonitorPage):
                      [Line("bat.power")], floor=0, min_span=60, fmt=lambda v: f"{v:g} W")
         self.bat_pct = self.bat.mini("% charge")
         self.bat_health = self.bat.mini("% health")
+        self._sync_temp_labels()
 
         flow = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE, homogeneous=True,
                            max_children_per_line=3, min_children_per_line=1,
@@ -154,31 +200,136 @@ class DashboardPage(MonitorPage):
         self.flow = flow
         self.body.append(flow)
 
-    # -- summary pills (profile, GPU mode, charge limit) ---------------------------------
-    def refresh(self) -> None:
-        from ..tasks import run_bg
+    # -- summary quick-controls + readiness ---------------------------------------------------
+    def _sync_temp_labels(self) -> None:
+        u = temp_unit_label()
+        mapping = ((self.cpu, "pkg", f"{u} pkg"),
+                   (self.dgpu, "gpu_t", u),
+                   (self.fan_cpu, "cpu_t", f"{u} cpu"),
+                   (self.fan_gpu, "gpu_fan_t", f"{u} gpu"),
+                   (self.disk, "disk_t", u))
+        for card, key, text in mapping:
+            lbl = getattr(card, "cap_labels", {}).get(key)
+            if lbl is not None:
+                set_text(lbl, text)
+                lbl.set_tooltip_text(text)
 
+    def refresh(self) -> None:
         def summary():
-            out = {}
+            out: dict = {}
             for key, fn in (("gpu", lambda: self.ctl.get_gpu_status()[0]),
                             ("thr", lambda: self.ctl.get_battery_threshold()[0])):
                 try:
                     out[key] = fn()
                 except Exception:  # each summary item is optional
                     out[key] = None
+            try:
+                from ...daemon.client import DaemonClient
+                out["svc"] = DaemonClient().status()
+            except Exception:
+                out["svc"] = None
             return out
 
         def done(res):
             self.gpu_mode, self.threshold = res["gpu"], res["thr"]
+            self._svc_status = res.get("svc")
             self._pills()
+            self._sync_setup()
 
         if self.win.caps is not None:  # after the controller's probe (it is not reentrant)
             run_bg(summary, done=done)
+        self._sync_setup()
         self.update()
+
+    def _sync_setup(self) -> None:
+        spec = dashboard_readiness(self.win.caps, self.win.caps_error,
+                                   self._svc_status, self.win.fake)
+        if spec is None or (spec["id"] != "caps-error"
+                            and prefs.load_prefs().get("dismissed_setup")):
+            self.setup_card.set_visible(False)
+            self._setup_spec = None
+            return
+        self._setup_spec = spec
+        self.setup_icon.set_from_icon_name(spec["icon"])
+        set_text(self.setup_title, spec["title"])
+        set_text(self.setup_body, spec["body"])
+        self.setup_btn.set_label(spec["action_label"])
+        self.setup_btn.set_sensitive(True)
+        self.setup_card.set_visible(True)
+
+    def _dismiss_setup(self) -> None:
+        prefs.save_prefs(dismissed_setup=True)
+        self.setup_card.set_visible(False)
+
+    def _run_setup_action(self) -> None:
+        if not self._setup_spec:
+            return
+        act = self._setup_spec["action"]
+        if act == "retry_caps":
+            self.win.retry_caps()
+        elif act == "open_about":
+            self.win.show_page("about")
+        elif act == "start_daemon":
+            from ...daemon.client import DaemonClient
+            self.setup_btn.set_sensitive(False)
+
+            def start():
+                DaemonClient().start()
+                return DaemonClient().status()
+
+            def done(st):
+                self._svc_status = st
+                self._sync_setup()
+                self.win.toast("Background service started")
+
+            def fail(exc):
+                self.setup_btn.set_sensitive(True)
+                self.win.toast_error(exc)
+
+            run_bg(start, done=done, error=fail)
+
+    def _append_pill(self, btn: Gtk.Button) -> None:
+        self.pills.append(btn)
+        child = btn.get_parent()
+        if child is not None:
+            child.set_focusable(False)
+
+    def _cycle_profile(self) -> None:
+        cur = self.win.profile
+        if cur not in PROFILE_ORDER:
+            nxt = PROFILE_ORDER[1]
+        else:
+            nxt = PROFILE_ORDER[(PROFILE_ORDER.index(cur) + 1) % len(PROFILE_ORDER)]
+        self.win.request_profile(nxt)
+
+    def _toggle_charge_limit(self) -> None:
+        if self._toggling_bat or self.threshold is None:
+            self.win.show_page("battery")
+            return
+        target = 100 if self.threshold < 95 else 80
+        self._toggling_bat = True
+
+        def done(_res=None):
+            self._toggling_bat = False
+            self.threshold = target
+            self._pills()
+
+        def err():
+            self._toggling_bat = False
+
+        self.win.run_write(lambda: self.ctl.set_battery_threshold(target),
+                           f"Charge limit set to {target}%", after=done, on_error=err)
 
     def _pills(self, profile=None) -> None:
         prof = profile or self.win.profile
-        key = (prof, self.gpu_mode.mode if self.gpu_mode else None, self.threshold)
+        st = self.hub.store
+        cpu_t = st.last("temp.cpu")
+        cpu_r = st.last("fan.cpu")
+        unit = prefs.get_temp_unit()
+        therm = (f"{fmt_temp(cpu_t, unit=unit)}"
+                 + (f" · {fmt_rpm(cpu_r)} rpm" if cpu_r is not None else ""))
+        key = (prof, self.gpu_mode.mode if self.gpu_mode else None, self.threshold,
+               cpu_t is not None, round(cpu_t or 0), round(cpu_r or -1), unit)
         if key == getattr(self, "_pill_key", None):
             return
         self._pill_key = key
@@ -188,11 +339,45 @@ class DashboardPage(MonitorPage):
             self.pills.remove(child)
             child = nxt
         if prof is not None:
-            self.pills.append(pill(PROFILE_INFO[prof][0], "accent"))
+            title, _sub, icon = PROFILE_INFO[prof]
+            b = Gtk.Button(tooltip_text=f"{title} profile — click to cycle mode")
+            b.add_css_class("quick-pill")
+            b.add_css_class("accent")
+            box = Gtk.Box(spacing=6)
+            box.append(Gtk.Image.new_from_icon_name(icon))
+            box.append(label(title))
+            b.set_child(box)
+            b.connect("clicked", lambda *_: self._cycle_profile())
+            self._append_pill(b)
         if self.gpu_mode is not None:
-            self.pills.append(pill(GPU_MODE_INFO[self.gpu_mode.mode][0] + " graphics"))
+            gname = GPU_MODE_INFO[self.gpu_mode.mode][0] + " graphics"
+            b = Gtk.Button(tooltip_text="Click to change GPU mode")
+            b.add_css_class("quick-pill")
+            box = Gtk.Box(spacing=6)
+            box.append(Gtk.Image.new_from_icon_name("applications-graphics-symbolic"))
+            box.append(label(gname))
+            b.set_child(box)
+            b.connect("clicked", lambda *_: self.win.show_page("gpu"))
+            self._append_pill(b)
         if self.threshold is not None:
-            self.pills.append(pill(f"Charge limit {self.threshold}%"))
+            b = Gtk.Button(tooltip_text="Click to toggle 80% / 100% battery charge limit")
+            b.add_css_class("quick-pill")
+            box = Gtk.Box(spacing=6)
+            box.append(Gtk.Image.new_from_icon_name("battery-good-symbolic"))
+            box.append(label(f"Charge limit {self.threshold}%"))
+            b.set_child(box)
+            b.connect("clicked", lambda *_: self._toggle_charge_limit())
+            self._append_pill(b)
+        if cpu_t is not None or cpu_r is not None:
+            b = Gtk.Button(tooltip_text="Open Fans & temperatures monitor")
+            b.add_css_class("quick-pill")
+            b.add_css_class("gold")
+            box = Gtk.Box(spacing=6)
+            box.append(Gtk.Image.new_from_icon_name("weather-windy-symbolic"))
+            box.append(label(therm, ("numeric",)))
+            b.set_child(box)
+            b.connect("clicked", lambda *_: self.win.show_page("fanmon"))
+            self._append_pill(b)
 
     def on_telemetry(self, t) -> None:
         if t.profile is not None:
@@ -204,6 +389,8 @@ class DashboardPage(MonitorPage):
         return st.stats(key, (st.last_t or 0) - WINDOW_S)
 
     def update(self) -> None:
+        self._sync_temp_labels()
+        self._pills()
         st = self.hub.store
         info = self.hub.info
         last = st.last
@@ -211,7 +398,7 @@ class DashboardPage(MonitorPage):
         cpu = info.get("cpu") or {}
         static = self.hub.sampler.cpu.static
         self.cpu.set_value(fmt.num(last("cpu.total")), "%")
-        set_text(self.cpu_temp, fmt.num(last("temp.cpu")))
+        set_text(self.cpu_temp, temp_value(last("temp.cpu")))
         f = last("cpu.freq.avg")
         set_text(self.cpu_freq, f"{f / 1000:.2f}" if f else "–")
         load = cpu.get("load")
@@ -232,6 +419,10 @@ class DashboardPage(MonitorPage):
                  f"{fmt.bytes_(mem.get('buff_cache'))}" if used is not None and total else "")
         # iGPU
         ig = info.get("igpu") or {}
+        dg = info.get("dgpu") or {}
+        ig_title = gpu_vendor_title(ig, "igpu")
+        if self.igpu.get_parent() is not None:
+            self.igpu.get_parent().set_visible(bool(ig.get("present")) or not dg.get("present"))
         if ig.get("present"):
             self.igpu.set_value(fmt.num(last("igpu.util")), "%")
             set_text(self.igpu_freq, fmt.num(last("igpu.freq")))
@@ -239,18 +430,16 @@ class DashboardPage(MonitorPage):
             req = last("igpu.freq_req")
             set_text(self.igpu.foot, "render engine busy" +
                      (f" · requested {req:.0f} MHz" if req is not None else ""))
-            set_text(self.igpu.title, (ig.get("name") or "Intel graphics")
-                     .replace(" Graphics", ""))
-            self.igpu.title.set_tooltip_text(ig.get("name") or "Intel graphics")
+            set_text(self.igpu.title, (ig.get("name") or ig_title).replace(" Graphics", ""))
+            self.igpu.title.set_tooltip_text(ig.get("name") or ig_title)
         else:
             self.igpu.set_value("–")
-            set_text(self.igpu.foot, "No Intel graphics detected on this laptop.")
+            set_text(self.igpu.foot, "No integrated GPU detected.")
         # dGPU
-        dg = info.get("dgpu") or {}
         self._dgpu(dg, last)
         # fans
-        set_text(self.fan_cpu_t, fmt.num(last("temp.cpu")))
-        set_text(self.fan_gpu_t, fmt.num(last("dgpu.temp")) if dg.get("state") == "awake"
+        set_text(self.fan_cpu_t, temp_value(last("temp.cpu")))
+        set_text(self.fan_gpu_t, temp_value(last("dgpu.temp")) if dg.get("state") == "awake"
                  else "–")
         for card, key in ((self.fan_cpu, "fan.cpu"), (self.fan_gpu, "fan.gpu")):
             v = last(key)
@@ -263,7 +452,7 @@ class DashboardPage(MonitorPage):
         self.disk.set_value(*_split(fmt.rate(last("disk.read"))))
         set_text(self.disk_w, fmt.rate(last("disk.write")))
         main = next(iter(disk.get("disks") or {}), None)
-        set_text(self.disk_t, fmt.num(last(f"temp.disk.{main}.0")) if main else "–")
+        set_text(self.disk_t, temp_value(last(f"temp.disk.{main}.0")) if main else "–")
         set_text(self.disk.foot, "read · " + (f"{main} busy {fmt.pct(last(f'disk.{main}.busy'))}"
                                               if main else "no disks"))
         # network
@@ -316,7 +505,7 @@ class DashboardPage(MonitorPage):
             return
         if not dg.get("present") or not dg.get("backend"):
             c.set_value("–")
-            set_text(c.foot, "The NVIDIA driver could not provide readings. Check the "
+            set_text(c.foot, f"No readings from {gpu_vendor_title(dg, 'dgpu')}. Check the "
                              "driver, then reopen this page.")
             c.foot.set_tooltip_text(dg.get("reason") or None)
             c.set_badge(None)
@@ -332,12 +521,12 @@ class DashboardPage(MonitorPage):
                      f"{dg.get('last_age_s') or 0:.0f} s ago")
             c.set_badge((dg.get("power_state") or "D3") if sleeping else "Idle")
             last = (dg.get("last_q") or {}) if not sleeping else {}
-            set_text(self.dgpu_temp, fmt.num(last.get("temp")))
+            set_text(self.dgpu_temp, temp_value(last.get("temp")))
             set_text(self.dgpu_power, fmt.num(last.get("power"), 1))
             return
         q = dg.get("q") or {}
         c.set_value(fmt.num(last("dgpu.util")), "%")
-        set_text(self.dgpu_temp, fmt.num(last("dgpu.temp")))
+        set_text(self.dgpu_temp, temp_value(last("dgpu.temp")))
         set_text(self.dgpu_power, fmt.num(last("dgpu.power"), 1))
         ps = q.get("pstate")
         c.set_badge(f"P{ps}" if ps is not None else "Awake", "gold")

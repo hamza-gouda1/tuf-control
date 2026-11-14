@@ -52,9 +52,10 @@ def _refresh_and_check() -> tuple[dict, Report]:
     return out, _check_and_mark()
 
 
-def _load() -> Report | None:
+def _load() -> tuple[Report | None, dict]:
     from ...updates.check import load_report
-    return load_report()
+    from ...updates.settings import load_settings
+    return load_report(), load_settings()
 
 
 def _write_background_checks(enabled: bool, updater=update_config):
@@ -103,6 +104,7 @@ class UpdatesPage(Page):
         self.last_run: dict | None = None
         self._history_runs: list[dict] | None = None
         self._history_busy = False
+        self._auto_settings: dict | None = None
 
         # summary header
         self.hero_g = Adw.PreferencesGroup()
@@ -199,9 +201,9 @@ class UpdatesPage(Page):
         card.append(self.prog_auth)
         self.prog_rows_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         card.append(self.prog_rows_box)
-        self.prog_log = label("", ("prog-log",), wrap=True, selectable=False,
+        self.prog_log = label("", ("prog-log",), wrap=True, selectable=True,
                               xalign=0.0, wrap_mode=Pango.WrapMode.WORD_CHAR)
-        sw = Gtk.ScrolledWindow(height_request=120, vexpand=False)
+        sw = Gtk.ScrolledWindow(height_request=150, vexpand=False)
         sw.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         sw.set_child(self.prog_log)
         card.append(sw)
@@ -213,20 +215,26 @@ class UpdatesPage(Page):
         """One live row per system service the run uses."""
         r: dict = {}
         box = Gtk.Box(spacing=10)
-        box.append(Gtk.Image.new_from_icon_name(
+        icon = Gtk.Image.new_from_icon_name(
             SOURCE_ICONS.get("apt" if method.startswith("packagekit") else
                              ("flatpak" if method.startswith("flatpak") else method),
-                             "emblem-synchronizing-symbolic")))
-        mid = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1, hexpand=True)
-        r["name"] = label(actions.METHOD_TITLES.get(method, method), ("body",), wrap=True)
+                             "emblem-synchronizing-symbolic"))
+        icon.set_valign(Gtk.Align.START)
+        icon.set_margin_top(2)
+        box.append(icon)
+        mid = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4, hexpand=True)
+        head = Gtk.Box(spacing=8)
+        r["name"] = label(actions.METHOD_TITLES.get(method, method), ("body",), wrap=True,
+                          hexpand=True)
         r["phase"] = label("Waiting…", ("dim-label",), wrap=True,
                            wrap_mode=Pango.WrapMode.WORD_CHAR)
-        mid.append(r["name"])
+        head.append(r["name"])
+        mid.append(head)
         mid.append(r["phase"])
+        r["bar"] = Gtk.ProgressBar(hexpand=True, show_text=False)
+        r["bar"].add_css_class("prog-bar")
+        mid.append(r["bar"])
         box.append(mid)
-        r["bar"] = Gtk.ProgressBar(valign=Gtk.Align.CENTER, width_request=80)
-        r["bar"].set_hexpand(False)
-        box.append(r["bar"])
         self._prog_rows[method] = r
         self.prog_rows_box.append(box)
 
@@ -335,9 +343,25 @@ class UpdatesPage(Page):
         self.hero_icon.set_visible(level < 3)
 
     # -- data ----------------------------------------------------------------------------
+    def on_shown(self) -> None:
+        super().on_shown()
+        if self.state is not None and not self._tick_id:
+            self._tick()
+            self._tick_id = GLib.timeout_add(TICK_MS, self._tick)
+
+    def on_hidden(self) -> None:
+        if self._tick_id:
+            GLib.source_remove(self._tick_id)
+            self._tick_id = 0
+
     def refresh(self) -> None:
-        run_bg(_load, done=self._loaded, error=self.win.toast_error)
+        run_bg(_load, done=self._loaded_all, error=self.win.toast_error)
         self._refresh_history()
+
+    def _loaded_all(self, data: tuple[Report | None, dict]) -> None:
+        rep, auto_st = data
+        self._auto_settings = auto_st
+        self._loaded(rep)
 
     def _refresh_history(self) -> None:
         if self._history_busy:
@@ -475,19 +499,23 @@ class UpdatesPage(Page):
                           if src.source == "repos" else
                           "This update service is unavailable or turned off. Check its "
                           "installation and try Refresh again.")
-                r = info_row(esc(src.title), reason,
-                             SOURCE_ICONS.get(src.source, "dialog-information-symbolic"))
-                r.set_tooltip_text(src.reason or None)
+                ico = Gtk.Image.new_from_icon_name(
+                    SOURCE_ICONS.get(src.source, "dialog-information-symbolic"))
+                if src.reason:
+                    ico.set_tooltip_text(src.reason)
+                r = Adw.ActionRow(title=esc(src.title), subtitle=reason)
+                r.set_subtitle_lines(0)
+                r.add_prefix(ico)
                 g.add(r)
             self._add(g)
         self._add(self._history_group())
-        # keep the tools group last
-        self.prefs.remove(self.tools_g)
-        self.prefs.add(self.tools_g)
 
     def _render_auto(self) -> None:
-        from ...updates.settings import load_settings
-        st = load_settings()
+        st = getattr(self, "_auto_settings", None)
+        if st is None:
+            from ...updates.settings import load_settings
+            st = load_settings()
+            self._auto_settings = st
         self._syncing_auto = True
         self.auto_switch.set_active(bool(st.get("enabled", True)))
         self._syncing_auto = False
@@ -500,7 +528,7 @@ class UpdatesPage(Page):
                     + (", and notifies once per new update" if st.get("notify", True)
                        else ""))
         self.auto_row.set_subtitle(text)
-        self.auto_row.set_tooltip_text("Settings are stored in ~/.config/asusius/config.json")
+        self.auto_switch.set_tooltip_text("Settings are stored in ~/.config/asusius/config.json")
 
     def _background_checks_changed(self, switch, _pspec) -> None:
         if getattr(self, "_syncing_auto", False):
@@ -510,6 +538,8 @@ class UpdatesPage(Page):
 
         def done(_cfg):
             switch.set_sensitive(True)
+            if isinstance(_cfg, dict) and "updates" in _cfg:
+                self._auto_settings = _cfg["updates"]
             self._render_auto()
 
         def error(exc):
@@ -528,7 +558,6 @@ class UpdatesPage(Page):
         items = src.items
         n_upd = sum(1 for i in items if i.counts)
         g = Adw.PreferencesGroup(title=esc(src.title), description=esc(source_caption(src)))
-        g.set_tooltip_text(src.title)
         head = Gtk.Box(spacing=8, valign=Gtk.Align.CENTER)
         if n_upd:
             head.append(pill(str(n_upd), "accent"))
@@ -536,13 +565,19 @@ class UpdatesPage(Page):
         if sec:
             head.append(pill(f"{sec} security", "err"))
         if actions.plan(items):
-            head.append(button("Update", "flat", on_click=lambda s=src: self._update_source(s)))
+            btn = button("Update", "flat", on_click=lambda s=src: self._update_source(s))
+            btn.set_tooltip_text(f"Install updates from {src.title}")
+            head.append(btn)
         g.set_header_suffix(head)
         if src.error:
-            row = info_row("Could not check", "The update service did not return a complete "
-                           "list. Try Refresh again; point here for technical details.",
-                           "dialog-warning-symbolic")
-            row.set_tooltip_text(src.error)
+            warn_ico = Gtk.Image.new_from_icon_name("dialog-warning-symbolic")
+            warn_ico.set_tooltip_text(src.error)
+            row = Adw.ActionRow(
+                title="Could not check",
+                subtitle="The update service did not return a complete list. Try Refresh again; "
+                         "point at the warning icon for technical details.")
+            row.set_subtitle_lines(0)
+            row.add_prefix(warn_ico)
             g.add(row)
         if not items and not src.error:
             r = info_row("Up to date", "Nothing to install from here.", "emblem-ok-symbolic")
@@ -620,7 +655,6 @@ class UpdatesPage(Page):
         row = Adw.ExpanderRow(title=esc(history.run_title(r)),
                               subtitle=esc(f"{when} · {trig}{dur}"))
         row.set_subtitle_lines(1)
-        row.set_tooltip_text(f"{when} · {trig}{dur}")
         results = r.get("items") or []
         n = {k: sum(1 for x in results if x.get("result") == k)
              for k in ("installed", "restart", "pending", "failed")}
@@ -651,7 +685,6 @@ class UpdatesPage(Page):
         sub = item_subtitle(i)
         row = Adw.ExpanderRow(title=esc(i.name), subtitle=esc(sub))
         row.set_subtitle_lines(1)
-        row.set_tooltip_text(sub)          # the version line can ellipsize when narrow
         level = getattr(self, "_level", 0)
         narrow = level >= 2
         compact = level >= 3
@@ -709,11 +742,19 @@ class UpdatesPage(Page):
             cmd.add_css_class("property")
             copy = Gtk.Button(icon_name="edit-copy-symbolic", valign=Gtk.Align.CENTER)
             copy.set_tooltip_text("Copy the command")
-            copy.connect("clicked", lambda _b, t=bl["command"]:
-                         self.get_clipboard().set(t))
+            copy.connect("clicked", lambda _b, t=bl["command"]: self._copy_command(t))
             cmd.add_suffix(copy)
             row.add_row(cmd)
         return row
+
+    def _copy_command(self, text: str) -> None:
+        try:
+            self.get_clipboard().set(text)
+        except (TypeError, AttributeError):
+            from gi.repository import Gdk, GObject
+            self.get_clipboard().set_content(
+                Gdk.ContentProvider.new_for_value(GObject.Value(str, text)))
+        self.win.toast("Command copied")
 
     # -- actions ------------------------------------------------------------------------------
     def _open_software(self) -> None:

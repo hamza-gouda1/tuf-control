@@ -31,6 +31,19 @@ def _rgba(rgb) -> Gdk.RGBA:
     return c
 
 
+def _anchor_combo_popover(row: Gtk.Widget) -> None:
+    """Right-align an Adw.ComboRow popover so long item labels don't clip past window edges."""
+    stack = [row]
+    while stack:
+        w = stack.pop()
+        if isinstance(w, Gtk.Popover):
+            w.set_halign(Gtk.Align.END)
+        child = w.get_first_child()
+        while child is not None:
+            stack.append(child)
+            child = child.get_next_sibling()
+
+
 class Swatch(Gtk.DrawingArea):
     def __init__(self) -> None:
         super().__init__(content_width=56, content_height=30, valign=Gtk.Align.CENTER)
@@ -67,6 +80,7 @@ class EffectsSection(Adw.PreferencesGroup):
         self.notif: dict = {}
         self._quiet = False
         self._timer = None
+        self._after_timer = 0
         self._ticks = 0
         self._timer_ms = 0
         self._root = None
@@ -89,6 +103,7 @@ class EffectsSection(Adw.PreferencesGroup):
         self.pick = Adw.ComboRow(title="Effect", model=Gtk.StringList.new(
             ["Off"] + [EFFECTS[n].title for n in NAMES]))
         self.pick.set_subtitle_lines(0)
+        _anchor_combo_popover(self.pick)
         self.pick.connect("notify::selected", lambda *_: self._picked())
         self.add(self.pick)
         self.param_rows: list[Gtk.Widget] = []
@@ -258,8 +273,9 @@ class EffectsSection(Adw.PreferencesGroup):
 
         if p.kind == "colour":
             row = Adw.ActionRow(title=p.label)
-            btn = Gtk.ColorDialogButton(dialog=Gtk.ColorDialog(with_alpha=False),
-                                        valign=Gtk.Align.CENTER)
+            btn = Gtk.ColorDialogButton(
+                dialog=Gtk.ColorDialog(title="Choose colour", with_alpha=False),
+                valign=Gtk.Align.CENTER)
             btn.set_rgba(_rgba(hex_to_rgb(cur)))
             btn.connect("notify::rgba", lambda b, _p: put(rgb_to_hex(
                 (round(b.get_rgba().red * 255), round(b.get_rgba().green * 255),
@@ -341,7 +357,7 @@ class EffectsSection(Adw.PreferencesGroup):
 
     def _sync(self) -> None:
         r = self._root
-        shown = bool(self.get_mapped() and r is not None and r.get_visible()
+        shown = bool(self.active and self.get_mapped() and r is not None and r.get_visible()
                      and not r.get_property("suspended"))
         if shown and self._timer is None:
             self._last_t = time.monotonic()
@@ -355,11 +371,35 @@ class EffectsSection(Adw.PreferencesGroup):
         self._timer = GLib.timeout_add(self._timer_ms, self._on_timer)
 
     def _on_timer(self) -> bool:
+        if not self.active:
+            self._timer = None
+            return False
         self._frame()
         if round(self.gate.interval * 1000) != self._timer_ms:
             self._arm()
             return False
         return True
+
+    def on_hidden(self) -> None:
+        if self._timer is not None:
+            GLib.source_remove(self._timer)
+            self._timer = None
+        after = getattr(self, "_after_timer", 0)
+        if after:
+            GLib.source_remove(after)
+            self._after_timer = 0
+
+    def _schedule_poll(self, delay_ms: int) -> None:
+        prev = getattr(self, "_after_timer", 0)
+        if prev:
+            GLib.source_remove(prev)
+
+        def fire() -> bool:
+            self._after_timer = 0
+            self.poll_status()
+            return False
+
+        self._after_timer = GLib.timeout_add(delay_ms, fire)
 
     def _frame(self) -> None:
         now = time.monotonic()
@@ -399,7 +439,7 @@ class EffectsSection(Adw.PreferencesGroup):
             self._got_config(cfg)
             title = EFFECTS[want["active"]].title if want["active"] else "Hardware effect"
             self.win.toast(f"{title} on" + (" · service started" if started else ""))
-            GLib.timeout_add(800, lambda: (self.poll_status(), False)[1])
+            EffectsSection._schedule_poll(self, 800)
         run_bg(work, done=done, error=self.win.toast_error)
 
     def write_config(self, edit, start: bool) -> tuple[dict, object]:
@@ -449,7 +489,7 @@ class EffectsSection(Adw.PreferencesGroup):
         def go():
             run_bg(self.client.stop if run else self.client.start,
                    done=lambda _m: (self.win.toast("Service stopped" if run else "Service started"),
-                                    GLib.timeout_add(700, lambda: (self.poll_status(), False)[1])),
+                                    EffectsSection._schedule_poll(self, 700)),
                    error=self.win.toast_error)
 
         if run:
