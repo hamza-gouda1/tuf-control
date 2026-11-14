@@ -285,6 +285,7 @@ STUB
 chmod +x "$T/manager-bin/systemctl"
 export ASUSIUS_TEST_MANAGER_LOG=$T/manager.log
 ASUSIUS_NO_SYSTEMD='' PATH="$T/manager-bin:$PATH" "$ROOT/install.sh" --no-hotkey >/dev/null
+grep -qx -- '--user restart asusiusd.service' "$ASUSIUS_TEST_MANAGER_LOG" || fail "running daemon not restarted on upgrade"
 ASUSIUS_NO_SYSTEMD='' PATH="$T/manager-bin:$PATH" "$ROOT/uninstall.sh" >/dev/null
 grep -qx -- '--user start asusiusd.service' "$ASUSIUS_TEST_MANAGER_LOG" || fail "previous active state not restored"
 [ "$(cat "$unit")" = 'original unit' ] || fail "service restore with manager lost original"

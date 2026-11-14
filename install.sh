@@ -736,14 +736,19 @@ Path(dst).write_text(f"# {marker}\n" + "\n".join(lines) + "\n", encoding="utf-8"
 PYTHON
     fi
     if [ "$DRY" = 0 ] && systemd_user_available; then
+        active=$(systemctl --user is-active asusiusd.service 2>/dev/null) || true
         if [ ! -f "$state" ]; then
             enabled=$(systemctl --user is-enabled asusiusd.service 2>/dev/null) || true
-            active=$(systemctl --user is-active asusiusd.service 2>/dev/null) || true
             printf '%s\n%s\n' "$enabled" "$active" >"$state"
             chmod 0600 "$state"
         fi
         act systemctl --user daemon-reload
-        act systemctl --user enable --now asusiusd.service
+        if [ "$active" = active ]; then
+            act systemctl --user enable asusiusd.service
+            act systemctl --user restart asusiusd.service
+        else
+            act systemctl --user enable --now asusiusd.service
+        fi
     elif [ "$DRY" = 0 ] && [ -z "${ASUSIUS_NO_SYSTEMD:-}" ]; then
         say "daemon: systemd user manager not available (container or non-systemd session); unit written to $DAEMON_UNIT"
         say "  enable later in a systemd session with: systemctl --user enable --now asusiusd.service"
