@@ -1,0 +1,68 @@
+<!-- Copyright (C) Hamza Gouda; SPDX-License-Identifier: GPL-3.0-or-later -->
+<svg xmlns="http://www.w3.org/2000/svg" width="560" height="144" viewBox="0 0 560 144">
+  <!-- README Hero Lockup (Dark theme variant, built around Obsidian & Bordeaux Crest) -->
+  <defs>
+    <clipPath id="h-clip">
+      <path d="M 32 10 H 96 Q 112 10 112 26 V 69 Q 112 91 93 102 L 71 114 Q 64 118 57 114 L 35 102 Q 16 91 16 69 V 26 Q 16 10 32 10 Z"/>
+    </clipPath>
+    <linearGradient id="h-obsidian" x1="16" y1="10" x2="96" y2="104" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#36272B"/>
+      <stop offset="0.58" stop-color="#1E1518"/>
+      <stop offset="1" stop-color="#120C0E"/>
+    </linearGradient>
+    <linearGradient id="h-bordeaux" x1="36" y1="42" x2="112" y2="115" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#AA2D4C"/>
+      <stop offset="0.55" stop-color="#7B1C35"/>
+      <stop offset="1" stop-color="#4A0E1E"/>
+    </linearGradient>
+    <linearGradient id="h-rim" x1="64" y1="10" x2="64" y2="116" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F5E5C8" stop-opacity="0.40"/>
+      <stop offset="0.45" stop-color="#E09AAE" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#000000" stop-opacity="0.45"/>
+    </linearGradient>
+    <linearGradient id="h-gold-lit" x1="29" y1="23" x2="64" y2="90" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FAF0DC"/>
+      <stop offset="0.5" stop-color="#E6CA9C"/>
+      <stop offset="1" stop-color="#C7A26B"/>
+    </linearGradient>
+    <linearGradient id="h-gold-shade" x1="64" y1="23" x2="99" y2="90" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#E1C290"/>
+      <stop offset="0.52" stop-color="#BD975E"/>
+      <stop offset="1" stop-color="#8F6A38"/>
+    </linearGradient>
+    <linearGradient id="h-wingbar" x1="42" y1="69" x2="73" y2="79" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FAF0DC"/>
+      <stop offset="1" stop-color="#D4B07A"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Brand Card Backdrop -->
+  <rect x="0" y="0" width="560" height="144" rx="20" fill="#151112"/>
+  <rect x="0.75" y="0.75" width="558.5" height="142.5" rx="19.25" fill="none" stroke="#EEE7E4" stroke-opacity="0.08" stroke-width="1.5"/>
+
+  <!-- Emblem positioned on left -->
+  <g transform="translate(26, 8)">
+    <path d="M 32 14.5 H 96 Q 112 14.5 112 30.5 V 73.5 Q 112 95.5 93 106.5 L 71 118.5 Q 64 122.5 57 118.5 L 35 106.5 Q 16 95.5 16 73.5 V 30.5 Q 16 14.5 32 14.5 Z"
+          fill="#0B0708"/>
+    <g clip-path="url(#h-clip)">
+      <rect x="14" y="8" width="100" height="112" fill="url(#h-obsidian)"/>
+      <path d="M 114 34 L 14 85 V 122 H 114 Z" fill="url(#h-bordeaux)"/>
+      <path d="M 14 85 L 114 34" fill="none" stroke="#E8A2B5" stroke-opacity="0.32" stroke-width="1.5"/>
+    </g>
+    <path d="M 32 10.75 H 96 Q 111.25 10.75 111.25 26 V 69 Q 111.25 90.35 92.6 101.35 L 70.6 113.35 Q 64 117 57.4 113.35 L 35.4 101.35 Q 16.75 90.35 16.75 69 V 26 Q 16.75 10.75 32 10.75 Z"
+          fill="none" stroke="url(#h-rim)" stroke-width="1.5"/>
+    <g transform="translate(0, 3)" opacity="0.45" fill="#090406">
+      <path d="M 64 23 L 29 90 H 45.5 L 64 46 Z"/>
+      <path d="M 64 23 L 99 90 H 82.5 L 64 46 Z"/>
+      <path d="M 44 69 H 68.5 L 72.7 79 H 42 Z"/>
+    </g>
+    <path d="M 44 69 H 68.5 L 72.7 79 H 42 Z" fill="url(#h-wingbar)"/>
+    <path d="M 64 23 L 29 90 H 45.5 L 64 46 Z" fill="url(#h-gold-lit)"/>
+    <path d="M 64 23 L 99 90 H 82.5 L 64 46 Z" fill="url(#h-gold-shade)"/>
+  </g>
+
+  <!-- Wordmark + Subtitle -->
+  <text x="168" y="75" font-family="Inter, Cantarell, 'Segoe UI', system-ui, sans-serif" font-size="46" font-weight="800" letter-spacing="2" fill="#EEE7E4">ASUSIUS</text>
+  <rect x="170" y="88" width="44" height="3" rx="1.5" fill="#C9AE86"/>
+  <text x="224" y="94" font-family="Inter, Cantarell, 'Segoe UI', system-ui, sans-serif" font-size="14" font-weight="600" letter-spacing="1.1" fill="#C3B8B5">LINUX HARDWARE COMMAND CENTER</text>
+</svg>

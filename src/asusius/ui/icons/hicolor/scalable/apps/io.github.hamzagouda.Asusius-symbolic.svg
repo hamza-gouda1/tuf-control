@@ -1,0 +1,8 @@
+<!-- Copyright (C) Hamza Gouda; SPDX-License-Identifier: GPL-3.0-or-later -->
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <!-- Symbolic icon for Asusius: pure monochrome filled paths for clean GTK/Shell recoloring -->
+  <path fill="#241f31" fill-rule="evenodd"
+        d="M 4 1 H 12 Q 14 1 14 3 V 8.8 Q 14 11.6 11.6 13.0 L 8.6 14.7 Q 8 15.05 7.4 14.7 L 4.4 13.0 Q 2 11.6 2 8.8 V 3 Q 2 1 4 1 Z M 4.1 2.35 H 11.9 Q 12.65 2.35 12.65 3.1 V 8.7 Q 12.65 10.65 10.9 11.7 L 8.0 13.35 L 5.1 11.7 Q 3.35 10.65 3.35 8.7 V 3.1 Q 3.35 2.35 4.1 2.35 Z"/>
+  <path fill="#241f31" d="M 8 3.5 L 4.2 11.2 H 5.8 L 8 6.4 L 10.2 11.2 H 11.8 Z"/>
+  <path fill="#241f31" d="M 5.3 8.8 H 8.1 L 8.7 10.1 H 4.9 Z"/>
+</svg>
