@@ -1,5 +1,5 @@
 blank_issues_enabled: false
 contact_links:
   - name: Report a security problem privately
-    url: https://github.com/hamza-gouda1/tuf-control/security/advisories/new
+    url: https://github.com/hamza-gouda1/asusius/security/advisories/new
     about: The polkit helper and the agent-access server are security relevant; please do not file these publicly.

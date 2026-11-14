@@ -78,7 +78,7 @@ Features and firmware support vary by model; this is not a full parity claim.
 
 Only one model has been tested by the author. The other rows are what the design expects, not results.
 Run `asusius capabilities --json` on your laptop and open a
-[hardware report](https://github.com/hamza-gouda1/tuf-control/issues/new?template=hardware_report.yml)
+[hardware report](https://github.com/hamza-gouda1/asusius/issues/new?template=hardware_report.yml)
 so this table can be filled in with real results.
 
 | Model | Status | Notes |

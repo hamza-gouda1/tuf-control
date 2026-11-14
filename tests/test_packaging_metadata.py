@@ -9,10 +9,10 @@ import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
 
-# github.com/hamza-gouda1/asusius does not exist (HTTP 404); the origin is
-# github.com/hamza-gouda1/tuf-control until the GitHub repo itself is renamed.
-DEAD_REPO = "hamza-gouda1/asusius"
-LIVE_REPO = "hamza-gouda1/tuf-control"
+# github.com/hamza-gouda1/tuf-control is the retired name (now a 301 redirect to
+# the renamed repository); packaging files must reference only the live name.
+DEAD_REPO = "hamza-gouda1/tuf-control"
+LIVE_REPO = "hamza-gouda1/asusius"
 
 REPO_URL_FILES = (
     "README.md",

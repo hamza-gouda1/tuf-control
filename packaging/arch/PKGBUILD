@@ -2,7 +2,7 @@
 # NOT yet built or tested on Arch. Build it in a clean chroot (extra-x86_64-build) before
 # submitting to the AUR. Publish the deterministic release asset before building.
 pkgname=asusius
-pkgver=0.1.0
+pkgver=0.2.0
 pkgrel=1
 pkgdesc='Control app for ASUS TUF/ROG laptops: profiles, fans, keyboard lighting, GPU mode, telemetry'
 arch=('any')
@@ -13,7 +13,7 @@ optdepends=('gnome-shell: Quick Settings profile toggle'
             'supergfxctl: GPU mode switching through supergfxd')
 makedepends=('glib2' 'python-build' 'python-installer' 'python-setuptools' 'python-wheel')
 source=("$url/releases/download/v$pkgver/$pkgname-$pkgver.tar.gz")
-sha256sums=('500aae137ead5e3db6b8dd8b3f651964b357a1ac4e1df9397544d8ff86bf2d04')
+sha256sums=('2d9cf011b088fa08c9fcae873f2dbd8cfc981bc09b1eaa81fe56b7d6bcc75964')
 
 build() {
   cd "$pkgname-$pkgver"

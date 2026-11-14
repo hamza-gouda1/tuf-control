@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 [Unit]
 Description=Asusius automation and keyboard effects
-Documentation=https://github.com/hamza-gouda1/tuf-control/blob/main/docs/AUTOMATION.md
+Documentation=https://github.com/hamza-gouda1/asusius/blob/main/docs/AUTOMATION.md
 PartOf=graphical-session.target
 After=graphical-session.target
 

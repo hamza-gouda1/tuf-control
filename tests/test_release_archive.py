@@ -18,10 +18,14 @@ SPEC.loader.exec_module(release)
 
 class ReleaseArchiveTests(unittest.TestCase):
     def test_tagged_source_is_reproducible_and_checksum_matches(self):
+        # the PKGBUILD pins one tested release; build exactly that tag
+        pkgver = re.search(r'(?m)^pkgver=(\S+)',
+                           (REPO / "packaging/arch/PKGBUILD").read_text(encoding="utf-8"))[1]
+        tag = f"v{pkgver}"
         with tempfile.TemporaryDirectory() as temporary:
             output = Path(temporary)
-            first, digest = release.build_archive(REPO, "v0.1.0", output / "one")
-            second, other = release.build_archive(REPO, "v0.1.0", output / "two")
+            first, digest = release.build_archive(REPO, tag, output / "one")
+            second, other = release.build_archive(REPO, tag, output / "two")
             self.assertEqual(first.read_bytes(), second.read_bytes())
             self.assertEqual(digest, other)
             self.assertEqual(digest, hashlib.sha256(first.read_bytes()).hexdigest())
@@ -30,7 +34,7 @@ class ReleaseArchiveTests(unittest.TestCase):
             with tarfile.open(first) as archive:
                 names = archive.getnames()
             self.assertTrue(names)
-            prefix = release.PROJECT_NAME + "-0.1.0"
+            prefix = release.PROJECT_NAME + "-" + pkgver
             self.assertTrue(all(name == prefix or name.startswith(prefix + "/") for name in names))
             if REPO.name == "asusius":
                 packaging = (REPO / "packaging/arch/PKGBUILD").read_text()
