@@ -108,10 +108,10 @@ class CpuPage(MonitorPage):
             pg = self.policy_grid
             pg.set("driver", pol.get("driver") or "–")
             vinfo = cpu_vendor_info(self.static, pol)
-            if "pstate" in pg.cells:
-                pg.cells["pstate"][0].set_label(vinfo["pstate_title"])
-            if "temp" in g.cells:
-                g.cells["temp"][0].set_tooltip_text(vinfo["temp_tip"])
+            if "pstate" in getattr(pg, "captions", ()):
+                pg.captions["pstate"].set_label(vinfo["pstate_title"])
+            if "temp" in getattr(g, "boxes", ()):
+                g.boxes["temp"].set_tooltip_text(vinfo["temp_tip"])
             pg.set("pstate", pol.get("pstate_status") or "not in use")
             nt = pol.get("no_turbo")
             pg.set("turbo", {"0": "enabled", "1": "disabled"}.get(nt or "", "–"))

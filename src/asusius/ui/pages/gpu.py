@@ -11,6 +11,7 @@ from ..viewmodels import (
     DGPU_POWER_TEXT,
     GPU_MODE_INFO,
     GPU_UI_ORDER,
+    fmt_num,
     fmt_temp,
     gpu_action_text,
     gpu_switch_requirement,

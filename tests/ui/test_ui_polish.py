@@ -13,19 +13,22 @@ from unittest.mock import Mock, patch
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
+from gi.repository import Gtk  # noqa: E402
 
 from asusius.backends.fake import DEFAULT_CURVES  # noqa: E402
-from asusius.core import Capability, FanCurve, GpuMode  # noqa: E402
+from asusius.core import Capability, FanCurve, GpuMode, Telemetry  # noqa: E402
 from asusius.ui import app as ui_app  # noqa: E402
 from asusius.ui import prefs  # noqa: E402
 from asusius.ui import viewmodels as vm  # noqa: E402
 from asusius.ui.pages.agent_access import AgentAccessPage  # noqa: E402
 from asusius.ui.pages.automation import AutomationPage  # noqa: E402
 from asusius.ui.pages.battery import BatteryPage  # noqa: E402
+from asusius.ui.pages.cpu import CpuPage  # noqa: E402
 from asusius.ui.pages.display import DisplayPage  # noqa: E402
 from asusius.ui.pages.gpu import GpuPage  # noqa: E402
 from asusius.ui.pages.keyboard import HW_NOTE, KeyboardPage  # noqa: E402
 from asusius.ui.pages.keyboard_effects import EffectsSection  # noqa: E402
+from asusius.ui.pages.monitor_base import StatGrid  # noqa: E402
 from asusius.ui.pages.services import ServicesPage  # noqa: E402
 from asusius.ui.pages.updates import UpdatesPage  # noqa: E402
 
@@ -147,6 +150,34 @@ class AssetAndCssHygieneTests(unittest.TestCase):
         for token in (".linked > button", "button.suggested-action:disabled",
                       ".quick-pill.accent", ".setup-card"):
             self.assertIn(token, dark)
+
+    def test_all_css_files_parse_cleanly_in_gtk(self):
+        base = (UI_DIR / "style.css").read_text().replace("@MONO@", "monospace")
+        css_files = (
+            "style.css",
+            "style-dark.css",
+            "style-popover.css",
+            "style-popover-dark.css",
+            "monitor.css",
+            "system.css",
+        )
+        for name in css_files:
+            raw = (UI_DIR / name).read_text().replace("@MONO@", "monospace")
+            self.assertNotIn("margin-end:", raw, f"GTK4 CSS rejects margin-end in {name}")
+            self.assertNotIn("margin-start:", raw, f"GTK4 CSS rejects margin-start in {name}")
+            for label, css in ((f"{name} (standalone)", raw),
+                               (f"{name} (with style.css)",
+                                raw if name == "style.css" else f"{base}\n{raw}")):
+                provider = Gtk.CssProvider()
+                errors = []
+                provider.connect(
+                    "parsing-error",
+                    lambda _p, sec, err, lbl=label, out=errors: out.append(
+                        f"{lbl}:{sec.get_start_location().lines + 1}: {err.message}"
+                    ),
+                )
+                provider.load_from_string(css)
+                self.assertEqual(errors, [], f"GTK CSS parsing errors in {label}: {errors}")
 
 
 class PageCallbackSafetyTests(unittest.TestCase):
@@ -305,6 +336,128 @@ class PageCallbackSafetyTests(unittest.TestCase):
         run.call_args.kwargs["done"](("changed",))
         self.assertFalse(page._stat_busy)
         page.refresh.assert_called_once_with()
+
+    def test_gpu_page_on_telemetry_handles_active_sleeping_and_fake(self):
+        page = SimpleNamespace(
+            temp_val=Mock(),
+            draw_val=Mock(),
+            power_row=Mock(),
+            power_val=Mock(),
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"XDG_CONFIG_HOME": tmp}):
+                prefs.save_prefs(temp_unit="C")
+
+                active = Telemetry(gpu_runtime="active", gpu_temp_c=62.4, gpu_power_w=45.67)
+                GpuPage.on_telemetry(page, active)
+                page.temp_val.set_label.assert_called_with("62\u00a0°C")
+                page.draw_val.set_label.assert_called_with("45.7 W")
+                page.power_row.set_subtitle.assert_called_with("")
+                page.power_val.set_label.assert_called_with(vm.DGPU_POWER_TEXT["active"])
+
+                sleeping = Telemetry(gpu_runtime="suspended", gpu_temp_c=49.0, gpu_power_w=0.0)
+                GpuPage.on_telemetry(page, sleeping)
+                page.temp_val.set_label.assert_called_with("–")
+                page.draw_val.set_label.assert_called_with("–")
+                page.power_val.set_label.assert_called_with(vm.DGPU_POWER_TEXT["suspended"])
+
+                lost = Telemetry(gpu_runtime="error", gpu_temp_c=None, gpu_power_w=None)
+                GpuPage.on_telemetry(page, lost)
+                page.power_row.set_subtitle.assert_called_with(vm.DGPU_LOST_TEXT)
+                page.power_val.set_label.assert_called_with(vm.DGPU_POWER_TEXT["error"])
+
+                fake_t = SimpleNamespace(gpu_runtime=None, gpu_temp_c=55.0, gpu_power_w=None)
+                GpuPage.on_telemetry(page, fake_t)
+                page.temp_val.set_label.assert_called_with("55\u00a0°C")
+                page.draw_val.set_label.assert_called_with("– W")
+
+    def test_cpu_page_update_handles_intel_and_amd_telemetry(self):
+        def build_grid(*keys):
+            g = SimpleNamespace(
+                cells={k: Mock(get_label=Mock(return_value="")) for k in keys},
+                captions={k: Mock() for k in keys},
+                boxes={k: Mock() for k in keys},
+            )
+            g.set = lambda key, text, tip=None: StatGrid.set(g, key, text, tip)
+            return g
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"XDG_CONFIG_HOME": tmp}):
+                prefs.save_prefs(temp_unit="C")
+                for vendor, static, policy, telemetry, exp_pstate, exp_tip, exp_power in (
+                    (
+                        "intel",
+                        {
+                            "model": "Intel(R) Core(TM) i7-14700HX",
+                            "topology": {0: {"min_mhz": 800, "max_mhz": 5500}},
+                        },
+                        {
+                            "governor": "powersave",
+                            "epp": "balance_performance",
+                            "driver": "intel_pstate",
+                            "pstate_status": "active",
+                            "no_turbo": "0",
+                        },
+                        Telemetry(cpu_temp_c=64.0, cpu_power_w=None),
+                        "intel_pstate",
+                        "coretemp Package thermal sensor",
+                        "needs root",
+                    ),
+                    (
+                        "amd",
+                        {
+                            "model": "AMD Ryzen 9 7945HX",
+                            "topology": {0: {"min_mhz": 400, "max_mhz": 5400}},
+                        },
+                        {
+                            "governor": "powersave",
+                            "epp": "power",
+                            "driver": "amd-pstate-epp",
+                            "pstate_status": "active",
+                            "no_turbo": "1",
+                        },
+                        Telemetry(cpu_temp_c=71.2, cpu_power_w=24.5),
+                        "amd-pstate",
+                        "k10temp / ACPI package sensor",
+                        "24.5\u00a0W",
+                    ),
+                ):
+                    values = {
+                        "cpu.total": 32.5,
+                        "cpu.freq.avg": 3200.0,
+                        "temp.cpu": telemetry.cpu_temp_c,
+                        "power.cpu": telemetry.cpu_power_w,
+                        "cpu.ctxt": 12000.0,
+                        "cpu.intr": 8500.0,
+                    }
+                    store = SimpleNamespace(last=values.get, last_t=10.0)
+                    hub = SimpleNamespace(
+                        store=store,
+                        info={"cpu": {"load": (1.1, 0.8, 0.4, 2, 400), "uptime": 7200}},
+                        sampler=SimpleNamespace(cpu=SimpleNamespace(policy=lambda: policy)),
+                    )
+                    stats = build_grid("util", "freq", "temp", "power", "load", "uptime",
+                                       "threads", "ctxt", "intr", "governor")
+                    policy_grid = build_grid("driver", "pstate", "turbo", "range")
+                    page = SimpleNamespace(
+                        hub=hub,
+                        static=static,
+                        stats=stats,
+                        policy_grid=policy_grid,
+                        _policy_t=-1e9,
+                        _pol=None,
+                        rapl_note=Mock(get_label=Mock(return_value="prev")),
+                        redraw=Mock(),
+                    )
+                    CpuPage.update(page)
+                    policy_grid.captions["pstate"].set_label.assert_called_with(exp_pstate)
+                    stats.boxes["temp"].set_tooltip_text.assert_called_with(exp_tip)
+                    stats.cells["power"].set_label.assert_called_with(exp_power)
+                    page.redraw.assert_called_once()
+                    if vendor == "intel":
+                        page.rapl_note.set_visible.assert_called_with(True)
+                    else:
+                        page.rapl_note.set_visible.assert_called_with(False)
 
 
 if __name__ == "__main__":

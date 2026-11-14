@@ -101,6 +101,7 @@ class StatGrid(Gtk.FlowBox):
                          min_children_per_line=min_per_line, max_children_per_line=max_per_line,
                          column_spacing=10, row_spacing=10)
         self.cells: dict[str, Gtk.Label] = {}
+        self.captions: dict[str, Gtk.Label] = {}
         self.boxes: dict[str, Gtk.Widget] = {}
 
     def add(self, key: str, caption: str, tooltip: str | None = None) -> Gtk.Label:
@@ -116,6 +117,7 @@ class StatGrid(Gtk.FlowBox):
         self.append(box)
         box.get_parent().set_focusable(False)
         self.cells[key] = val
+        self.captions[key] = cap
         self.boxes[key] = box.get_parent()
         return val
 

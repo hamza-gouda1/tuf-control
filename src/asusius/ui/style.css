@@ -164,7 +164,7 @@ button.suggested-action:disabled {
 banner button {
   margin-top: 6px;
   margin-bottom: 6px;
-  margin-end: 8px;
+  margin-right: 8px;
   min-height: 30px;
   padding: 4px 14px;
   border-radius: 999px;
