@@ -11,7 +11,7 @@ from gi.repository import Adw, Gio, GLib, Gtk
 from ..controller import FAKE_ROOT_ENV
 from ..core import Capability, Profile, Telemetry
 from .live import LiveHub
-from .pages.base import Page
+from .pages.base import Page, a11y_name
 from .tasks import run_bg
 from .viewmodels import (
     PROFILE_INFO,
@@ -194,7 +194,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.tight = Adw.Breakpoint.new(Adw.BreakpointCondition.parse("max-width: 460sp"))
         self.tight.add_setter(self.split, "collapsed", True)
         self.tight.add_setter(self.pw_box, "visible", False)
-        self.tight.add_setter(self.chip_label, "visible", False)
+        self.tight.add_setter(self.chip, "visible", False)
         self.tight.add_setter(self.jump_btn, "visible", False)
         self.add_breakpoint(self.tight)
 
@@ -218,8 +218,6 @@ class MainWindow(Adw.ApplicationWindow):
         self.pages.built[key] = page
         self.stack.add_named(page, key)
         if key == "performance":
-            self.responsive(lambda lv: page.cards.set_orientation(
-                Gtk.Orientation.VERTICAL if lv == 3 else Gtk.Orientation.HORIZONTAL))
             if self.profile is not None:
                 page.set_profile(self.profile)
         elif key == "processes":
@@ -512,6 +510,7 @@ class MainWindow(Adw.ApplicationWindow):
         btn = Gtk.Button(icon_name="system-search-symbolic",
                          tooltip_text="Jump to page (Ctrl+K)", valign=Gtk.Align.CENTER)
         btn.add_css_class("flat")
+        a11y_name(btn, "Jump to page")
         btn.connect("clicked", lambda *_: self._show_quick_jump())
         self.jump_btn = btn
         return btn
@@ -539,6 +538,7 @@ class MainWindow(Adw.ApplicationWindow):
         btn = Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu,
                              tooltip_text="Menu & preferences", valign=Gtk.Align.CENTER)
         btn.add_css_class("flat")
+        a11y_name(btn, "Main menu")
         return btn
 
     def refresh_all(self) -> None:

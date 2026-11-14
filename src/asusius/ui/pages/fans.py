@@ -50,7 +50,9 @@ class FansPage(Page):
 
         self.profile_row = Adw.ComboRow(title="Profile",
                                         subtitle="Each profile keeps its own curves")
+        self.profile_row.set_subtitle_lines(0)
         self.profile_row.set_model(Gtk.StringList.new([PROFILE_INFO[p][0] for p in PROFILE_ORDER]))
+        self.profile_row.set_tooltip_text(PROFILE_INFO[PROFILE_ORDER[0]][0])
         self.profile_row.connect("notify::selected", self._pick_profile)
         self.enable_row = Adw.SwitchRow(title="Use custom curve",
                                         subtitle="Off: the firmware's automatic curve")
@@ -139,6 +141,7 @@ class FansPage(Page):
     def _quiet_select(self, prof):
         self._busy = True
         self.profile_row.set_selected(PROFILE_ORDER.index(prof))
+        self.profile_row.set_tooltip_text(PROFILE_INFO[prof][0])
         self._busy = False
 
     def _loaded(self, curves) -> None:
@@ -190,6 +193,7 @@ class FansPage(Page):
         if self._busy:
             return
         self.profile = PROFILE_ORDER[self.profile_row.get_selected()]
+        self.profile_row.set_tooltip_text(PROFILE_INFO[self.profile][0])
         self.follow = self.profile is self.win.profile
         self.refresh()
 

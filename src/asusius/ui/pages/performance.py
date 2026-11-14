@@ -18,11 +18,13 @@ from ..widgets import label
 from .base import Page, a11y_name, button, prefs_page
 
 
-class ProfileCards(Gtk.Box):
+class ProfileCards(Gtk.FlowBox):
     """Three large toggle cards; emits on_pick(profile) on user clicks only."""
 
     def __init__(self, on_pick) -> None:
-        super().__init__(spacing=10, homogeneous=True)
+        super().__init__(selection_mode=Gtk.SelectionMode.NONE, homogeneous=True,
+                         min_children_per_line=1, max_children_per_line=3,
+                         column_spacing=10, row_spacing=10)
         self.on_pick = on_pick
         self.buttons: dict[Profile, Gtk.ToggleButton] = {}
         self._quiet = False
@@ -51,6 +53,9 @@ class ProfileCards(Gtk.Box):
             b.connect("toggled", self._toggled, prof)
             self.buttons[prof] = b
             self.append(b)
+            ch = b.get_parent()
+            if ch is not None:
+                ch.set_focusable(False)
         self._sync_ticks()
 
     def _sync_ticks(self):
@@ -79,12 +84,19 @@ class PerformancePage(Page):
         g1 = Adw.PreferencesGroup(title="Profile",
                                   description="Sets fan behaviour and firmware power targets.")
         g1.add(self.cards)
-        live_strip = Gtk.Box(spacing=8, margin_top=10, halign=Gtk.Align.START)
-        self.live_temp_pill = label("", ("live-pill", "numeric"), visible=False)
-        self.live_power_pill = label("", ("live-pill", "numeric"), visible=False)
-        self.live_gov_pill = label("", ("live-pill",), visible=False)
+        live_strip = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE, homogeneous=False,
+                                 min_children_per_line=1, max_children_per_line=3,
+                                 column_spacing=8, row_spacing=6, margin_top=10,
+                                 halign=Gtk.Align.START)
+        self.live_temp_pill = label("", ("live-pill", "numeric"))
+        self.live_power_pill = label("", ("live-pill", "numeric"))
+        self.live_gov_pill = label("", ("live-pill",))
         for p in (self.live_temp_pill, self.live_power_pill, self.live_gov_pill):
             live_strip.append(p)
+            ch = p.get_parent()
+            if ch is not None:
+                ch.set_focusable(False)
+                ch.set_visible(False)
         g1.add(live_strip)
         self.limits = Adw.PreferencesGroup(title="Power limits")
         self.limit_rows: list = []
@@ -117,22 +129,27 @@ class PerformancePage(Page):
     def on_telemetry(self, t) -> None:
         self._sync_live_chips(t)
 
+    @staticmethod
+    def _show_pill(pill_label: Gtk.Label, text: str) -> None:
+        pill_label.set_label(text)
+        pill_label.set_visible(True)
+        ch = pill_label.get_parent()
+        if ch is not None:
+            ch.set_visible(True)
+
     def _sync_live_chips(self, t=None) -> None:
         if t is None:
             t = self.win.telemetry()
         if t.cpu_temp_c is not None:
-            self.live_temp_pill.set_label(f"CPU {fmt_temp(t.cpu_temp_c)}")
-            self.live_temp_pill.set_visible(True)
+            self._show_pill(self.live_temp_pill, f"CPU {fmt_temp(t.cpu_temp_c)}")
         if t.cpu_power_w is not None:
-            self.live_power_pill.set_label(f"Package {fmt_num(t.cpu_power_w, 1)} W")
-            self.live_power_pill.set_visible(True)
+            self._show_pill(self.live_power_pill, f"Package {fmt_num(t.cpu_power_w, 1)} W")
         try:
             gov = self.win.hub.sampler.cpu.policy().get("governor")
         except Exception:
             gov = None
         if gov:
-            self.live_gov_pill.set_label(f"Governor: {gov}")
-            self.live_gov_pill.set_visible(True)
+            self._show_pill(self.live_gov_pill, f"Governor: {gov}")
 
     def _show_limits(self, lims) -> None:
         self._clear_limits()

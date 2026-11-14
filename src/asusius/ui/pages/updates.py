@@ -652,9 +652,10 @@ class UpdatesPage(Page):
                 "detected": "installed outside Asusius"}.get(r.get("trigger"),
                                                                  r.get("trigger") or "run")
         dur = f" · {r['duration_s']:g} s" if r.get("duration_s") else ""
-        row = Adw.ExpanderRow(title=esc(history.run_title(r)),
-                              subtitle=esc(f"{when} · {trig}{dur}"))
-        row.set_subtitle_lines(1)
+        sub = f"{when} · {trig}{dur}"
+        row = Adw.ExpanderRow(title=esc(history.run_title(r)), subtitle=esc(sub))
+        row.set_subtitle_lines(0)
+        row.set_tooltip_text(sub)
         results = r.get("items") or []
         n = {k: sum(1 for x in results if x.get("result") == k)
              for k in ("installed", "restart", "pending", "failed")}
@@ -684,7 +685,8 @@ class UpdatesPage(Page):
         bl = i.blocker
         sub = item_subtitle(i)
         row = Adw.ExpanderRow(title=esc(i.name), subtitle=esc(sub))
-        row.set_subtitle_lines(1)
+        row.set_subtitle_lines(0)
+        row.set_tooltip_text(sub)
         level = getattr(self, "_level", 0)
         narrow = level >= 2
         compact = level >= 3
