@@ -16,6 +16,16 @@ from .util import join, listdir, read_bytes, read_int, read_str
 RESCAN_S = 10.0
 
 
+def _parse_int_tok(raw: bytes) -> int | None:
+    parts = raw.split()
+    if not parts:
+        return None
+    try:
+        return int(parts[0])
+    except ValueError:
+        return None
+
+
 def parse_fdinfo(data: bytes) -> dict | None:
     """DRM client stats from one fdinfo file, None when the fd is not a DRM client."""
     if b"drm-driver" not in data:
@@ -24,29 +34,40 @@ def parse_fdinfo(data: bytes) -> dict | None:
     for line in data.split(b"\n"):
         if not line.startswith(b"drm-"):
             continue
-        key, _, val = line.partition(b":")
-        key = key.decode()
+        raw_key, _, val = line.partition(b":")
+        key = raw_key.decode("utf-8", errors="replace")
         val = val.strip()
         if key.startswith("drm-engine-capacity-"):
-            out["capacity"][key[20:]] = int(val)
+            v = _parse_int_tok(val)
+            if v is not None:
+                out["capacity"][key[20:]] = v
         elif key.startswith("drm-engine-"):
-            out["engines"][key[11:]] = int(val.split()[0])
+            v = _parse_int_tok(val)
+            if v is not None:
+                out["engines"][key[11:]] = v
         elif key.startswith("drm-total-cycles-"):
-            out["total_cycles"][key[17:]] = int(val.split()[0])
+            v = _parse_int_tok(val)
+            if v is not None:
+                out["total_cycles"][key[17:]] = v
         elif key.startswith("drm-cycles-"):
-            out["cycles"][key[11:]] = int(val.split()[0])
+            v = _parse_int_tok(val)
+            if v is not None:
+                out["cycles"][key[11:]] = v
         elif key.startswith("drm-resident-") or key.startswith("drm-total-"):
             parts = val.split()
-            n = int(parts[0])
-            unit = parts[1] if len(parts) > 1 else b""
-            n *= {b"KiB": 1024, b"MiB": 1 << 20, b"GiB": 1 << 30}.get(unit, 1)
-            out["mem"][key[4:]] = n
+            n = _parse_int_tok(val)
+            if n is not None:
+                unit = parts[1] if len(parts) > 1 else b""
+                n *= {b"KiB": 1024, b"MiB": 1 << 20, b"GiB": 1 << 30}.get(unit, 1)
+                out["mem"][key[4:]] = n
         elif key == "drm-driver":
-            out["driver"] = val.decode()
+            out["driver"] = val.decode("utf-8", errors="replace")
         elif key == "drm-pdev":
-            out["pdev"] = val.decode()
+            out["pdev"] = val.decode("utf-8", errors="replace")
         elif key == "drm-client-id":
-            out["client"] = int(val)
+            v = _parse_int_tok(val)
+            if v is not None:
+                out["client"] = v
     return out
 
 
@@ -67,7 +88,12 @@ class DrmClients:
         self._scan_t = now
         proc = join(self.root, "proc")
         paths: dict[tuple[int, int], str] = {}
-        for pid in os.listdir(proc):
+        try:
+            pids = os.listdir(proc)
+        except OSError:
+            self.paths = {}
+            return
+        for pid in pids:
             if not pid.isdigit():
                 continue
             fd_dir = os.path.join(proc, pid, "fd")
@@ -154,9 +180,13 @@ def find_intel_card(root: str) -> tuple[str, str, str] | None:
     return None
 
 
-ENGINE_NAMES = {"render": "Render/3D", "rcs": "Render/3D", "copy": "Blitter", "bcs": "Blitter",
-                "video": "Video", "vcs": "Video", "video-enhance": "Video enhance",
-                "vecs": "Video enhance", "compute": "Compute", "ccs": "Compute"}
+ENGINE_NAMES = {
+    "render": "Render/3D", "rcs": "Render/3D", "gfx": "3D / GFX",
+    "copy": "Blitter", "bcs": "Blitter", "sdma": "DMA",
+    "video": "Video", "vcs": "Video", "dec": "Video decode", "enc": "Video encode",
+    "video-enhance": "Video enhance", "vecs": "Video enhance", "jpeg": "JPEG",
+    "compute": "Compute", "ccs": "Compute",
+}
 
 
 class IntelGpu:

@@ -140,7 +140,7 @@ def load_config(path: Path | None = None) -> dict:
     """Read and validate. A missing file yields the defaults; a broken one raises."""
     path = path or config_path()
     try:
-        text = path.read_text()
+        text = path.read_text(encoding="utf-8")
     except FileNotFoundError:
         return copy.deepcopy(DEFAULTS)
     except OSError as exc:
@@ -189,7 +189,7 @@ def _atomic_write(path: Path, text: str) -> None:
     prepare_private_parent(path)
     fd, tmp = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     try:
-        with os.fdopen(fd, "w") as f:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
             os.fchmod(f.fileno(), 0o600)
             f.write(text)
             f.flush()

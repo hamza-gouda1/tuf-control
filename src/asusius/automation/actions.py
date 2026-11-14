@@ -17,6 +17,13 @@ from .engine import RESTORE_CONFIG
 from .rules import PPD_NAMES
 
 
+def _safe_int(val, default: int = 0) -> int:
+    try:
+        return int(val)
+    except (TypeError, ValueError):
+        return default
+
+
 class PpdClient:
     """net.hadess.PowerProfiles ActiveProfile. Under ASUSIUS_FAKE_ROOT it reads and
     writes <root>/fake/ppd.json instead, so tests never reach the system bus."""
@@ -94,16 +101,22 @@ class ControllerSink:
                         "colour2": list(saved.colour2), "speed": saved.speed,
                         "direction": saved.direction}
             data = c.get_kbd_rgb()[0].get("mode_data") or {}
-            return {"mode": int(data.get("mode", 0)),
-                    "colour1": list(data.get("colour1", (0, 0, 0))),
-                    "colour2": list(data.get("colour2", (0, 0, 0))),
-                    "speed": int(data.get("speed", 1)), "direction": int(data.get("direction", 0))}
+            return {"mode": _safe_int(data.get("mode"), 0),
+                    "colour1": list(data.get("colour1") or (0, 0, 0)),
+                    "colour2": list(data.get("colour2") or (0, 0, 0)),
+                    "speed": _safe_int(data.get("speed"), 1),
+                    "direction": _safe_int(data.get("direction"), 0)}
         if key == "kbd_brightness":
             return c.get_kbd_brightness()[0][0]
         if key == "charge_limit":
             return c.get_battery_threshold()[0]
         if key == "panel_overdrive":
-            return bool(int(self._overdrive_attr().current))
+            cur = str(self._overdrive_attr().current or "").strip().lower()
+            if cur in ("1", "true", "on", "enabled"):
+                return True
+            if cur in ("0", "false", "off", "disabled"):
+                return False
+            raise BackendUnavailable(f"panel_overdrive: unexpected value {cur!r}")
         if key == "ppd":
             return self.ppd.get()
         if key == "effect":

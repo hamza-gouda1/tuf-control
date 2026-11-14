@@ -26,7 +26,8 @@ def add_parsers(sub) -> None:
     ap.add_argument("--yes", action="store_true", help="really apply (asks polkit)")
     hs = us.add_parser("history", help="past update runs from the persistent history")
     hs.add_argument("--since", help="e.g. 7d, 24h, 30m, 2w, today, yesterday (default: all)")
-    hs.add_argument("--source", choices=["apt", "snap", "flatpak", "firmware", "system"])
+    hs.add_argument("--source", choices=["apt", "dnf", "pacman", "zypper",
+                                         "snap", "flatpak", "firmware", "system"])
     hs.add_argument("--limit", type=int, default=50)
     hs.add_argument("--json", action="store_true")
 

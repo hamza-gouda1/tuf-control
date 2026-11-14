@@ -11,8 +11,11 @@ everything outstanding: "14 updates available (apt 12, firmware 1, snap 1)".
 from __future__ import annotations
 
 import os
-import time
+import shutil
+import subprocess
+import sys
 import threading
+import time
 
 from .model import Report
 
@@ -60,17 +63,35 @@ def body_text(report: Report) -> str:
 
 
 def _launch_app() -> None:
-    """Open the app on its Updates page (the desktop action runs `--page updates`)."""
+    """Open the app on its Updates page outside asusiusd's restricted cgroup."""
+    exe = shutil.which("asusius-gui")
+    cmd = ([exe, "--page", "updates"] if exe else
+           [sys.executable, "-m", "asusius.ui", "--page", "updates"])
+    if shutil.which("systemd-run"):
+        try:
+            r = subprocess.run(
+                ["systemd-run", "--user", "--collect", "--quiet", "--no-block", "--", *cmd],
+                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL, timeout=5, check=False)
+            if r.returncode == 0:
+                return
+        except (OSError, subprocess.SubprocessError):
+            pass
     try:
         from gi.repository import Gio
         app = Gio.DesktopAppInfo.new("io.github.hamzagouda.Asusius.desktop")
-        if app is None:
+        if app is not None:
+            if "updates" in app.list_actions():
+                app.launch_action("updates", None)
+            else:
+                app.launch(None, None)
             return
-        if "updates" in app.list_actions():
-            app.launch_action("updates", None)
-        else:
-            app.launch(None, None)
     except Exception:
+        pass
+    try:
+        subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL, start_new_session=True)
+    except OSError:
         pass
 
 
@@ -170,11 +191,11 @@ def send(summary: str, body: str = "", replaces_id: int = 0,
         from .check import cache_dir
         p = cache_dir() / "notifications.log"
         p.parent.mkdir(parents=True, exist_ok=True)
-        with open(p, "a") as f:
+        with open(p, "a", encoding="utf-8") as f:
             f.write(summary + (" [click opens the app]" if open_on_click else "") + "\n")
         return 0
     try:
-        from gi.repository import Gio, GLib
+        from gi.repository import GLib
 
         from .. import dbusutil
         actions = ("default", "") if open_on_click else ()

@@ -82,8 +82,7 @@ def fake_sources(now: float) -> list[SourceResult]:
                                         "updatable": 12}, items=[
         UpdateItem(id="firmware:3b27a1b5c0de", source="firmware", name="System Firmware",
                    current="309", available="310", size=13_900_000, security=True,
-                   description="ASUS FX608JHR BIOS 310: security fixes and improved "
-                               "stability",
+                   description="ASUS BIOS 310: security fixes and improved stability",
                    needs_reboot=True, apply_method="fwupd", kind="bios",
                    extra={"device_id": "3b27a1b5c0de" + "0" * 28, "vendor": "ASUSTeK",
                           "require_ac": True, "urgency": "high",

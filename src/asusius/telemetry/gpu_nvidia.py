@@ -145,11 +145,21 @@ class Nvml:
         out: dict[int, dict] = {}
         for fname in self._procs:
             kind = "C" if "Compute" in fname else "G"
-            n = ctypes.c_uint(64)
-            arr = (_Proc * 64)()
-            if getattr(self.lib, fname)(h, ctypes.byref(n), arr) != NVML_OK:
-                continue
-            for i in range(min(n.value, 64)):
+            cap = 64
+            arr = None
+            n = ctypes.c_uint(cap)
+            while True:
+                arr = (_Proc * cap)()
+                n = ctypes.c_uint(cap)
+                rc = getattr(self.lib, fname)(h, ctypes.byref(n), arr)
+                if rc == NVML_OK:
+                    break
+                if rc == NVML_INSUFFICIENT_SIZE and cap < 4096:
+                    cap = min(4096, max(n.value, cap * 2))
+                    continue
+                n = ctypes.c_uint(0)
+                break
+            for i in range(min(n.value, cap)):
                 p = arr[i]
                 mem = None if p.usedGpuMemory == NOT_AVAILABLE_ULL else p.usedGpuMemory
                 cur = out.get(p.pid)
@@ -159,13 +169,19 @@ class Nvml:
                 else:
                     out[p.pid] = {"type": kind, "vram": mem, "sm": None}
         if self._putil and out:
-            n = ctypes.c_uint(64)
-            arr = (_ProcUtil * 64)()
-            rc = self.lib.nvmlDeviceGetProcessUtilization(h, arr, ctypes.byref(n),
-                                                          ctypes.c_ulonglong(self._last_ts))
+            cap = 64
+            while True:
+                arr = (_ProcUtil * cap)()
+                n = ctypes.c_uint(cap)
+                rc = self.lib.nvmlDeviceGetProcessUtilization(
+                    h, arr, ctypes.byref(n), ctypes.c_ulonglong(self._last_ts))
+                if rc == NVML_INSUFFICIENT_SIZE and cap < 4096:
+                    cap = min(4096, max(n.value, cap * 2))
+                    continue
+                break
             if rc == NVML_OK:
                 newest = self._last_ts
-                for i in range(min(n.value, 64)):
+                for i in range(min(n.value, cap)):
                     s = arr[i]
                     newest = max(newest, s.timeStamp)
                     if s.pid in out:
@@ -250,17 +266,25 @@ class NvidiaGpu:
             self.nvml.shutdown()
         self.handle = None
 
-    def _query_nvml(self) -> dict | None:
+    def _fallback_to_smi(self, now: float) -> dict | None:
+        import shutil
+        self.release()
+        if shutil.which("nvidia-smi"):
+            self.backend = "nvidia-smi"
+            return self._query_smi(now)
+        return None
+
+    def _query_nvml(self, now: float = 0.0) -> dict | None:
         nv = self.nvml
         if not nv.init():
             self.reason = "nvmlInit failed"
-            return None
+            return self._fallback_to_smi(now)
         if self.handle is None:
             self.handle = nv.handle(self.dev["addr"])
             if self.handle is None:
                 self.reason = f"NVML has no device at {self.dev['addr']}"
                 nv.shutdown()
-                return None
+                return self._fallback_to_smi(now)
             if not self.static:
                 self.static = nv.static(self.handle)
         q = nv.query(self.handle)
@@ -313,13 +337,14 @@ class NvidiaGpu:
                              "to recover it. GPU monitoring is paused.")
             info["dgpu"] = out
             return
-        if rs != "active":
+        if rs not in ("active", "unsupported"):
             self.release()
             self._idle = 0
             self.procs = {}
             out["state"] = "unavailable" if rs is None else "sleeping"
             if rs is None:
-                out["reason"] = "Runtime power-management state is unreadable; monitoring is paused."
+                out["reason"] = ("Runtime power-management state is unreadable; "
+                                 "monitoring is paused.")
             info["dgpu"] = out
             return
         if self.backend is None:
@@ -335,7 +360,7 @@ class NvidiaGpu:
             info["dgpu"] = out
             return
         if self.backend == "nvml":
-            q = self._query_nvml()
+            q = self._query_nvml(now)
         elif self.backend == "nvidia-smi":
             q = self._query_smi(now)
             if q is None and self._smi_last:

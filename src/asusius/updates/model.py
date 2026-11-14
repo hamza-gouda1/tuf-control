@@ -10,6 +10,9 @@ from dataclasses import asdict, dataclass, field
 # display order and titles of the sources
 SOURCE_TITLES = {
     "apt": "System packages",
+    "dnf": "System packages (DNF)",
+    "pacman": "System packages (pacman)",
+    "zypper": "System packages (zypper)",
     "snap": "Snaps",
     "flatpak": "Flatpak apps",
     "firmware": "Firmware",

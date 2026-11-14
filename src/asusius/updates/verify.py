@@ -41,7 +41,8 @@ def installed_versions(items: list[UpdateItem]) -> dict[str, str | None]:
     by: dict[str, list[UpdateItem]] = {}
     for i in items:
         by.setdefault(i.source, []).append(i)
-    readers = {"apt": _apt, "snap": _snap, "flatpak": _flatpak, "firmware": _firmware}
+    readers = {"apt": _apt, "dnf": _rpm, "zypper": _rpm, "pacman": _pacman,
+               "snap": _snap, "flatpak": _flatpak, "firmware": _firmware}
     for src, its in by.items():
         fn = readers.get(src)
         if fn is None:
@@ -62,8 +63,8 @@ def before_versions(items: list[UpdateItem]) -> dict[str, str | None]:
 
 
 def _apt(items):
-    names = sorted({f"{i.name}:{i.extra.get('arch')}" if i.extra.get("arch") else i.name
-                    for i in items})
+    names = sorted({f"{i.name.split(':')[0]}:{i.extra.get('arch')}"
+                    if i.extra.get("arch") else i.name for i in items})
     r = subprocess.run(["dpkg-query", "-W", "-f=${Package}\t${Architecture}\t${Version}\t"
                         "${db:Status-Abbrev}\n", "--", *names], capture_output=True, text=True,
                        timeout=30, stdin=subprocess.DEVNULL, env={**os.environ, "LC_ALL": "C"})
@@ -74,12 +75,46 @@ def _apt(items):
             got[(f[0], f[1])] = f[2]
     out = {}
     for i in items:
-        version = got.get((i.name, i.extra.get("arch"))) or got.get((i.name, "all"))
+        base = i.name.split(":")[0]
+        version = got.get((base, i.extra.get("arch"))) or got.get((base, "all"))
         if version is None and not i.extra.get("arch"):
-            versions = {v for (name, _arch), v in got.items() if name == i.name}
+            versions = {v for (name, _arch), v in got.items() if name == base}
             version = next(iter(versions)) if len(versions) == 1 else None
         out[i.id] = version
     return out
+
+
+def _rpm(items):
+    names = sorted({i.name for i in items})
+    r = subprocess.run(["rpm", "-q", "--qf", "%{NAME}\t%{ARCH}\t%{EVR}\n", "--", *names],
+                       capture_output=True, text=True, timeout=30, stdin=subprocess.DEVNULL,
+                       env={**os.environ, "LC_ALL": "C"})
+    got = {}
+    for line in r.stdout.splitlines():
+        f = line.split("\t")
+        if len(f) == 3:
+            got[(f[0], f[1])] = f[2]
+    out = {}
+    for i in items:
+        arch = i.extra.get("arch")
+        ver = got.get((i.name, arch)) if arch else None
+        if ver is None:
+            vers = {v for (n, _a), v in got.items() if n == i.name}
+            ver = next(iter(vers)) if len(vers) == 1 else None
+        out[i.id] = ver
+    return out
+
+
+def _pacman(items):
+    names = sorted({i.name for i in items})
+    r = subprocess.run(["pacman", "-Q", "--", *names], capture_output=True, text=True,
+                       timeout=30, stdin=subprocess.DEVNULL, env={**os.environ, "LC_ALL": "C"})
+    got = {}
+    for line in r.stdout.splitlines():
+        parts = line.split()
+        if len(parts) >= 2:
+            got[parts[0]] = parts[1]
+    return {i.id: got.get(i.name) for i in items}
 
 
 def _snap(items):
@@ -139,8 +174,10 @@ def staged_firmware(items: list[UpdateItem]) -> dict[str, str]:
         return {}
     staged = {}
     for i in its:
-        record = next((r for r in records if r.get("DeviceId") ==
-                       i.extra.get("device_id")), {})
+        dev_id = i.extra.get("device_id")
+        matches = [(int(r.get("Modified") or r.get("Created") or 0), idx, r)
+                   for idx, r in enumerate(records) if r.get("DeviceId") == dev_id]
+        record = max(matches, key=lambda x: (x[0], x[1]))[2] if matches else {}
         if record.get("UpdateState") not in (1, 4):  # PENDING, NEEDS_REBOOT
             continue
         versions = [r.get("Version") for r in record.get("Releases") or []]

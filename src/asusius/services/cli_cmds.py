@@ -57,7 +57,7 @@ def run(args) -> int:
         return 0
     unit = next((u for u in units if u.name == args.name), None)
     if unit is None:
-        print(f"error: no loaded unit {args.name!r}")
+        print(f"error: no unit {args.name!r}")
         return 1
     if sub == "show":
         d = {**unit.__dict__, **be.details(unit),

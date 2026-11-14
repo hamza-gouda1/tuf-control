@@ -9,6 +9,7 @@ from .errors import (
     ValidationError,
 )
 from .models import (
+    AURA_MODES,
     BatteryHealth,
     Capability,
     CapStatus,
@@ -26,8 +27,8 @@ from .models import (
 )
 
 __all__ = [
-    "BackendError", "BackendUnavailable", "BatteryHealth", "CapStatus", "Capability",
-    "FanCurve", "FanPoint", "FirmwareAttribute", "GpuAction", "GpuMode", "GpuStatus",
-    "KbdEffect", "PowerLimit", "PrivilegeRequired",
-    "Profile", "Telemetry", "AsusiusError", "Unsupported", "ValidationError", "jsonable",
+    "AURA_MODES", "BackendError", "BackendUnavailable", "BatteryHealth", "CapStatus",
+    "Capability", "FanCurve", "FanPoint", "FirmwareAttribute", "GpuAction", "GpuMode",
+    "GpuStatus", "KbdEffect", "PowerLimit", "PrivilegeRequired", "Profile", "Telemetry",
+    "AsusiusError", "Unsupported", "ValidationError", "jsonable",
 ]

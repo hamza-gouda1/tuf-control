@@ -32,7 +32,6 @@ import threading
 import time
 import urllib.parse
 from collections.abc import Callable
-from pathlib import Path
 
 from .model import UpdateItem
 
@@ -244,19 +243,37 @@ def pk_refresh(progress: Progress | None = None, watch: object | None = None) ->
     return "package lists refreshed"
 
 
+def _split_pkg_arch(spec: str) -> tuple[str, str | None]:
+    if ":" in spec:
+        name, arch = spec.split(":", 1)
+        return name, arch or None
+    return spec, None
+
+
+def _pid_matches_specs(pid: str, specs: set[tuple[str, str | None]]) -> bool:
+    parts = pid.split(";")
+    pname, narch = _split_pkg_arch(parts[0])
+    parch = narch or (parts[2] if len(parts) > 2 and parts[2] else None)
+    return any(
+        pname == req_name and (req_arch is None or parch is None or parch == req_arch)
+        for req_name, req_arch in specs
+    )
+
+
 def pk_update(names: list[str] | None, progress: Progress | None = None,
               watch: object | None = None, cancel: threading.Event | None = None) -> str:
     """Update the named packages (all offered updates when None) via PackageKit."""
     from gi.repository import GLib
     from .apt import dpkg_holds
     held = dpkg_holds()
-    if names and held.intersection(names):
+    wanted = {_split_pkg_arch(n) for n in names} if names is not None else None
+    if wanted and held.intersection(base for base, _ in wanted):
         raise ActionError("A selected package is now held by you. Refresh the Updates page")
     offered = PkTransaction(progress, 300, watch=watch).run(
         "GetUpdates", GLib.Variant("(t)", (PK_FILTER_NONE,)))
     ids = [pid for _info, pid, _s in offered
-           if pid.split(";")[0] not in held
-           and (names is None or pid.split(";")[0] in set(names))]
+           if pid.split(";")[0].split(":")[0] not in held
+           and (wanted is None or _pid_matches_specs(pid, wanted))]
     if not ids:
         return "nothing to update"
     _check_cancelled(cancel)
@@ -272,24 +289,26 @@ def pk_install(names: list[str], progress: Progress | None = None,
     this is what a kept-back meta package needs — the new packages it depends on."""
     from gi.repository import GLib
     from .apt import dpkg_holds
-    if dpkg_holds().intersection(set(names) | set(expected_upgrades or [])):
+    wanted = {_split_pkg_arch(n) for n in names}
+    exp_specs = {_split_pkg_arch(n) for n in (expected_upgrades or [])}
+    if dpkg_holds().intersection({b for b, _ in wanted | exp_specs}):
         raise ActionError("A dependency is now held by you. Nothing was installed")
+    resolve_names = list(dict.fromkeys(_split_pkg_arch(n)[0] for n in names))
     resolved = PkTransaction(progress, 120, watch=watch).run(
-        "Resolve", GLib.Variant("(tas)", (PK_FILTER_NOT_INSTALLED, list(names))))
-    ids = sorted({pid for _info, pid, _s in resolved if pid.split(";")[0] in set(names)})
-    resolved_names = {pid.split(";")[0] for pid in ids}
-    if resolved_names != set(names):
+        "Resolve", GLib.Variant("(tas)", (PK_FILTER_NOT_INSTALLED, resolve_names)))
+    ids = sorted({pid for _info, pid, _s in resolved if _pid_matches_specs(pid, wanted)})
+    if not all(any(_pid_matches_specs(pid, {spec}) for pid in ids) for spec in wanted):
         raise ActionError("PackageKit could not resolve every confirmed package; refresh "
                           "the Updates page before trying again")
     simulated = PkTransaction(progress, 120, watch=watch).run(
         "InstallPackages", GLib.Variant("(tas)", (
             PK_TX_FLAG_ONLY_TRUSTED | PK_TX_FLAG_SIMULATE, ids)))
     # PackageKit's InfoEnum INSTALLING/UPDATING, never removal/downgrade/obsoletion.
-    allowed = set(names) | set(expected_upgrades or [])
+    allowed = wanted | exp_specs
     if not simulated:
         raise ActionError("PackageKit did not provide a dependency simulation; nothing was installed")
     for info, pid, _summary in simulated:
-        if info not in (12, 11) or pid.split(";")[0] not in allowed:
+        if info not in (12, 11) or not _pid_matches_specs(pid, allowed):
             raise ActionError("PackageKit's plan differs from the confirmed package list; "
                               "refresh the Updates page. Nothing was installed")
     if cancel is not None and cancel.is_set():
@@ -520,8 +539,8 @@ def fwupd_refresh() -> str:
     r = subprocess.run(["fwupdmgr", "refresh", "--force"], capture_output=True, text=True,
                        timeout=180, stdin=subprocess.DEVNULL)
     if r.returncode not in (0, 2):  # 2: nothing to do / already fresh
-        raise ActionError((r.stderr or r.stdout).strip().splitlines()[-1:] or
-                          ["fwupdmgr refresh failed"])
+        lines = (r.stderr or r.stdout).strip().splitlines()
+        raise ActionError(lines[-1] if lines else "fwupdmgr refresh failed")
     return "firmware metadata refreshed"
 
 
@@ -598,9 +617,12 @@ def flatpak_update(installation: str, refs: list[str] | None, progress=None,
 
 def flatpak_refresh() -> str:
     for inst in ("system", "user"):  # without --cached: downloads the remotes' summaries
-        subprocess.run(["flatpak", "remote-ls", f"--{inst}", "--updates",
-                        "--columns=application"], capture_output=True, timeout=120,
-                       stdin=subprocess.DEVNULL)
+        r = subprocess.run(["flatpak", "remote-ls", f"--{inst}", "--updates",
+                            "--columns=application"], capture_output=True, text=True,
+                           timeout=120, stdin=subprocess.DEVNULL)
+        if r.returncode != 0:
+            lines = (r.stderr or r.stdout).strip().splitlines()
+            raise ActionError(lines[-1] if lines else f"flatpak remote-ls --{inst} failed")
     return "flatpak remotes refreshed"
 
 
@@ -615,19 +637,30 @@ def request_reboot() -> str:
 SOFTWARE_DESKTOP = "org.gnome.Software.desktop"
 
 
+def _software_target() -> tuple[list[str], str] | None:
+    if shutil.which("gnome-software"):
+        return ["gnome-software", "--mode=updates"], "opened Software"
+    if shutil.which("plasma-discover"):
+        return ["plasma-discover", "--mode", "Update"], "opened Discover"
+    if shutil.which("xdg-open"):
+        return ["xdg-open", "https://fwupd.org/"], "opened LVFS in browser"
+    return None
+
+
 def software_available() -> bool:
-    return bool(shutil.which("gnome-software"))
+    return _software_target() is not None
 
 
 def open_software() -> str:
     if _fake():
-        return _record("open gnome-software --mode=updates")
-    if not software_available():
-        raise ActionError("GNOME Software is not installed")
-    subprocess.Popen(["gnome-software", "--mode=updates"], stdin=subprocess.DEVNULL,
-                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                     start_new_session=True)
-    return "opened Software"
+        return _record("open software updates")
+    target = _software_target()
+    if target is None:
+        raise ActionError("No software center (GNOME Software, KDE Discover) or xdg-open found")
+    cmd, label = target
+    subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                     stderr=subprocess.DEVNULL, start_new_session=True)
+    return label
 
 
 # -- entry points ----------------------------------------------------------------------------------
@@ -641,7 +674,7 @@ def refresh_sources(sources: list[str], progress: Progress | None = None) -> dic
         try:
             if _fake():
                 out[s] = _record(f"refresh {s}")
-            elif s == "apt":
+            elif s in ("apt", "dnf", "zypper"):
                 out[s] = pk_refresh(progress)
             elif s == "firmware" and shutil.which("fwupdmgr"):
                 out[s] = fwupd_refresh()

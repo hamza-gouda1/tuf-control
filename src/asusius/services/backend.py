@@ -6,7 +6,7 @@ Listing: one ListUnits call per refresh, plus ListUnitFiles (enabled state and u
 path) every few refreshes; PID and memory come from the units' cgroups in /sys/fs/cgroup
 (plain file reads). None of it needs root.
 
-Actions: StartUnit / StopUnit / RestartUnit / EnableUnitFiles / DisableUnitFiles (+ Reload)
+Actions: StartUnit / StopUnit / RestartUnit / EnableUnitFiles / DisableUnitFiles
 on the user bus for user units, on the system bus for system units with interactive
 authorisation allowed, so systemd asks polkit and the desktop shows its own dialog.
 The UI checks `units.refusal()` first and asks for confirmation; this module checks again.
@@ -87,10 +87,15 @@ class SystemdBackend:
     def _call(self, method: str, args=None, reply: str | None = None, interactive=False,
               timeout_ms: int = 10000, path: str = SD_PATH, iface: str = SD_MGR):
         from .. import dbusutil
-        if self._conn is None:
+        if self._conn is None or self._conn.is_closed():
             self._conn = dbusutil.bus(self.kind)
-        return dbusutil.call(self.kind, SD, path, iface, method, args, reply, timeout_ms,
-                             interactive=interactive, conn=self._conn)
+        try:
+            return dbusutil.call(self.kind, SD, path, iface, method, args, reply, timeout_ms,
+                                 interactive=interactive, conn=self._conn)
+        except Exception:
+            if self._conn is not None and self._conn.is_closed():
+                self._conn = None
+            raise
 
     def _unit_files(self) -> dict[str, tuple[str, str]]:
         (rows,) = self._call("ListUnitFiles", None, "(a(ss))", timeout_ms=20000)
@@ -106,7 +111,9 @@ class SystemdBackend:
         self._n += 1
         cg = cgroup_map(self.cg_root)
         out = []
+        seen: set[str] = set()
         for name, desc, load, active, sub, _follow, opath, *_ in rows:
+            seen.add(name)
             st, fpath = self._files.get(name) or self._files.get(_template(name)) or ("", "")
             u = Unit(name=name, description=desc, load=load, active=active, sub=sub,
                      file_state=st, path=fpath, object_path=opath, scope=self.scope)
@@ -115,12 +122,20 @@ class SystemdBackend:
                 u.memory = _read_int(d / "memory.current")
                 u.pid = _first_pid(d)
             out.append(u)
+        for name, (st, fpath) in self._files.items():
+            if name in seen or "@." in name:
+                continue
+            load = "masked" if st == "masked" else "unloaded"
+            out.append(Unit(name=name, description="", load=load, active="inactive", sub="dead",
+                            file_state=st, path=fpath, object_path="", scope=self.scope))
         return out
 
     def details(self, unit: Unit) -> dict:
         """Main PID, unit file and timing for the selected unit (a few property reads)."""
         from gi.repository import GLib
-        out = {}
+        out: dict = {"fragment": unit.path} if unit.path else {}
+        if not unit.object_path:
+            return out
         try:
             (props,) = self._call("GetAll", GLib.Variant("(s)", ("org.freedesktop.systemd1.Unit",)),
                                   "(a{sv})", path=unit.object_path,
@@ -154,11 +169,9 @@ class SystemdBackend:
         elif op == "enable":
             self._call("EnableUnitFiles", GLib.Variant("(asbb)", ([unit.name], False, False)),
                        "(ba(sss))", interactive=interactive, timeout_ms=120000)
-            self._call("Reload", None, None, interactive=interactive, timeout_ms=120000)
         elif op == "disable":
             self._call("DisableUnitFiles", GLib.Variant("(asb)", ([unit.name], False)),
                        "(a(sss))", interactive=interactive, timeout_ms=120000)
-            self._call("Reload", None, None, interactive=interactive, timeout_ms=120000)
         self._files = {}  # re-read enabled states on the next refresh
         return f"{op} {unit.name}"
 
@@ -235,9 +248,9 @@ class FakeServices:
     def list_units(self, force_files: bool = False) -> list[Unit]:
         out = []
         for n, d, load, a, s, f, p, m in self.state.values():
+            base = "/usr/lib/systemd/" + ("system" if self.scope == "system" else "user")
             out.append(Unit(name=n, description=d, load=load, active=a, sub=s, file_state=f,
-                            pid=p, memory=m, scope=self.scope,
-                            path=f"/usr/lib/systemd/{'system' if self.scope == 'system' else 'user'}/{n}",
+                            pid=p, memory=m, scope=self.scope, path=f"{base}/{n}",
                             object_path=f"/org/freedesktop/systemd1/unit/{n.replace('.', '_2e')}"))
         return out
 

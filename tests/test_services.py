@@ -166,7 +166,7 @@ class SystemdBackendTests(unittest.TestCase):
         self.assertEqual(self.calls, [("RestartUnit", ("cups.service", "replace"), True)])
         self.calls.clear()
         be.act(by["ssh.service"], "enable")
-        self.assertEqual([c[0] for c in self.calls], ["EnableUnitFiles", "Reload"])
+        self.assertEqual([c[0] for c in self.calls], ["EnableUnitFiles"])
         self.assertEqual(self.calls[0][1], (["ssh.service"], False, False))
         self.calls.clear()
         with self.assertRaises(RefusedError):

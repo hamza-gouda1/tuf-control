@@ -11,6 +11,7 @@ from __future__ import annotations
 import time
 
 from .cpu import CpuReader
+from .gpu_amd import AmdDiscreteGpu, AmdGpu, find_amd_cards
 from .gpu_intel import IntelGpu
 from .gpu_nvidia import NvidiaGpu
 from .memory import MemoryReader
@@ -29,8 +30,27 @@ class Sampler:
         self.cpu = CpuReader(root)
         self.mem = MemoryReader(root)
         self.sensors = Sensors(root)
-        self.igpu = IntelGpu(root)
-        self.dgpu = NvidiaGpu(root, fake=fake)
+        intel = IntelGpu(root)
+        nv = NvidiaGpu(root, fake=fake)
+        amd_cards = find_amd_cards(root)
+        igpu_pdev = intel.pdev
+        if intel.card is not None:
+            self.igpu = intel
+        elif amd_cards and (nv.dev is not None or any(c["boot_vga"] for c in amd_cards)
+                            or len(amd_cards) == 1):
+            ig_card = next((c for c in amd_cards if c["boot_vga"]), amd_cards[0])
+            self.igpu = AmdGpu(root, card_info=ig_card)
+            igpu_pdev = ig_card["pdev"]
+        else:
+            self.igpu = intel
+        if nv.dev is not None:
+            self.dgpu = nv
+        else:
+            remaining_amd = [c for c in amd_cards if not igpu_pdev or c["pdev"] != igpu_pdev]
+            if remaining_amd:
+                self.dgpu = AmdDiscreteGpu(root, card_info=remaining_amd[0])
+            else:
+                self.dgpu = nv
         self.disk = Storage(root)
         self.net = Network(root)
         self.power = Power(root)

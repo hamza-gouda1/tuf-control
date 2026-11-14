@@ -157,7 +157,7 @@ class Action:
                 _keys(where, p, {"value"})
                 p["value"] = rgb_to_hex(hex_to_rgb(p.get("value")))
             elif t == "kbd_effect":
-                from ..ui.viewmodels import AURA_MODES as AURA_MODE_NAMES
+                from ..core.models import AURA_MODES as AURA_MODE_NAMES
                 _keys(where, p, {"mode", "colour", "colour2", "speed", "direction"})
                 mode = p.get("mode")
                 if isinstance(mode, str):
@@ -165,14 +165,17 @@ class Action:
                     if mode.lower() not in lookup:
                         _err(where, f"unknown keyboard mode {mode!r}")
                     mode = lookup[mode.lower()]
-                p["mode"] = _int(f"{where}.mode", mode, 0, 12)
+                mode = _int(f"{where}.mode", mode, 0, max(AURA_MODE_NAMES))
+                if mode not in AURA_MODE_NAMES:
+                    _err(f"{where}.mode", f"unknown keyboard mode {mode!r}")
+                p["mode"] = mode
                 p["colour"] = rgb_to_hex(hex_to_rgb(p.get("colour", "#8e2a44")))
                 p["colour2"] = rgb_to_hex(hex_to_rgb(p.get("colour2", "#000000")))
                 p["speed"] = _int(f"{where}.speed", p.get("speed", 1), 0, 2)
                 p["direction"] = _int(f"{where}.direction", p.get("direction", 0), 0, 3)
             elif t == "kbd_brightness":
                 _keys(where, p, {"value"})
-                p["value"] = _int(f"{where}.value", p.get("value"), 0, 3)
+                p["value"] = _int(f"{where}.value", p.get("value"), 0, 65535)
             elif t == "charge_limit":
                 _keys(where, p, {"value"})
                 p["value"] = _int(f"{where}.value", p.get("value"), 20, 100)
@@ -228,10 +231,12 @@ class Action:
         if self.type == "kbd_colour":
             return f"Keyboard {p['value']}"
         if self.type == "kbd_effect":
-            from ..ui.viewmodels import AURA_MODES as AURA_MODE_NAMES
+            from ..core.models import AURA_MODES as AURA_MODE_NAMES
             return f"Keyboard {AURA_MODE_NAMES.get(p['mode'], p['mode'])} {p['colour']}"
         if self.type == "kbd_brightness":
-            return f"Backlight {('off', 'low', 'medium', 'high')[p['value']]}"
+            names = ("off", "low", "medium", "high")
+            v = p["value"]
+            return f"Backlight {names[v] if 0 <= v < len(names) else v}"
         if self.type == "charge_limit":
             return f"Charge limit {p['value']}%"
         if self.type == "panel_overdrive":

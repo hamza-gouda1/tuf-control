@@ -209,10 +209,13 @@ class Engine:
                     out.log.append(self._entry(
                         "conflict", rule.id, f"{key}: wins over {', '.join(losers)} "
                         f"(priority {rule.priority})", key))
-                if key not in self.baseline:
+                had_baseline = key in self.baseline
+                if not had_baseline:
                     self.baseline[key] = self._read(key)
-                self._apply(out, "apply", rule.id, key, value)
-                self.holds[key] = _Hold(rule.id, value, rule.restore)
+                if self._apply(out, "apply", rule.id, key, value):
+                    self.holds[key] = _Hold(rule.id, value, rule.restore)
+                elif not had_baseline and key not in self.holds:
+                    self.baseline.pop(key, None)
             elif hold:
                 base = self.baseline.pop(key, None)
                 del self.holds[key]
@@ -225,13 +228,13 @@ class Engine:
         except AsusiusError:
             return None
 
-    def _apply(self, out: StepResult, kind: str, rule_id: str, key: str, value) -> None:
+    def _apply(self, out: StepResult, kind: str, rule_id: str, key: str, value) -> bool:
         try:
             detail = self.sink.apply(key, value, dry_run=self.dry_run)
             out.log.append(self._entry(kind, rule_id, detail, key))
         except AsusiusError as exc:
             out.log.append(self._entry("error", rule_id, f"{key}: {exc}", key))
-            return
+            return False
         if key == "profile" and self.sync_ppd:
             try:
                 ppd = Profile.parse(value).ppd_name
@@ -240,6 +243,7 @@ class Engine:
                                            "ppd"))
             except AsusiusError as exc:
                 out.log.append(self._entry("error", rule_id, f"ppd: {exc}", "ppd"))
+        return True
 
     def shutdown(self) -> list[LogEntry]:
         """Release every held setting (restoring where asked); used on daemon stop."""

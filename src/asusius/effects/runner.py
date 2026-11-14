@@ -41,10 +41,20 @@ class KbdWriter:
 
     @staticmethod
     def _effect(data: dict) -> KbdEffect:
-        return KbdEffect(int(data.get("mode", 0)), int(data.get("zone", 0)),
-                         tuple(data.get("colour1", (142, 42, 68))),
-                         tuple(data.get("colour2", (0, 0, 0))),
-                         int(data.get("speed", 1)), int(data.get("direction", 0)))
+        c1 = data.get("colour1")
+        c2 = data.get("colour2")
+        mode = data.get("mode")
+        zone = data.get("zone")
+        speed = data.get("speed")
+        direction = data.get("direction")
+        return KbdEffect(
+            int(mode if mode is not None else 0),
+            int(zone if zone is not None else 0),
+            tuple(c1) if c1 is not None else (142, 42, 68),
+            tuple(c2) if c2 is not None else (0, 0, 0),
+            int(speed if speed is not None else 1),
+            int(direction if direction is not None else 0),
+        )
 
     @staticmethod
     def _stored_effect(data) -> KbdEffect:
@@ -83,7 +93,14 @@ class KbdWriter:
             self._discard_recovery()
             self._recovery_checked = True
             return
-        current = self._effect((self.ctl.get_kbd_rgb()[0] or {}).get("mode_data") or {})
+        try:
+            current = self._effect((self.ctl.get_kbd_rgb()[0] or {}).get("mode_data") or {})
+        except AsusiusError:
+            raise
+        except (ValueError, TypeError, KeyError, AttributeError):
+            self._discard_recovery()
+            self._recovery_checked = True
+            return
         self._recovery_checked = True
         if current in frames:
             self.saved, self.saved_static = saved, static
@@ -201,6 +218,9 @@ class EffectsRunner:
         self._fail = 0
         self._paused_until = 0.0
         self._lock = threading.RLock()
+        self._io_lock = threading.Lock()
+        self._pending_hw_mode: KbdEffect | None = None
+        self._has_base = False
 
     # -- configuration ------------------------------------------------------------------------
     def configure(self, cfg: dict) -> None:
@@ -226,14 +246,21 @@ class EffectsRunner:
         """Someone else (an automation rule) set the hardware mode while an effect runs:
         that becomes the mode restored when the effect stops."""
         with self._lock:
-            if self.writer.saved is not None:
-                self.writer.saved = effect
-                if effect.mode == 0:
-                    self.writer.saved_static = None
-                self.writer.last_rgb = None  # repaint over it on the next frame
+            self._pending_hw_mode = effect
+
+    def _flush_pending_hw_mode(self) -> None:
+        with self._lock:
+            eff = self._pending_hw_mode
+            self._pending_hw_mode = None
+        if eff is not None and self.writer.saved is not None:
+            self.writer.saved = eff
+            if eff.mode == 0:
+                self.writer.saved_static = None
+            self.writer.last_rgb = None  # repaint over it on the next frame
 
     def get_override(self):
-        return self.override
+        with self._lock:
+            return self.override
 
     def wanted(self) -> tuple[str | None, dict, bool, dict]:
         cfg = self.cfg
@@ -249,25 +276,45 @@ class EffectsRunner:
         return name, params, on, notif
 
     # -- sources --------------------------------------------------------------------------------
-    def _source(self, kind: str):
-        if kind in self.sources:
-            return self.sources[kind]
-        if kind not in self._live:
-            if kind == "audio":
-                from .audio import AudioCapture
-                src = AudioCapture()
-            elif kind == "frames":
-                from ..automation.config import config_dir
-                from .ambient import ScreenColourSource
-                src = ScreenColourSource(self.token_path or config_dir() / "screencast-token")
-            elif kind == "notifications":
-                from .notify import NotificationMonitor
-                src = NotificationMonitor()
-            else:
-                return None
+    def _build_source(self, kind: str):
+        if kind == "audio":
+            from .audio import AudioCapture
+            return AudioCapture()
+        if kind == "frames":
+            from ..automation.config import config_dir
+            from .ambient import ScreenColourSource
+            return ScreenColourSource(self.token_path or config_dir() / "screencast-token")
+        if kind == "notifications":
+            from .notify import NotificationMonitor
+            return NotificationMonitor()
+        return None
+
+    def _ensure_sources(self, needs: set[str]) -> None:
+        with self._lock:
+            missing = [k for k in ("audio", "frames", "notifications")
+                       if k in needs and k not in self.sources and k not in self._live]
+        for kind in missing:
+            src = self._build_source(kind)
+            if src is None:
+                continue
             src.start()
-            self._live[kind] = src
-        return self._live[kind]
+            discard = None
+            with self._lock:
+                if kind in self._live or kind in self.sources:
+                    discard = src
+                else:
+                    self._live[kind] = src
+            if discard is not None:
+                try:
+                    discard.stop()
+                except Exception:
+                    pass
+
+    def _source(self, kind: str):
+        with self._lock:
+            if kind in self.sources:
+                return self.sources[kind]
+            return self._live.get(kind)
 
     def _inputs(self, needs: set[str]) -> Inputs:
         clock = self.clock
@@ -292,76 +339,120 @@ class EffectsRunner:
                       if "notifications" in needs else None,
                       theme_accent=theme)
 
-    def _stop_sources(self, keep: set[str]) -> None:
-        for kind in [k for k in self._live if k not in keep]:
+    def _pop_unused_sources(self, keep: set[str]) -> list[object]:
+        return [self._live.pop(k) for k in list(self._live) if k not in keep]
+
+    @staticmethod
+    def _stop_source_list(sources: list[object]) -> None:
+        for src in sources:
             try:
-                self._live.pop(kind).stop()
+                src.stop()
             except Exception:
                 pass
 
     # -- running --------------------------------------------------------------------------------
     def _rebuild(self) -> None:
-        name, params, notif_on, notif = self.wanted()
-        spec = (name, repr(sorted(params.items())), notif_on, repr(sorted(notif.items())))
-        if spec == self.spec:
-            return
-        self.spec = spec
-        if self.stack:
-            self.stack.stop()
-        self.stack = None
-        layers = []
-        needs: set[str] = set()
-        if name:
-            needs |= set(EFFECTS[name].needs)
-        if notif_on and name:  # the flash overlays an effect; alone it would need a base
-            needs.add("notifications")
-        self._stop_sources(needs)
-        if name:
-            inputs = self._inputs(needs)
-            layers.append((0, EFFECTS[name](params, inputs)))
+        with self._lock:
+            name, params, notif_on, notif = self.wanted()
+            spec = (name, repr(sorted(params.items())), notif_on, repr(sorted(notif.items())))
+            if spec == self.spec:
+                return
+            self.spec = spec
+            old_stack, self.stack = self.stack, None
+            self._has_base = bool(name)
+            needs: set[str] = set()
+            if name:
+                needs |= set(EFFECTS[name].needs)
             if notif_on:
-                layers.append((100, OVERLAY_EFFECTS["notifications"](notif, inputs)))
-        if layers:
-            self.stack = EffectStack(layers)
-            self.stack.start()
-            self.error = None
-            self._fail = 0
-            try:
-                self.writer.save()
-            except AsusiusError as exc:
-                self.error = f"keyboard colour unavailable: {exc}"
-        else:
-            self.colour = self.layer = None
-            self._release()
+                needs.add("notifications")
+            dead = self._pop_unused_sources(needs)
+        if old_stack:
+            old_stack.stop()
+        self._stop_source_list(dead)
+        self._ensure_sources(needs)
+        new_stack = None
+        with self._lock:
+            if self.spec != spec:
+                return
+            layers = []
+            if name or notif_on:
+                inputs = self._inputs(needs)
+                if name:
+                    layers.append((0, EFFECTS[name](params, inputs)))
+                if notif_on:
+                    layers.append((100, OVERLAY_EFFECTS["notifications"](notif, inputs)))
+            if layers:
+                new_stack = EffectStack(layers)
+                self.stack = new_stack
+                self.error = None
+                self._fail = 0
+            else:
+                self.colour = self.layer = None
+                self.smoother.value = None
+        if new_stack is not None:
+            new_stack.start()
+        with self._io_lock:
+            if name:
+                try:
+                    self.writer.save()
+                except AsusiusError as exc:
+                    with self._lock:
+                        self.error = f"keyboard colour unavailable: {exc}"
+            else:
+                self._flush_pending_hw_mode()
+                self._release()
 
     def _release(self) -> None:
         try:
             self.writer.restore()
         except AsusiusError as exc:
-            self.error = f"could not restore keyboard mode: {exc}"
+            with self._lock:
+                self.error = f"could not restore keyboard mode: {exc}"
 
     def step(self, dt: float) -> RGB | None:
+        self._rebuild()
         with self._lock:
-            self._rebuild()
-            if self.stack is None:
-                return None
-            rgb, who = self.stack.tick(dt)
+            stack = self.stack
+            has_base = self._has_base
+        if stack is None:
+            return None
+        rgb, who = stack.tick(dt)
+        need_flash_release = False
+        should_push = False
+        out: RGB | None = None
+        with self._lock:
+            if stack is not self.stack:
+                return self.colour
             if rgb is None:
+                if not has_base:
+                    self.colour = self.layer = None
+                    self.smoother.value = None
+                    need_flash_release = self.writer.saved is not None
                 return self.colour
             out = self.smoother.step(rgb, dt)
             self.colour, self.layer = out, who
-            if self.clock() < self._paused_until:
-                return out
+            should_push = self.clock() >= self._paused_until
+        if need_flash_release:
+            with self._io_lock:
+                self._flush_pending_hw_mode()
+                self._release()
+            return None
+        if not should_push or out is None:
+            return out
+        with self._io_lock:
+            self._flush_pending_hw_mode()
             try:
                 self.writer.push(out)
-                self._fail = 0
-                if self.error and self.error.startswith("write failed"):
-                    self.error = None
+                with self._lock:
+                    self._fail = 0
+                    if self.error and self.error.startswith("write failed"):
+                        self.error = None
             except AsusiusError as exc:
-                self._fail += 1
-                self.error = f"write failed: {exc}"
-                self._paused_until = self.clock() + min(30.0, 2.0 * self._fail)
-            return out
+                with self._lock:
+                    self._fail += 1
+                    self.error = f"write failed: {exc}"
+                    self._paused_until = self.clock() + min(30.0, 2.0 * self._fail)
+        return out
 
     def run(self, stop: threading.Event) -> None:
         last = self.clock()
@@ -375,17 +466,22 @@ class EffectsRunner:
 
     def frame_rate(self) -> int:
         """Configured fps, capped by what the layers need (slow effects need few frames)."""
-        if self.stack is None:
-            return 2 if not self.wanted()[0] else 10
-        need = max(getattr(e, "max_fps", 30) for _p, e in self.stack.layers)
-        return max(1, min(int(self.cfg.get("fps", 30)), need))
+        with self._lock:
+            if self.stack is None:
+                return 2 if not self.wanted()[0] else 10
+            need = max(getattr(e, "max_fps", 30) for _p, e in self.stack.layers)
+            return max(1, min(int(self.cfg.get("fps", 30)), need))
 
     def shutdown(self) -> None:
         with self._lock:
-            if self.stack:
-                self.stack.stop()
-            self.stack, self.spec = None, None
-            self._stop_sources(set())
+            stack, self.stack = self.stack, None
+            self.spec = None
+            dead = self._pop_unused_sources(set())
+        if stack:
+            stack.stop()
+        self._stop_source_list(dead)
+        with self._io_lock:
+            self._flush_pending_hw_mode()
             self._release()
 
     def status(self) -> dict:

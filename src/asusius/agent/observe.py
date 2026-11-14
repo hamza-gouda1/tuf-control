@@ -213,6 +213,7 @@ class Observer:
         if w:
             withheld.append("battery.model")
         full, design = b.get("energy_full"), b.get("energy_design")
+        health = min(100.0, max(0.0, 100 * full / design)) if full and design else None
         return {"present": bool(b.get("present")), "percent": b.get("percent"),
                 "status": b.get("status"), "ac_online": b.get("ac_online"),
                 "power_w": _r(b.get("watts")), "voltage_v": _r(b.get("voltage"), 2),
@@ -220,9 +221,19 @@ class Observer:
                     "energy_now") is not None else None,
                 "energy_full_wh": _r(full / 1e6) if full else None,
                 "energy_design_wh": _r(design / 1e6) if design else None,
-                "health_pct": _r(100 * full / design) if full and design else None,
+                "health_pct": _r(health),
                 "cycles": b.get("cycles"), "charge_limit_pct": b.get("limit"),
                 "hours_left_at_current_draw": _r(b.get("hours"), 2), "model": model or None}
+
+    def _gpu_maps(self, now: float) -> tuple[dict | None, dict | None]:
+        vals: dict = {}
+        info: dict = {}
+        for src in (self._sampler.igpu, self._sampler.dgpu):
+            try:
+                src.sample(now, vals, info)
+            except Exception:
+                pass
+        return info.get("igpu", {}).get("per_pid"), info.get("dgpu", {}).get("procs")
 
     # -- processes ---------------------------------------------------------------------------
     def processes(self, *, sort: str = "cpu", limit: int = 10, name_filter: str | None = None,
@@ -234,7 +245,8 @@ class Observer:
             now = self._now()
             if self._world is not None:
                 self._world.advance(now)
-            self._walker.walk(now)
+            ig_map, dg_map = self._gpu_maps(now)
+            self._walker.walk(now, ig_map, dg_map)
             self._walk_t = self.clock()
             if not self.fake:
                 self.sleep(BASELINE_MIN_S)
@@ -245,7 +257,8 @@ class Observer:
         now = self._now()
         if self._world is not None:
             self._world.advance(now)
-        procs = self._walker.walk(now)
+        ig_map, dg_map = self._gpu_maps(now)
+        procs = self._walker.walk(now, ig_map, dg_map)
         self._walk_t = self.clock()
         total = len(procs)
         if not include_kernel:

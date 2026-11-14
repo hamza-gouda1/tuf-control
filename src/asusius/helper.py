@@ -101,23 +101,27 @@ def _v_fan(real: Path, value: str) -> None:
         raise Rejected("not the asus_custom_fan_curve hwmon")
     leaf = real.name
     if leaf.endswith("_enable"):
-        _int(value, 1, 3, "pwm_enable")
+        _int(value, 0, 4, "pwm_enable")
     elif leaf.endswith("_temp"):
         _int(value, 0, 125, "temperature")
     else:
         _int(value, 0, 255, "pwm")
 
 
+_LED_NAME = r"[A-Za-z0-9_:-]*kbd_backlight[A-Za-z0-9_:-]*"
+_MAX_BATCH = 64
+
 # (relative-to-root regex of the *resolved* path, validator)
 RULES: list[tuple[re.Pattern[str], Callable[[Path, str], None]]] = [
     (re.compile(r"sys/firmware/acpi/platform_profile"), _v_profile),
     (re.compile(rf"sys/class/firmware-attributes/asus-armoury/attributes/{_NAME}/current_value"),
      _v_armoury),
-    (re.compile(r"sys/class/power_supply/BAT[0-9]/charge_control_end_threshold"), _v_battery),
-    (re.compile(r"sys/class/leds/asus::kbd_backlight/brightness"), _v_kbd_brightness),
+    (re.compile(r"sys/class/power_supply/BAT[A-Za-z0-9_]+/charge_control_end_threshold"),
+     _v_battery),
+    (re.compile(rf"sys/class/leds/{_LED_NAME}/brightness"), _v_kbd_brightness),
     # kbd_rgb_*: write-only; formats per asus-wmi docs, not verifiable by reading back
-    (re.compile(r"sys/class/leds/asus::kbd_backlight/kbd_rgb_mode"), _v_ints(6, 255)),
-    (re.compile(r"sys/class/leds/asus::kbd_backlight/kbd_rgb_state"), _v_ints(5, 1)),
+    (re.compile(rf"sys/class/leds/{_LED_NAME}/kbd_rgb_mode"), _v_ints(6, 255)),
+    (re.compile(rf"sys/class/leds/{_LED_NAME}/kbd_rgb_state"), _v_ints(5, 1)),
     (re.compile(r"sys/devices/virtual/hwmon/hwmon[0-9]+/pwm[123]_(?:enable|"
                 r"auto_point[1-8]_(?:temp|pwm))"), _v_fan),
     (re.compile(r"sys/class/hwmon/hwmon[0-9]+/pwm[123]_(?:enable|"
@@ -186,30 +190,56 @@ def _open_attribute(real: Path) -> int:
 
 
 def write(path: str, value: str, root: str | Path = "/") -> None:
-    real, validated = _validate(path, value, root)
-    # defence in depth, right at the sink: validate() already resolved and allow-listed
-    # the path; this second containment check on the resolved value makes the guarantee
-    # local to the open() call
+    write_batch([(path, value)], root=root)
+
+
+def write_batch(pairs: list[tuple[str, str]], root: str | Path = "/") -> None:
+    if not pairs or len(pairs) > _MAX_BATCH:
+        raise Rejected(f"batch must contain 1-{_MAX_BATCH} entries")
     base = Path(os.path.realpath(root))
-    if not real.is_relative_to(base / "sys"):
-        raise Rejected("path is not under /sys")
-    fd = _open_attribute(real)
+    validated = [_validate(path, value, root) for path, value in pairs]
+    fds: list[tuple[int, str]] = []
     try:
-        opened = os.fstat(fd)
-        if (opened.st_dev, opened.st_ino) != (validated.st_dev, validated.st_ino):
-            raise Rejected("attribute changed after validation")
-        os.write(fd, value.encode())
+        for (real, expected), (_, value) in zip(validated, pairs):
+            # defence in depth, right at the sink: validate() already resolved and allow-listed
+            # the path; this second containment check on the resolved value makes the guarantee
+            # local to the open() call
+            if not real.is_relative_to(base / "sys"):
+                raise Rejected("path is not under /sys")
+            fd = _open_attribute(real)
+            try:
+                opened = os.fstat(fd)
+                if (opened.st_dev, opened.st_ino) != (expected.st_dev, expected.st_ino):
+                    os.close(fd)
+                    raise Rejected("attribute changed after validation")
+            except BaseException:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+                raise
+            fds.append((fd, value))
+        for fd, value in fds:
+            os.write(fd, value.encode())
     finally:
-        os.close(fd)
+        for fd, _ in fds:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
 
 
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
-    if len(args) != 3 or args[0] != "write":
+    if len(args) == 3 and args[0] == "write":
+        pairs = [(args[1], args[2])]
+    elif len(args) >= 3 and len(args) % 2 == 1 and args[0] == "write-batch":
+        pairs = list(zip(args[1::2], args[2::2]))
+    else:
         print("usage: asusius-helper write <sysfs path> <value>", file=sys.stderr)
         return 2
     try:
-        write(args[1], args[2])
+        write_batch(pairs)
     except Rejected as exc:
         print(f"asusius-helper: rejected: {exc}", file=sys.stderr)
         return 3

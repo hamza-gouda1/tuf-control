@@ -60,8 +60,18 @@ class CliBackend(Backend):
         return run_cmd([exe, *check_args(args)], timeout=self.timeout)
 
     def probe(self):
-        if shutil.which(self.binary) is None:
+        exe = shutil.which(self.binary)
+        if exe is None:
             return {c: CapStatus(False, "asusctl not installed") for c in Capability}
+        try:
+            run_cmd([exe, "info"], timeout=min(self.timeout, 1.5))
+        except BackendUnavailable:
+            return {c: CapStatus(False, "asusctl not installed") for c in Capability}
+        except BackendError as exc:
+            msg = str(exc)
+            if any(k in msg for k in ("ServiceUnknown", "NameHasNoOwner", "D-Bus", "dbus")):
+                return {c: CapStatus(False, f"asusd unreachable via asusctl: {msg}")
+                        for c in Capability}
         ok = CapStatus(True)
         no = CapStatus(False, "not exposed by asusctl wrapper")
         return {
@@ -73,7 +83,8 @@ class CliBackend(Backend):
         }
 
     def get_profile(self) -> Profile:
-        m = re.search(r"Active profile:\s*(\w[\w-]*)", self._run(["profile", "get"]))
+        out = self._run(["profile", "get"])
+        m = re.search(r"Active profile(?:\s+is|:)\s*(\w[\w-]*)", out, re.IGNORECASE)
         if not m:
             raise BackendError("cannot parse asusctl profile output")
         return Profile.parse(m.group(1))
@@ -82,7 +93,8 @@ class CliBackend(Backend):
         self._run(["profile", "set", profile.cli_name])
 
     def get_battery_threshold(self) -> int:
-        m = re.search(r"limit:\s*(\d+)%", self._run(["battery", "info"]))
+        out = self._run(["battery", "info"])
+        m = re.search(r"limit(?:\s+is|:)\s*(\d+)%", out, re.IGNORECASE)
         if not m:
             raise BackendError("cannot parse asusctl battery output")
         return int(m.group(1))
@@ -93,14 +105,23 @@ class CliBackend(Backend):
         self._run(["battery", "limit", str(value)])
 
     def get_kbd_brightness(self) -> tuple[int, int]:
-        m = re.search(r"brightness:\s*(\w+)", self._run(["leds", "get"]))
-        if not m or m.group(1).lower() not in LED_LEVELS:
+        out = self._run(["leds", "get"])
+        m = re.search(r"brightness(?:\s+is|:)\s*(\w+)", out, re.IGNORECASE)
+        if not m:
             raise BackendError("cannot parse asusctl leds output")
-        return LED_LEVELS.index(m.group(1).lower()), len(LED_LEVELS) - 1
+        token = m.group(1).lower()
+        if token.isdigit():
+            val = int(token)
+            return val, max(len(LED_LEVELS) - 1, val)
+        if token not in LED_LEVELS:
+            raise BackendError("cannot parse asusctl leds output")
+        return LED_LEVELS.index(token), len(LED_LEVELS) - 1
 
     def set_kbd_brightness(self, value: int) -> None:
-        if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 3:
-            raise ValidationError("keyboard brightness must be 0-3")
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise ValidationError("keyboard brightness must be a non-negative integer")
+        if value >= len(LED_LEVELS):
+            raise Unsupported(f"asusctl leds supports 0-{len(LED_LEVELS) - 1} only")
         self._run(["leds", "set", LED_LEVELS[value]])
 
 

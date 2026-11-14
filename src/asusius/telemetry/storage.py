@@ -58,6 +58,7 @@ class Storage:
         self.want_mounts = False
         self._mounts: list[dict] = []
         self._mounts_t = -1e9
+        self._disks_t = -1e9
         self.disks = self._disks()
 
     def _disks(self) -> dict[str, dict]:
@@ -128,6 +129,9 @@ class Storage:
         return out
 
     def sample(self, now: float, vals: dict, info: dict) -> None:
+        if now - self._disks_t >= MOUNTS_EVERY_S:
+            self._disks_t = now
+            self.disks = self._disks()
         data = read_bytes(join(self.root, "proc/diskstats"))
         if data is None:
             info["disk"] = {"error": "/proc/diskstats unreadable"}

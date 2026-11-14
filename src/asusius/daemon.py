@@ -82,6 +82,7 @@ class Daemon:
         self.started = wall().isoformat(timespec="seconds")
         self.last_state = None
         self.wake = threading.Event()
+        self._reload_req = threading.Event()
         self.updates = updates if updates is not None else UpdateScheduler()
 
     # -- config --------------------------------------------------------------
@@ -123,6 +124,7 @@ class Daemon:
         return {
             "pid": os.getpid(), "version": __version__, "started": self.started,
             "updated": self.wall().isoformat(timespec="seconds"), "updated_ts": time.time(),
+            "updated_mono": time.monotonic(),
             "fake": bool(os.environ.get(FAKE_ROOT_ENV)),
             "dry_run": self.engine.dry_run, "config_error": self.config_error,
             "automation_enabled": self.cfg["automation"]["enabled"],
@@ -154,13 +156,16 @@ class Daemon:
         try:
             while not stop.is_set():
                 now = self.clock()
-                self.reload()
+                force_reload = self._reload_req.is_set()
+                if force_reload:
+                    self._reload_req.clear()
+                self.reload(force=force_reload)
                 if now >= next_auto or self.wake.is_set():
                     self.wake.clear()
                     try:
                         self.step()
                     except Exception as exc:  # one bad reply must not kill the daemon
-                        print(f"asusiusd: automation step failed: {exc!r}", file=sys.stderr)
+                        _err_log(f"asusiusd: automation step failed: {exc!r}")
                     next_auto = now + float(self.cfg["automation"]["poll_s"])
                 if now >= next_updates:  # cheap unless a check is due; that runs in a child
                     next_updates = now + UPDATES_TICK_S
@@ -173,7 +178,7 @@ class Daemon:
                     try:
                         self.write_status()
                     except Exception as exc:
-                        print(f"asusiusd: status write failed: {exc!r}", file=sys.stderr)
+                        _err_log(f"asusiusd: status write failed: {exc!r}")
                     next_status = now + 1.0
                 stop.wait(0.25)
         finally:
@@ -204,6 +209,13 @@ def watch_upower(wake: threading.Event) -> None:  # pragma: no cover - needs the
         except Exception:
             pass
     threading.Thread(target=body, name="asusius-upower", daemon=True).start()
+
+
+def _err_log(msg: str) -> None:
+    try:
+        print(msg, file=sys.stderr, flush=True)
+    except OSError:
+        pass
 
 
 def acquire_lock(path: Path):
@@ -242,7 +254,7 @@ def main(argv: list[str] | None = None) -> int:
     stop = threading.Event()
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
     signal.signal(signal.SIGINT, lambda *_: stop.set())
-    signal.signal(signal.SIGHUP, lambda *_: (daemon.reload(force=True), daemon.wake.set()))
+    signal.signal(signal.SIGHUP, lambda *_: (daemon._reload_req.set(), daemon.wake.set()))
     if not os.environ.get(FAKE_ROOT_ENV):
         watch_upower(daemon.wake)
     try:

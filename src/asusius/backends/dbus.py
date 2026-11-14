@@ -69,6 +69,8 @@ class GioTransport:
         return self._gi
 
     def _connection(self):
+        if self._conn is not None and hasattr(self._conn, "is_closed") and self._conn.is_closed():
+            self._conn = None
         if self._conn is None:
             Gio, GLib = self._mods()
             try:
@@ -186,6 +188,7 @@ class DBusBackend(Backend):
     def __init__(self, transport: Transport | None = None) -> None:
         self.t: Transport = transport or GioTransport()
         self._owners: dict[str, bool] | None = None
+        self._aura_path: str | None = None
 
     def _owner(self, name: str) -> bool:
         if self._owners is None:
@@ -193,9 +196,18 @@ class DBusBackend(Backend):
         if name not in self._owners:
             try:
                 self._owners[name] = self.t.name_has_owner(name)
-            except BackendError:
+            except (BackendError, BackendUnavailable):
                 self._owners[name] = False
         return self._owners[name]
+
+    def _reset_cache(self, name: str | None = None) -> None:
+        if name is None or name == ASUSD:
+            self._aura_path = None
+        if self._owners is not None:
+            if name is None:
+                self._owners.clear()
+            else:
+                self._owners.pop(name, None)
 
     def _need(self, name: str) -> None:
         if not self._owner(name):
@@ -213,7 +225,16 @@ class DBusBackend(Backend):
             raise BackendUnavailable(f"{dest} returned unusable introspection data")
         return sorted(n.get("name") for n in ET.fromstring(xml).findall("node") if n.get("name"))
 
+    def supports_attribute_write(self, name: str) -> bool:
+        if not self._owner(ASUSD) or not re.fullmatch(r"[a-z0-9_]+", name):
+            return False
+        try:
+            return name in self._children(ASUSD, ARMOURY_PATH)
+        except (BackendError, BackendUnavailable):
+            return False
+
     def probe(self):
+        self._reset_cache()
         res: dict[Capability, CapStatus] = {}
         asusd, gfx, ppd = self._owner(ASUSD), self._owner(SUPERGFX), self._owner(PPD)
         no_asusd = CapStatus(False, "asusd (xyz.ljones.Asusd) not on the system bus")
@@ -231,11 +252,38 @@ class DBusBackend(Backend):
         if asusd:
             try:
                 limits = self.get_limits()
-                if not any(x.bounded for x in limits):
+                if not limits:
                     res[Capability.POWER_LIMITS] = CapStatus(
-                        False, "asusd reports no PPT values (-1): the kernel asus-armoury driver has no power-limit table for this board")
-            except BackendError as exc:
-                res[Capability.POWER_LIMITS] = CapStatus(False, f"asusd armoury query failed: {exc}")
+                        False, "asusd reports no armoury power-limit attributes")
+                elif not any(x.bounded for x in limits):
+                    res[Capability.POWER_LIMITS] = CapStatus(
+                        False, "asusd reports no PPT values (-1): the kernel asus-armoury "
+                               "driver has no power-limit table for this board")
+            except (BackendError, BackendUnavailable, KeyError, TypeError, ValueError) as exc:
+                res[Capability.POWER_LIMITS] = CapStatus(
+                    False, f"asusd armoury query failed: {exc}")
+            try:
+                self._aura()
+            except (BackendError, BackendUnavailable, KeyError) as exc:
+                msg = f"asusd aura unavailable: {exc}"
+                res[Capability.KBD_BRIGHTNESS] = CapStatus(False, msg)
+                res[Capability.KBD_RGB] = CapStatus(False, msg)
+            try:
+                self.t.get_property(ASUSD, PLATFORM_PATH, PLATFORM_IFACE,
+                                    "ChargeControlEndThreshold")
+            except (BackendError, BackendUnavailable, KeyError) as exc:
+                if "Unknown" in str(exc) or isinstance(exc, (BackendUnavailable, KeyError)):
+                    res[Capability.BATTERY_THRESHOLD] = CapStatus(
+                        False, f"asusd charge limit unavailable: {exc}")
+            try:
+                prof = self.get_profile()
+                self.t.call(ASUSD, PLATFORM_PATH, FANCURVES_IFACE, "FanCurveData", "(u)",
+                            (prof.asusd_id,))
+            except (BackendError, BackendUnavailable, KeyError, TypeError, ValueError) as exc:
+                if "Unknown" in str(exc) or isinstance(
+                        exc, (BackendUnavailable, KeyError, TypeError, ValueError)):
+                    res[Capability.FAN_CURVES] = CapStatus(
+                        False, f"asusd fan curves unavailable: {exc}")
         return res
 
     # -- profile ----------------------------------------------------------
@@ -338,7 +386,7 @@ class DBusBackend(Backend):
     # -- keyboard -----------------------------------------------------------
     def _aura(self) -> str:
         # cached: software effects write several times a second
-        if getattr(self, "_aura_path", None) is None:
+        if self._aura_path is None:
             self._need(ASUSD)
             kids = self._children(ASUSD, AURA_ROOT)
             if not kids:
@@ -347,20 +395,32 @@ class DBusBackend(Backend):
         return self._aura_path
 
     def get_kbd_brightness(self) -> tuple[int, int]:
-        path = self._aura()
-        cur = int(self.t.get_property(ASUSD, path, AURA_IFACE, "Brightness"))
-        sup = self.t.get_property(ASUSD, path, AURA_IFACE, "SupportedBrightness")
+        try:
+            path = self._aura()
+            cur = int(self.t.get_property(ASUSD, path, AURA_IFACE, "Brightness"))
+            sup = self.t.get_property(ASUSD, path, AURA_IFACE, "SupportedBrightness")
+        except BackendUnavailable:
+            self._reset_cache(ASUSD)
+            raise
         return cur, int(max(sup)) if sup else 3
 
     def set_kbd_brightness(self, value: int) -> None:
         _, mx = self.get_kbd_brightness()
         if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= mx:
             raise ValidationError(f"keyboard brightness must be 0-{mx}")
-        self.t.set_property(ASUSD, self._aura(), AURA_IFACE, "Brightness", "u", value)
+        try:
+            self.t.set_property(ASUSD, self._aura(), AURA_IFACE, "Brightness", "u", value)
+        except BackendUnavailable:
+            self._reset_cache(ASUSD)
+            raise
 
     def get_kbd_rgb(self) -> dict:
-        path = self._aura()
-        props = self.t.get_all(ASUSD, path, AURA_IFACE)
+        try:
+            path = self._aura()
+            props = self.t.get_all(ASUSD, path, AURA_IFACE)
+        except BackendUnavailable:
+            self._reset_cache(ASUSD)
+            raise
 
         def unpack(mode):
             return {"mode": aura_mode_from_dbus(mode[0]), "zone": mode[1],
@@ -398,18 +458,38 @@ class DBusBackend(Backend):
             self.t.set_property(ASUSD, self._aura(), AURA_IFACE, "LedModeData",
                                 "(uu(yyy)(yyy)ss)", value)
         except BackendUnavailable:
-            self._aura_path = None  # asusd restarted or the device went away
+            self._reset_cache(ASUSD)  # asusd restarted or the device went away
             raise
 
     # -- attributes / battery extras --------------------------------------------
     def set_attribute(self, name: str, value: int | str) -> None:
         if not re.fullmatch(r"[a-z0-9_]+", name):
             raise ValidationError(f"bad attribute name {name!r}")
+        if isinstance(value, bool):
+            raise ValidationError(f"{name}: boolean is not a valid attribute value")
         self._need(ASUSD)
         if name not in self._children(ASUSD, ARMOURY_PATH):
             raise BackendUnavailable(f"asusd does not expose {name}")
-        self.t.set_property(ASUSD, f"{ARMOURY_PATH}/{name}", ARMOURY_IFACE,
-                            "CurrentValue", "i", int(value))
+        path = f"{ARMOURY_PATH}/{name}"
+        try:
+            props = self.t.get_all(ASUSD, path, ARMOURY_IFACE)
+        except (BackendError, BackendUnavailable):
+            props = {}
+        cur = props.get("CurrentValue")
+        sig: str
+        payload: int | str
+        if isinstance(cur, str):
+            sig, payload = "s", str(value)
+        else:
+            try:
+                payload = int(value)
+                sig = "i"
+            except (TypeError, ValueError):
+                if isinstance(value, str) and not props:
+                    raise ValidationError(
+                        f"{name}: expected integer value, got {value!r}") from None
+                sig, payload = "s", str(value)
+        self.t.set_property(ASUSD, path, ARMOURY_IFACE, "CurrentValue", sig, payload)
 
     def one_shot_full_charge(self) -> None:
         self._need(ASUSD)

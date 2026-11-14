@@ -138,7 +138,8 @@ def simulate_install(apt_pkg, cache, pkg, holds: set[str]) -> dict:
 
 def dpkg_holds(root: Path = Path("/")) -> set[str]:
     try:
-        return blockers.parse_dpkg_holds((root / "var/lib/dpkg/status").read_text())
+        return blockers.parse_dpkg_holds(
+            (root / "var/lib/dpkg/status").read_text(encoding="utf-8", errors="replace"))
     except OSError:
         return set()
 
@@ -246,14 +247,15 @@ _LIST = re.compile(r"^(?P<name>[^/\s]+)/(?P<suites>\S+) (?P<new>\S+) (?P<arch>\S
 
 
 def parse_apt_list(text: str) -> list[UpdateItem]:
-    """`apt list --upgradable`: 'name/suite1,suite2 new arch [upgradable from: old]'."""
+    """`apt list --upgradable`: 'name[:arch]/suite1,suite2 new arch [upgradable from: old]'."""
     out = []
     for line in text.splitlines():
         m = _LIST.match(line.strip())
         if not m or "upgradable from" not in line:
             continue
         suites = m["suites"].split(",")
-        out.append(_item(m["name"], m["arch"], m["cur"], m["new"],
+        name = m["name"].split(":")[0]
+        out.append(_item(name, m["arch"], m["cur"], m["new"],
                          security=_is_security(suites), origin=", ".join(suites)))
     return out
 
@@ -263,8 +265,8 @@ def _run(cmd: list[str], timeout: float = TIMEOUT_S) -> str:
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=env,
                        stdin=subprocess.DEVNULL)
     if r.returncode != 0:
-        raise RuntimeError((r.stderr or r.stdout).strip().splitlines()[-1:] or
-                           [f"{cmd[0]} exited {r.returncode}"])
+        lines = (r.stderr or r.stdout).strip().splitlines()
+        raise RuntimeError(lines[-1] if lines else f"{cmd[0]} exited {r.returncode}")
     return r.stdout
 
 

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) Hamza Gouda
-"""Control core for ASUS TUF/ROG laptops."""
+"""Control core for ASUS laptops."""
 
-__version__ = "0.1.2"
+__version__ = "0.2.1"

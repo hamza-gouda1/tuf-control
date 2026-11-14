@@ -86,21 +86,27 @@ class Sensors:
             hw = self.hw.first(name)
             if not hw:
                 continue
+            tctl_fallback: str | None = None
             for _n, path, lab in channels(hw, "temp"):
                 lab = lab or ""
-                if lab.startswith("Package id") or lab in ("Tctl", "Tdie"):
+                if lab.startswith("Package id") or lab == "Tdie":
                     self.pkg_path = self.pkg_path or path
+                elif lab == "Tctl":
+                    tctl_fallback = tctl_fallback or path
                 elif lab.startswith("Core "):
                     try:
                         self.core_paths[int(lab.split()[1])] = path
                     except ValueError:
                         pass
             if self.pkg_path is None:
-                ch = channels(hw, "temp")
-                self.pkg_path = ch[0][1] if ch else None
+                if tctl_fallback is not None:
+                    self.pkg_path = tctl_fallback
+                else:
+                    ch = channels(hw, "temp")
+                    self.pkg_path = ch[0][1] if ch else None
             break
         self.fan_paths = []
-        for name in ("asus", "asus_nb_wmi", "thinkpad", "dell_smm", "acpi_fan"):
+        for name in ("asus", "asus_nb_wmi", "asus-ec-sensors", "thinkpad", "dell_smm", "acpi_fan"):
             hw = self.hw.first(name)
             if not hw:
                 continue

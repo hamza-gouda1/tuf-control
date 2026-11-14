@@ -27,9 +27,20 @@ from .engine import State
 
 def _read(path: Path) -> str | None:
     try:
-        return path.read_text().strip()
+        return path.read_text(encoding="utf-8").strip()
     except OSError:
         return None
+
+
+def _read_starttime(d: Path) -> str | None:
+    raw = _read(d / "stat")
+    if not raw:
+        return None
+    idx = raw.rfind(")")
+    if idx < 0:
+        return None
+    fields = raw[idx + 2:].split()
+    return fields[19] if len(fields) > 19 else None
 
 
 def read_power(root: str | Path = "/") -> tuple[bool | None, int | None]:
@@ -65,7 +76,7 @@ class ProcessScanner:
     def __init__(self, proc: str | Path = "/proc", uid: int | None = None) -> None:
         self.proc = Path(proc)
         self.uid = os.getuid() if uid is None else uid
-        self._cache: dict[str, frozenset[str]] = {}
+        self._cache: dict[str, tuple[str | None, frozenset[str]]] = {}
 
     def _names(self, d: Path) -> frozenset[str]:
         names: set[str] = set()
@@ -114,11 +125,17 @@ class ProcessScanner:
             del self._cache[gone]
         out: set[str] = set()
         for pid in pids:
-            names = self._cache.get(pid)
-            if names is None:
-                names = self._names(self.proc / pid)
-                if names:  # an unreadable, already-exited pid is retried next time
-                    self._cache[pid] = names
+            d = self.proc / pid
+            start = _read_starttime(d)
+            cached = self._cache.get(pid)
+            if cached is not None and start == cached[0]:
+                out |= cached[1]
+                continue
+            names = self._names(d)
+            if names:  # an unreadable, already-exited pid is retried next time
+                self._cache[pid] = (start, names)
+            else:
+                self._cache.pop(pid, None)
             out |= names
         return frozenset(out)
 
@@ -131,7 +148,7 @@ class StateCollector:
         from ..controller import FAKE_ROOT_ENV
         self.ctl = ctl
         self.root = root if root is not None else (os.environ.get(FAKE_ROOT_ENV) or "/")
-        self.scanner = scanner or ProcessScanner()
+        self.scanner = scanner or ProcessScanner(Path(self.root) / "proc")
         self.wall = wall
         self.power = power or (lambda: read_power(self.root))
         self.needs_apps = True

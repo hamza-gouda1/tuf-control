@@ -62,6 +62,7 @@ class NotificationMonitor(NotificationQueue):
     def start(self) -> None:
         if self.conn is not None:
             return
+        conn = None
         try:
             from gi.repository import Gio, GLib
             addr = self.address or Gio.dbus_address_get_for_bus_sync(Gio.BusType.SESSION, None)
@@ -76,6 +77,12 @@ class NotificationMonitor(NotificationQueue):
             self.conn = conn
             self.error = None
         except Exception as exc:
+            if conn is not None and self.conn is not conn:
+                try:
+                    conn.close_sync(None)
+                except Exception:
+                    pass
+            self._filter = None
             self.error = f"cannot monitor notifications: {exc}"
 
     def _on_message(self, _conn, msg, incoming):

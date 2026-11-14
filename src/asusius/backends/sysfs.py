@@ -65,19 +65,45 @@ class SysfsBackend(Backend):
     @property
     def battery_dir(self) -> Path | None:
         base = self._p("sys/class/power_supply")
-        for d in sorted(base.glob("BAT*")):
-            return d
-        return None
+        candidates = sorted(base.glob("BAT*"))
+        for d in candidates:
+            typ = read_text(d / "type")
+            if (typ is None or typ == "Battery") and any(
+                (d / k).exists() for k in ("energy_full", "charge_full", "capacity")
+            ):
+                return d
+        return candidates[0] if candidates else None
 
     @property
     def kbd_dir(self) -> Path:
-        return self._p("sys/class/leds/asus::kbd_backlight")
+        leds = self._p("sys/class/leds")
+        pref = leds / "asus::kbd_backlight"
+        if (pref / "brightness").exists():
+            return pref
+        for d in sorted(leds.glob("*kbd_backlight*")):
+            if (d / "brightness").exists():
+                return d
+        return pref
 
     def _hwmon(self, name: str) -> Path | None:
         for d in sorted(self._p("sys/class/hwmon").glob("hwmon*")):
             if read_text(d / "name") == name:
                 return d
         return None
+
+    def _hwmon_temp_input(self, hw: Path, preferred_labels: tuple[str, ...]) -> int | None:
+        by_label: dict[str, int] = {}
+        for f in sorted(hw.glob("temp*_input")):
+            raw = _int(read_text(f))
+            if raw is None:
+                continue
+            label = (read_text(f.with_name(f.name.replace("_input", "_label"))) or "").lower()
+            if label and label not in by_label:
+                by_label[label] = raw
+        for want in preferred_labels:
+            if want.lower() in by_label:
+                return by_label[want.lower()]
+        return _int(read_text(hw / "temp1_input"))
 
     # -- probe ------------------------------------------------------------
     def probe(self) -> dict[Capability, CapStatus]:
@@ -104,14 +130,16 @@ class SysfsBackend(Backend):
         thr = bat is not None and (bat / "charge_control_end_threshold").exists()
         st[Capability.BATTERY_THRESHOLD] = ok if thr else CapStatus(
             False, "charge_control_end_threshold not present")
-        full = bat is not None and (bat / "energy_full_design").exists()
+        full = bat is not None and (
+            (bat / "energy_full_design").exists() or (bat / "charge_full_design").exists()
+        )
         st[Capability.BATTERY_HEALTH] = ok if full else CapStatus(False, "battery energy not present")
         if (self.armoury / "gpu_mux_mode").exists() or (self.armoury / "dgpu_disable").exists():
             st[Capability.GPU_MODE] = CapStatus(True, "inferred from mux/dgpu attributes")
         else:
             st[Capability.GPU_MODE] = CapStatus(False, "no gpu_mux_mode/dgpu_disable attribute")
         st[Capability.KBD_BRIGHTNESS] = ok if (self.kbd_dir / "brightness").exists() else CapStatus(
-            False, "asus::kbd_backlight not present")
+            False, "keyboard backlight not present")
         st[Capability.KBD_RGB] = CapStatus(
             False, "kbd_rgb_* files are write-only and root-only; use the D-Bus backend")
         st[Capability.FAN_CURVES] = ok if self._hwmon("asus_custom_fan_curve") else CapStatus(
@@ -209,8 +237,21 @@ class SysfsBackend(Backend):
 
     def get_battery_health(self) -> BatteryHealth:
         bat = self.battery_dir
-        full = _int(read_text(bat / "energy_full")) if bat else None
-        design = _int(read_text(bat / "energy_full_design")) if bat else None
+        if bat is None:
+            raise BackendUnavailable("battery energy values unreadable")
+        full = _int(read_text(bat / "energy_full"))
+        design = _int(read_text(bat / "energy_full_design"))
+        if full is None or design is None:
+            c_full = _int(read_text(bat / "charge_full"))
+            c_design = _int(read_text(bat / "charge_full_design"))
+            if c_full is not None and c_design is not None:
+                volt = (_int(read_text(bat / "voltage_min_design"))
+                        or _int(read_text(bat / "voltage_now")))
+                if volt and volt > 0:
+                    full = (c_full * volt) // 1_000_000
+                    design = (c_design * volt) // 1_000_000
+                else:
+                    full, design = c_full, c_design
         if full is None or design is None:
             raise BackendUnavailable("battery energy values unreadable")
         return BatteryHealth(full, design, _int(read_text(bat / "cycle_count")))
@@ -292,7 +333,7 @@ class SysfsBackend(Backend):
         if hw is None:
             raise BackendUnavailable("asus_custom_fan_curve not present")
         curves = {}
-        for idx, label in ((1, "CPU"), (2, "GPU")):
+        for label, idx in self._FAN_INDEX.items():
             temps = [_int(read_text(hw / f"pwm{idx}_auto_point{i}_temp")) for i in range(1, 9)]
             pwms = [_int(read_text(hw / f"pwm{idx}_auto_point{i}_pwm")) for i in range(1, 9)]
             if None in temps or None in pwms:
@@ -310,31 +351,45 @@ class SysfsBackend(Backend):
         idx = self._FAN_INDEX.get(curve.fan.upper())
         if hw is None or idx is None:
             raise BackendUnavailable(f"no custom fan curve for {curve.fan}")
+        pairs: list[tuple[Path, str]] = []
         for i, pt in enumerate(curve.points, 1):
-            self.writer.write(hw / f"pwm{idx}_auto_point{i}_temp", str(pt.temp))
-            self.writer.write(hw / f"pwm{idx}_auto_point{i}_pwm", str(pt.pwm))
+            pairs.append((hw / f"pwm{idx}_auto_point{i}_temp", str(pt.temp)))
+            pairs.append((hw / f"pwm{idx}_auto_point{i}_pwm", str(pt.pwm)))
         # asus-wmi: 1 = custom curve on, 2 = firmware automatic
-        self.writer.write(hw / f"pwm{idx}_enable", "1" if curve.enabled else "2")
+        pairs.append((hw / f"pwm{idx}_enable", "1" if curve.enabled else "2"))
+        batch = getattr(self.writer, "write_many", None)
+        if callable(batch):
+            batch(pairs)
+        else:
+            for p, v in pairs:
+                self.writer.write(p, v)
 
     def reset_fan_curves(self, profile: Profile) -> None:
         self._check_active(profile)
         hw = self._hwmon("asus_custom_fan_curve")
         if hw is None:
             raise BackendUnavailable("asus_custom_fan_curve not present")
-        for idx in (1, 2):
-            if (hw / f"pwm{idx}_enable").exists():
-                self.writer.write(hw / f"pwm{idx}_enable", "3")  # 3 = factory defaults
+        pairs = [(hw / f"pwm{idx}_enable", "3")  # 3 = factory defaults
+                 for idx in self._FAN_INDEX.values()
+                 if (hw / f"pwm{idx}_enable").exists()]
+        batch = getattr(self.writer, "write_many", None)
+        if callable(batch):
+            batch(pairs)
+        else:
+            for p, v in pairs:
+                self.writer.write(p, v)
 
     # -- telemetry ------------------------------------------------------------
     def get_telemetry(self) -> Telemetry:
         t = Telemetry()
-        for hw_name in ("coretemp", "k10temp", "acpitz"):
+        for hw_name in ("coretemp", "k10temp", "zenpower", "acpitz"):
             hw = self._hwmon(hw_name)
-            raw = _int(read_text(hw / "temp1_input")) if hw else None
+            raw = (self._hwmon_temp_input(hw, ("Tdie", "Package id 0", "Tctl", "CPU"))
+                   if hw else None)
             if raw is not None:
                 t.cpu_temp_c = raw / 1000
                 break
-        for hw_name in ("asus", "acpi_fan"):
+        for hw_name in ("asus", "asus_nb_wmi", "asus-ec-sensors", "acpi_fan"):
             hw = self._hwmon(hw_name)
             if hw is None:
                 continue
@@ -350,7 +405,13 @@ class SysfsBackend(Backend):
         bat = self.battery_dir
         if bat:
             p = _int(read_text(bat / "power_now"))
-            t.battery_power_w = None if p is None else round(p / 1e6, 2)
+            if p is None:
+                cur = _int(read_text(bat / "current_now"))
+                volt = _int(read_text(bat / "voltage_now"))
+                t.battery_power_w = None if (cur is None or volt is None) else round(
+                    abs(cur) * volt / 1e12, 2)
+            else:
+                t.battery_power_w = round(p / 1e6, 2)
             t.battery_status = read_text(bat / "status")
             t.battery_percent = _int(read_text(bat / "capacity"))
         try:
@@ -358,11 +419,40 @@ class SysfsBackend(Backend):
         except (BackendUnavailable, ValidationError):
             pass
         t.cpu_power_w = self._rapl_power()
-        t.gpu_runtime = self.dgpu_runtime()
-        # nvidia-smi wakes a suspended dGPU (and drains the battery): only ask when awake
-        if self.use_nvidia_smi and t.gpu_runtime in (None, "active"):
+        dgpu = self._dgpu_dir()
+        t.gpu_runtime = read_text(dgpu / "power/runtime_status") if dgpu else None
+        is_nvidia = dgpu is not None and read_text(dgpu / "vendor") == "0x10de"
+        # Only query active/unsupported GPUs so suspended dGPUs stay asleep
+        if self.use_nvidia_smi and is_nvidia and t.gpu_runtime in (None, "active", "unsupported"):
             self._fill_gpu(t)
+        elif dgpu is None and self.use_nvidia_smi and not self._p("sys/bus/pci/devices").exists():
+            self._fill_gpu(t)
+        elif t.gpu_runtime in (None, "active", "unsupported"):
+            self._fill_amd_gpu(t, dgpu)
         return t
+
+    def _fill_amd_gpu(self, t: Telemetry, dgpu: Path | None) -> None:
+        target = dgpu if (dgpu is not None and read_text(dgpu / "vendor") == "0x1002") else None
+        if target is None:
+            for d in sorted(self._p("sys/bus/pci/devices").glob("*")):
+                if ((read_text(d / "class") or "").startswith("0x03")
+                        and read_text(d / "vendor") == "0x1002"):
+                    if read_text(d / "power/runtime_status") in ("active", "unsupported", None):
+                        target = d
+                        break
+        if target is None:
+            return
+        busy = _int(read_text(target / "gpu_busy_percent"))
+        if busy is not None:
+            t.gpu_util_pct = float(busy)
+        for hw in sorted((target / "hwmon").glob("hwmon*")):
+            temp = self._hwmon_temp_input(hw, ("edge", "junction", "PPT"))
+            if temp is not None:
+                t.gpu_temp_c = round(temp / 1000, 1)
+            pwr = _int(read_text(hw / "power1_average")) or _int(read_text(hw / "power1_input"))
+            if pwr is not None:
+                t.gpu_power_w = round(pwr / 1e6, 1)
+            break
 
     def _rapl_power(self) -> float | None:
         """CPU package power from the RAPL energy counter (often root-only)."""

@@ -42,44 +42,61 @@ class UpdateScheduler:
         self.next_try = 0.0
         self.last_ts: float | None = None
         self._notify_id = 0
-        self._lock = threading.Lock()
+        self._status: dict | None = None
+        self._lock = threading.RLock()
 
     def configure(self, settings: dict) -> None:
-        self.settings = dict(settings or {})
-        self._status = None
+        with self._lock:
+            self.settings = dict(settings or {})
+            self._status = None
 
     @property
     def checking(self) -> bool:
-        return self.worker is not None and self.worker.is_alive()
+        with self._lock:
+            w = self.worker
+        return w is not None and w.is_alive()
 
     def _last_checked(self) -> float:
         """Newest of our own last check and the cache (the GUI may have checked)."""
         rep = load_cache().get("report") or {}
-        return max(self.last_ts or 0.0, float(rep.get("checked_ts") or 0.0))
+        with self._lock:
+            last_ts = self.last_ts or 0.0
+        return max(last_ts, float(rep.get("checked_ts") or 0.0))
 
     def due(self, now: float | None = None) -> bool:
         now = self.clock() if now is None else now
-        if not self.settings.get("enabled", True) or self.checking:
+        with self._lock:
+            enabled = self.settings.get("enabled", True)
+            next_try = self.next_try
+            started_at = self.started_at
+            interval = float(self.settings.get("interval_h", 6.0)) * 3600.0
+            checking = self.checking
+        if not enabled or checking:
             return False
-        if now < self.next_try or now - self.started_at < self.first_delay_s:
+        if now < next_try or now - started_at < self.first_delay_s:
             return False
-        interval = float(self.settings.get("interval_h", 6.0)) * 3600.0
         return now - self._last_checked() >= interval
 
     def tick(self, now: float | None = None) -> bool:
         """Start a check in the background when one is due. Returns True if started."""
         now = self.clock() if now is None else now
-        if not self.due(now):
+        with self._lock:
+            if not self.due(now):
+                return False
+            respect_metered = self.settings.get("respect_metered", True)
+        if respect_metered and self.metered():
+            with self._lock:
+                self.skipped = "metered connection"
+                self.next_try = now + METERED_RETRY_S
             return False
-        if self.settings.get("respect_metered", True) and self.metered():
-            self.skipped = "metered connection"
-            self.next_try = now + METERED_RETRY_S
-            return False
-        self.skipped = None
-        self.worker = threading.Thread(target=self._run, args=(now,), name="asusius-updates",
-                                       daemon=True)
-        self.worker.start()
-        return True
+        with self._lock:
+            if not self.due(now):
+                return False
+            self.skipped = None
+            self.worker = threading.Thread(target=self._run, args=(now,), name="asusius-updates",
+                                           daemon=True)
+            self.worker.start()
+            return True
 
     def _run(self, now: float) -> None:
         try:  # what was pending before the check; gone afterwards = installed elsewhere
@@ -89,11 +106,13 @@ class UpdateScheduler:
         try:
             rep = self.runner()
         except Exception as exc:
-            self.last_error = str(exc)
-            self.next_try = now + RETRY_S
+            with self._lock:
+                self.last_error = str(exc)
+                self.next_try = now + RETRY_S
             return
-        self.last_error = None
-        self.last_ts = rep.checked_ts or now
+        with self._lock:
+            self.last_error = None
+            self.last_ts = rep.checked_ts or now
         self.after_check(rep, old)
         self.status(refresh=True)
 
@@ -103,7 +122,9 @@ class UpdateScheduler:
         GNOME Software, a terminal) and only noticed by this check. Returns the text
         shown, if any."""
         self._record_detected(rep, old)
-        if not self.settings.get("notify", True):
+        with self._lock:
+            notify_enabled = self.settings.get("notify", True)
+        if not notify_enabled:
             # still remember what was offered, so turning notifications on later does
             # not announce a backlog
             def mark(d):
@@ -166,19 +187,27 @@ class UpdateScheduler:
 
     def _notify(self, summary: str, body: str) -> int:
         # clicking the notification opens the app on the Updates page
-        nid = notify_mod.send(summary, body, self._notify_id, open_on_click=True)
+        with self._lock:
+            prev_id = self._notify_id
+        nid = notify_mod.send(summary, body, prev_id, open_on_click=True)
         if nid:
-            self._notify_id = nid
+            with self._lock:
+                self._notify_id = nid
         return nid
 
     def status(self, refresh: bool = False) -> dict:
         """For the daemon's status file; the cache is re-read only when asked (each tick)."""
-        if refresh or getattr(self, "_status", None) is None:
+        rep = None
+        if refresh:
             rep = load_cache().get("report") or {}
-            self._status = {"last_checked": rep.get("checked_ts"), "total": rep.get("total"),
-                            "summary": rep.get("summary")}
-        return {**self._status, "enabled": self.settings.get("enabled", True),
-                "checking": self.checking, "error": self.last_error, "skipped": self.skipped}
+        with self._lock:
+            if not refresh and self._status is None:
+                rep = load_cache().get("report") or {}
+            if rep is not None:
+                self._status = {"last_checked": rep.get("checked_ts"), "total": rep.get("total"),
+                                "summary": rep.get("summary")}
+            return {**(self._status or {}), "enabled": self.settings.get("enabled", True),
+                    "checking": self.checking, "error": self.last_error, "skipped": self.skipped}
 
 
 def mark_seen(rep: Report) -> None:

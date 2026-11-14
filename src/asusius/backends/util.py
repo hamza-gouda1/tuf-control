@@ -57,6 +57,16 @@ class DirectWriter:
 
 
 HELPER_PATH = "/usr/libexec/asusius-helper"
+HELPER_PATHS = (HELPER_PATH, "/usr/lib/asusius/asusius-helper")
+
+
+def _resolve_helper(explicit: str | None = None) -> str:
+    if explicit is not None:
+        return explicit
+    for candidate in HELPER_PATHS:
+        if os.access(candidate, os.X_OK):
+            return candidate
+    return HELPER_PATH
 
 
 class PkexecWriter:
@@ -66,8 +76,17 @@ class PkexecWriter:
     exact sysfs paths and validated values; this class never builds a shell command.
     """
 
-    def __init__(self, helper: str = HELPER_PATH, timeout: float = 120.0) -> None:
-        self.helper, self.timeout = helper, timeout
+    def __init__(self, helper: str | None = None, timeout: float = 120.0) -> None:
+        self._explicit_helper = helper
+        self.timeout = timeout
+
+    @property
+    def helper(self) -> str:
+        return _resolve_helper(self._explicit_helper)
+
+    @helper.setter
+    def helper(self, value: str) -> None:
+        self._explicit_helper = value
 
     @staticmethod
     def no_new_privileges() -> bool:
@@ -78,26 +97,50 @@ class PkexecWriter:
         return (not self.no_new_privileges() and os.access(self.helper, os.X_OK)
                 and shutil.which("pkexec") is not None)
 
-    def write(self, path: Path, value: str) -> None:
+    def _run_helper(self, helper_args: list[str], path_hint: Path) -> subprocess.CompletedProcess:
         if self.no_new_privileges():
             raise PrivilegeRequired(
                 "privileged sysfs writes are unavailable under NoNewPrivileges; "
                 "the background service needs asusd or power-profiles-daemon for this change")
         pkexec = shutil.which("pkexec")
+        helper = self.helper
         if not self.available() or pkexec is None:
             raise PrivilegeRequired(
-                f"no permission to write {path}; install the polkit helper "
+                f"no permission to write {path_hint}; install the polkit helper "
                 "(see docs/INSTALL.md, install.sh --system)")
         try:
-            proc = subprocess.run([pkexec, self.helper, "write", str(path), str(value)],
+            proc = subprocess.run([pkexec, helper, *helper_args],
                                   capture_output=True, text=True, timeout=self.timeout,
                                   check=False, stdin=subprocess.DEVNULL)
         except subprocess.TimeoutExpired:
             raise BackendError("authentication timed out") from None
         if proc.returncode in (126, 127):  # dismissed / not authorised
             raise PrivilegeRequired("authentication was cancelled or refused")
+        return proc
+
+    def write(self, path: Path, value: str) -> None:
+        proc = self._run_helper(["write", str(path), str(value)], path)
         if proc.returncode != 0:
             raise BackendError(f"privileged write refused: {proc.stderr.strip()[:200]}")
+
+    def write_many(self, writes: list[tuple[Path, str]]) -> None:
+        if not writes:
+            return
+        if len(writes) == 1:
+            self.write(*writes[0])
+            return
+        args = ["write-batch"]
+        for p, v in writes:
+            args.extend((str(p), str(v)))
+        proc = self._run_helper(args, writes[0][0])
+        if proc.returncode == 0:
+            return
+        # Older installed root helpers only support `write <path> <value>` (rc=2 usage).
+        if proc.returncode == 2:
+            for p, v in writes:
+                self.write(p, v)
+            return
+        raise BackendError(f"privileged write refused: {proc.stderr.strip()[:200]}")
 
 
 class FallbackWriter:
@@ -112,6 +155,20 @@ class FallbackWriter:
             self.primary.write(path, value)
         except PrivilegeRequired:
             self.fallback.write(path, value)
+
+    def write_many(self, writes: list[tuple[Path, str]]) -> None:
+        if not writes:
+            return
+        try:
+            for p, v in writes:
+                self.primary.write(p, v)
+        except PrivilegeRequired:
+            batch = getattr(self.fallback, "write_many", None)
+            if callable(batch):
+                batch(writes)
+            else:
+                for p, v in writes:
+                    self.fallback.write(p, v)
 
 
 class RecordingWriter:

@@ -157,6 +157,9 @@ def mcp_main(argv: list[str] | None = None, json_out: bool = True) -> int:
     if "--print-config" in argv:
         print(json.dumps(client_config(), indent=2))
         return 0
+    if "-h" in argv or "--help" in argv:
+        print("usage: asusius-mcp [--print-config]")
+        return 0
     if argv and argv != ["mcp"]:
         print("usage: asusius-mcp [--print-config]", file=sys.stderr)
         return 2

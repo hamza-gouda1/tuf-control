@@ -4,11 +4,16 @@
 from __future__ import annotations
 
 import os
+import re
+import shutil
+import subprocess
 
 from .util import join, read_bytes, read_int, read_str
 
 ARPHRD = {1: "Ethernet", 772: "Loopback", 65534: "Tunnel", 776: "Tunnel", 768: "Tunnel",
           778: "Tunnel", 823: "Tunnel"}
+IW_EVERY_S = 5.0
+_IW_SIGNAL = re.compile(r"^\s*signal:\s*(-?\d+(?:\.\d+)?)\s*dBm", re.MULTILINE)
 
 
 def parse_net_dev(data: bytes) -> dict[str, tuple[int, int, int, int]]:
@@ -44,6 +49,29 @@ class Network:
         self.root = root
         self._prev: tuple[float, dict] | None = None
         self._meta: dict[str, dict] = {}
+        self._iw_cache: dict[str, tuple[float, tuple[float, float] | None]] = {}
+
+    def _iw_link(self, name: str, now: float) -> tuple[float, float] | None:
+        cached = self._iw_cache.get(name)
+        if cached and now - cached[0] < IW_EVERY_S:
+            return cached[1]
+        iw = shutil.which("iw")
+        if self.root != "/" or iw is None:
+            return None
+        val: tuple[float, float] | None = None
+        try:
+            proc = subprocess.run([iw, "dev", name, "link"], capture_output=True, text=True,
+                                  timeout=0.5, check=False, stdin=subprocess.DEVNULL)
+            if proc.returncode == 0:
+                m = _IW_SIGNAL.search(proc.stdout)
+                if m:
+                    dbm = float(m.group(1))
+                    qual = round(max(0.0, min(70.0, (dbm + 100.0) * 70.0 / 60.0)), 1)
+                    val = (qual, dbm)
+        except (OSError, subprocess.SubprocessError, ValueError):
+            pass
+        self._iw_cache[name] = (now, val)
+        return val
 
     def meta(self, name: str) -> dict:
         m = self._meta.get(name)
@@ -73,6 +101,8 @@ class Network:
             info["net"] = {"error": "/proc/net/dev unreadable"}
             return
         stats = parse_net_dev(data)
+        self._meta = {k: v for k, v in self._meta.items() if k in stats}
+        self._iw_cache = {k: v for k, v in self._iw_cache.items() if k in stats}
         prev, self._prev = self._prev, (now, stats)
         ifaces = []
         rx_t = tx_t = 0.0
@@ -97,7 +127,13 @@ class Network:
         if have:
             vals["net.rx"], vals["net.tx"] = rx_t, tx_t
         wl = parse_wireless(read_str(join(self.root, "proc/net/wireless")))
-        info["net"] = {
-            "ifaces": {n: {**self.meta(n), **self.link(n), "rx_total": stats[n][0],
-                           "tx_total": stats[n][2], "wifi": wl.get(n)} for n in ifaces},
-        }
+        ifaces_info = {}
+        for n in ifaces:
+            m = self.meta(n)
+            lk = self.link(n)
+            wifi = wl.get(n)
+            if wifi is None and m["kind"] == "Wi-Fi" and lk.get("state") == "up":
+                wifi = self._iw_link(n, now)
+            ifaces_info[n] = {**m, **lk, "rx_total": stats[n][0],
+                              "tx_total": stats[n][2], "wifi": wifi}
+        info["net"] = {"ifaces": ifaces_info}

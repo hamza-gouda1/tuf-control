@@ -55,8 +55,8 @@ class Unit:
 
     @property
     def running(self) -> bool:
-        return self.active == "active" and self.sub in ("running", "listening", "waiting",
-                                                        "mounted", "plugged", "active")
+        return self.active == "active" and self.sub in ("running", "exited", "listening",
+                                                        "waiting", "mounted", "plugged", "active")
 
     def state_text(self) -> str:
         if self.active == "failed":
@@ -87,7 +87,7 @@ class Unit:
 
 def template_of(name: str) -> str:
     """'getty@tty1.service' -> 'getty@.service'."""
-    m = re.match(r"^([^@]+)@[^.]*(\.\w+)$", name)
+    m = re.match(r"^([^@]+)@.*(\.[^.]+)$", name)
     return f"{m[1]}@{m[2]}" if m else name
 
 

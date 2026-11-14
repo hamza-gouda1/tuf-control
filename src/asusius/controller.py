@@ -236,9 +236,17 @@ class Controller:
         return self.read(Capability.FIRMWARE_ATTRIBUTES)
 
     def set_attribute(self, name: str, value: int | str, dry_run: bool = False) -> WriteResult:
-        # every backend is tried in order: asusd can write what sysfs needs root for
+        probes = self._probe_all()
+        backends: list[Backend] = []
+        for b in self.backends:
+            if b.name == "dbus":
+                checker = getattr(b, "supports_attribute_write", None)
+                if callable(checker) and checker(name):
+                    backends.append(b)
+            elif probes[b.name][Capability.FIRMWARE_ATTRIBUTES].available:
+                backends.append(b)
         return self._write(Capability.FIRMWARE_ATTRIBUTES, name, value, dry_run=dry_run,
-                           method="set_attribute", backends=list(self.backends),
+                           method="set_attribute", backends=backends,
                            detail=f"set {name}={value}")
 
     def one_shot_full_charge(self, dry_run: bool = False) -> WriteResult:
@@ -253,16 +261,25 @@ class Controller:
             if cap in (Capability.TELEMETRY, Capability.KBD_RGB, Capability.FIRMWARE_ATTRIBUTES):
                 continue
             vals = {}
+            comparable = {}
             for b in self.providers(cap):
                 try:
                     v = getattr(b, OPERATIONS[cap][0])()
                 except Exception as exc:
                     vals[b.name] = f"error: {exc}"
+                    comparable[b.name] = vals[b.name]
                     continue
                 if cap is Capability.POWER_LIMITS:
                     v = {x.name: [x.current, x.min, x.max] for x in v}
-                vals[b.name] = jsonable(v)
+                jv = jsonable(v)
+                vals[b.name] = jv
+                if cap is Capability.GPU_MODE and isinstance(jv, dict):
+                    comparable[b.name] = jv.get("mode")
+                elif cap is Capability.FAN_CURVES and isinstance(jv, dict):
+                    comparable[b.name] = {k.upper(): val for k, val in jv.items()}
+                else:
+                    comparable[b.name] = jv
             if len(vals) > 1:
-                same = len({repr(v) for v in vals.values()}) == 1
+                same = len({repr(v) for v in comparable.values()}) == 1
                 rows.append({"capability": cap.value, "values": vals, "agree": same})
         return rows

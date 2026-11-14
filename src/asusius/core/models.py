@@ -250,6 +250,12 @@ class KbdEffect:
         return self
 
 
+AURA_MODES: dict[int, str] = {
+    0: "Static", 1: "Breathe", 2: "Colour cycle", 3: "Rainbow wave", 4: "Star", 5: "Rain",
+    6: "Highlight", 7: "Laser", 8: "Ripple", 10: "Pulse", 11: "Comet", 12: "Flash",
+}
+
+
 def jsonable(obj):
     """Convert models (dataclasses, enums, properties of interest) to JSON-safe data."""
     if dataclasses.is_dataclass(obj) and not isinstance(obj, type):

@@ -8,6 +8,7 @@ the Bordeaux installer), then the GNOME Shell user-theme name from gsettings (re
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
@@ -16,6 +17,8 @@ from ..brand_palette import ACCENTS
 from .colour import RGB, hex_to_rgb
 
 _ALIASES = {"noir": "oxblood-noir", "oxblood": "oxblood-noir", "merlot": "merlot-day"}
+_USER_THEME_SCHEMA = "org.gnome.shell.extensions.user-theme"
+_MISSING_SCHEMA = False
 
 
 def normalise_variant(name: str | None) -> str | None:
@@ -27,12 +30,27 @@ def normalise_variant(name: str | None) -> str | None:
 
 
 def _gsettings_theme() -> str | None:
+    global _MISSING_SCHEMA
     try:
-        out = subprocess.run(["gsettings", "get", "org.gnome.shell.extensions.user-theme",
+        from gi.repository import Gio
+        src = Gio.SettingsSchemaSource.get_default()
+        if src is None or src.lookup(_USER_THEME_SCHEMA, True) is None:
+            return None
+        return Gio.Settings.new(_USER_THEME_SCHEMA).get_string("name") or None
+    except Exception:
+        pass
+    if _MISSING_SCHEMA or not shutil.which("gsettings"):
+        return None
+    try:
+        out = subprocess.run(["gsettings", "get", _USER_THEME_SCHEMA,
                               "name"], capture_output=True, text=True, timeout=2)
     except (OSError, subprocess.SubprocessError):
         return None
-    return out.stdout.strip() if out.returncode == 0 else None
+    if out.returncode != 0:
+        if "No such schema" in (out.stderr or ""):
+            _MISSING_SCHEMA = True
+        return None
+    return out.stdout.strip()
 
 
 def theme_variant(home: Path | None = None,
@@ -42,7 +60,7 @@ def theme_variant(home: Path | None = None,
     state = Path(os.environ.get("XDG_STATE_HOME") or home / ".local/state")
     for f in (cfg / "bordeaux-gnome/variant", state / "bordeaux-gnome/variant"):
         try:
-            v = normalise_variant(f.read_text())
+            v = normalise_variant(f.read_text(encoding="utf-8"))
         except OSError:
             continue
         if v:

@@ -30,6 +30,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from ..core import (
+    AURA_MODES,
+    AsusiusError,
     BackendError,
     BackendUnavailable,
     Capability,
@@ -38,7 +40,6 @@ from ..core import (
     GpuMode,
     KbdEffect,
     Profile,
-    AsusiusError,
     Unsupported,
     ValidationError,
     jsonable,
@@ -401,9 +402,28 @@ class AgentService:
         fn = {"asusius://status": t_get_status, "asusius://capabilities": t_get_capabilities,
               "asusius://telemetry/summary": lambda s, a: t_get_telemetry(
                   s, {"sections": ["cpu", "memory", "gpus", "fans", "battery"]})}[uri]
-        data = _finish(fn(self, {}))
+        try:
+            data = _finish(fn(self, {}))
+        except ToolError:
+            raise
+        except ValidationError as exc:
+            self.audit.write(client=self.client, process=self.process, kind="resource",
+                             name=uri, decision="error")
+            raise ToolError("invalid_value", str(exc)) from None
+        except (BackendUnavailable, Unsupported) as exc:
+            self.audit.write(client=self.client, process=self.process, kind="resource",
+                             name=uri, decision="unavailable")
+            raise ToolError("unavailable", str(exc)) from None
+        except BackendError as exc:
+            self.audit.write(client=self.client, process=self.process, kind="resource",
+                             name=uri, decision="error")
+            raise ToolError("backend_error", str(exc)) from None
+        except AsusiusError as exc:
+            self.audit.write(client=self.client, process=self.process, kind="resource",
+                             name=uri, decision="error")
+            raise ToolError("error", str(exc)) from None
         self.audit.write(client=self.client, process=self.process, kind="resource",
-                             name=uri, decision="ok")
+                         name=uri, decision="ok")
         return "application/json", json.dumps(data, separators=(",", ":"))
 
 
@@ -847,8 +867,6 @@ def w_restore_defaults(svc: AgentService, a: dict) -> Plan:
 
 # -- catalogue ---------------------------------------------------------------------------
 
-from ..ui.viewmodels import AURA_MODES  # noqa: E402  (GTK-free; names of keyboard modes)
-
 MODE_NAMES = {k: v.lower().replace(" ", "_") for k, v in AURA_MODES.items()}
 MODE_IDS = {v: k for k, v in MODE_NAMES.items()}
 SPEEDS = {"slow": 0, "medium": 1, "fast": 2}
@@ -957,8 +975,8 @@ _T = [
          w_set_keyboard_effect, rate=10, writes=True, read_only=False),
     Tool("set_keyboard_brightness", "Set keyboard brightness",
          "Set the keyboard backlight level (0 = off; the maximum comes from the hardware, "
-         "usually 3). Dry run by default.",
-         "basic", wobj({"level": {"type": "integer", "minimum": 0, "maximum": 3}}, ["level"]),
+         "often 3). Dry run by default.",
+         "basic", wobj({"level": {"type": "integer", "minimum": 0, "maximum": 65535}}, ["level"]),
          w_set_keyboard_brightness, rate=10, writes=True, read_only=False),
     Tool("run_automation_dry_run", "Automation dry run",
          "Evaluate the owner's automation rules against the current (or overridden) inputs "

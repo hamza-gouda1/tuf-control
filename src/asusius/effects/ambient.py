@@ -99,7 +99,7 @@ class ScreenCastFlow:
 
     def open(self) -> tuple[int, int]:
         res = self.bus.request("CreateSession", [], {
-            "session_handle_token": "tuf" + secrets.token_hex(4)})
+            "session_handle_token": "asusius" + secrets.token_hex(4)})
         self.session = res["session_handle"]
         opts = {"types": SOURCE_MONITOR, "multiple": False, "cursor_mode": CURSOR_HIDDEN,
                 "persist_mode": PERSIST_UNTIL_REVOKED}
@@ -126,6 +126,11 @@ class ScreenCastFlow:
             except Exception:
                 pass
             self.session = None
+        if hasattr(self.bus, "close"):
+            try:
+                self.bus.close()
+            except Exception:
+                pass
 
 
 class GioPortalBus:  # pragma: no cover - needs a desktop session and a user's consent
@@ -133,15 +138,37 @@ class GioPortalBus:  # pragma: no cover - needs a desktop session and a user's c
 
     _SIGS = {"types": "u", "multiple": "b", "cursor_mode": "u", "persist_mode": "u",
              "restore_token": "s", "handle_token": "s", "session_handle_token": "s"}
+    _owns_fd = True
 
     def __init__(self, timeout_s: float = 120.0) -> None:
         from gi.repository import Gio, GLib
         self.Gio, self.GLib = Gio, GLib
         self.ctx = GLib.MainContext.new()
         self.ctx.push_thread_default()
-        self.conn = Gio.bus_get_sync(Gio.BusType.SESSION, None)
-        self.timeout_s = timeout_s
-        self.sender = self.conn.get_unique_name()[1:].replace(".", "_")
+        self._pushed = True
+        self._cancel = threading.Event()
+        try:
+            self.conn = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+            self.timeout_s = timeout_s
+            self.sender = self.conn.get_unique_name()[1:].replace(".", "_")
+        except BaseException:
+            self.close()
+            raise
+
+    def cancel(self) -> None:
+        self._cancel.set()
+        try:
+            self.ctx.wakeup()
+        except Exception:
+            pass
+
+    def close(self) -> None:
+        if self._pushed:
+            self._pushed = False
+            try:
+                self.ctx.pop_thread_default()
+            except Exception:
+                pass
 
     def _opts(self, options: dict):
         V = self.GLib.Variant
@@ -149,7 +176,7 @@ class GioPortalBus:  # pragma: no cover - needs a desktop session and a user's c
 
     def request(self, method: str, args: list, options: dict) -> dict:
         GLib = self.GLib
-        token = "tuf" + secrets.token_hex(6)
+        token = "asusius" + secrets.token_hex(6)
         options = {**options, "handle_token": token}
         path = f"/org/freedesktop/portal/desktop/request/{self.sender}/{token}"
         box: dict = {}
@@ -169,10 +196,13 @@ class GioPortalBus:  # pragma: no cover - needs a desktop session and a user's c
             self.conn.call_sync(PORTAL, PORTAL_PATH, SCREENCAST, method, body,
                                 GLib.VariantType("(o)"), 0, 10000, None)
             deadline = GLib.get_monotonic_time() + int(self.timeout_s * 1e6)
-            while not done.is_set() and GLib.get_monotonic_time() < deadline:
+            while (not done.is_set() and not self._cancel.is_set()
+                   and GLib.get_monotonic_time() < deadline):
                 self.ctx.iteration(True)
         finally:
             self.conn.signal_unsubscribe(sub)
+        if self._cancel.is_set() and not done.is_set():
+            raise PortalError(f"{method}: cancelled")
         if not done.is_set():
             raise PortalError(f"{method}: no answer from the portal")
         if box["code"] == 1:
@@ -197,14 +227,24 @@ class GioPortalBus:  # pragma: no cover - needs a desktop session and a user's c
 def gst_frames(fd: int, node: int, width: int = 16, height: int = 9,
                fps: int = 4):  # pragma: no cover - needs a live PipeWire stream
     """Generator of (bytes, width, height, stride) from a PipeWire node via GStreamer."""
-    import gi
-    gi.require_version("Gst", "1.0")
-    from gi.repository import Gst
-    Gst.init(None)
-    pipe = Gst.parse_launch(
-        f"pipewiresrc fd={fd} path={node} always-copy=true ! videoconvert ! videoscale ! "
-        f"videorate ! video/x-raw,format=RGB,width={width},height={height},"
-        f"framerate={fps}/1 ! appsink name=sink max-buffers=1 drop=true sync=false")
+    pipe = None
+    try:
+        import gi
+        gi.require_version("Gst", "1.0")
+        from gi.repository import Gst
+        Gst.init(None)
+        pipe = Gst.parse_launch(
+            f"pipewiresrc fd={fd} path={node} always-copy=true ! videoconvert ! videoscale ! "
+            f"videorate ! video/x-raw,format=RGB,width={width},height={height},"
+            f"framerate={fps}/1 ! appsink name=sink max-buffers=1 drop=true sync=false")
+    except BaseException:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        if pipe is not None:
+            pipe.set_state(Gst.State.NULL)
+        raise
     sink = pipe.get_by_name("sink")
     pipe.set_state(Gst.State.PLAYING)
     try:
@@ -243,6 +283,8 @@ class ScreenColourSource:
         self.error: str | None = None
         self._latest: RGB | None = None
         self._stop = threading.Event()
+        self._lock = threading.Lock()
+        self._bus = None
         self._thread: threading.Thread | None = None
 
     @property
@@ -250,32 +292,54 @@ class ScreenColourSource:
         return self.tokens.get() is not None
 
     def start(self) -> None:
-        if self._thread:
-            return
-        self._stop.clear()
-        self._thread = threading.Thread(target=self._run, name="tuf-ambient", daemon=True)
-        self._thread.start()
+        with self._lock:
+            if self._thread is not None and self._thread.is_alive():
+                return
+            ev = threading.Event()
+            self._stop = ev
+            t = threading.Thread(target=self._run, args=(ev,), name="asusius-ambient", daemon=True)
+            self._thread = t
+            t.start()
 
     def run_sync(self) -> None:
         """The thread body; tests call it directly."""
-        self._run()
+        self._run(self._stop)
 
-    def _run(self) -> None:
+    def _run(self, stop_ev: threading.Event | None = None) -> None:
+        stop_ev = stop_ev or self._stop
         flow = None
+        bus = None
         try:
             self.status = "waiting-permission" if not self.has_token else "starting"
-            flow = ScreenCastFlow(self.bus_factory(), self.tokens)
+            bus = self.bus_factory()
+            with self._lock:
+                self._bus = bus
+            if stop_ev.is_set():
+                return
+            flow = ScreenCastFlow(bus, self.tokens)
             fd, node = flow.open()
+            if stop_ev.is_set():
+                if getattr(bus, "_owns_fd", False):
+                    try:
+                        os.close(fd)
+                    except OSError:
+                        pass
+                return
             self.status = "running"
-            for frame in self.frames_factory(fd, node):
-                if self._stop.is_set():
-                    break
-                if frame is None:
-                    continue
-                data, w, h, stride = frame
-                c = average_rgb(data, w, h, stride, self.boost)
-                if c is not None:
-                    self._latest = c
+            frames = self.frames_factory(fd, node)
+            try:
+                for frame in frames:
+                    if stop_ev.is_set():
+                        break
+                    if frame is None:
+                        continue
+                    data, w, h, stride = frame
+                    c = average_rgb(data, w, h, stride, self.boost)
+                    if c is not None:
+                        self._latest = c
+            finally:
+                if hasattr(frames, "close"):
+                    frames.close()
             if self.status == "running":
                 self.status = "idle"
         except PortalDenied as exc:
@@ -283,14 +347,28 @@ class ScreenColourSource:
         except Exception as exc:  # no portal, no GStreamer plugin, no session bus...
             self.status, self.error = "unavailable", f"{type(exc).__name__}: {exc}"
         finally:
+            with self._lock:
+                self._bus = None
             if flow:
                 flow.close()
+            elif bus is not None and hasattr(bus, "close"):
+                try:
+                    bus.close()
+                except Exception:
+                    pass
 
     def stop(self) -> None:
-        self._stop.set()
-        if self._thread:
-            self._thread.join(2)
-            self._thread = None
+        with self._lock:
+            self._stop.set()
+            bus = self._bus
+            t = self._thread
+        if bus is not None and hasattr(bus, "cancel"):
+            bus.cancel()
+        if t is not None:
+            t.join(2)
+            with self._lock:
+                if self._thread is t and not t.is_alive():
+                    self._thread = None
 
     def latest(self) -> RGB | None:
         return self._latest

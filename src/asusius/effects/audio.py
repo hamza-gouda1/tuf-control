@@ -87,6 +87,7 @@ class AudioAnalyzer:
         self.env = {b: Envelope() for b in BANDS}
         self._lock = threading.Lock()
         self._buf: list[float] = []
+        self._tail: bytes = b""
 
     def feed(self, samples) -> None:
         """Float samples in -1..1, any length."""
@@ -101,9 +102,15 @@ class AudioAnalyzer:
                     env.feed(0.0 if silent else e[b], dt)
 
     def feed_s16le(self, data: bytes) -> None:
+        if self._tail:
+            data = self._tail + data
+            self._tail = b""
+        if len(data) & 1:
+            self._tail = data[-1:]
+            data = data[:-1]
         n = len(data) // 2
         if n:
-            self.feed([v / 32768.0 for v in struct.unpack(f"<{n}h", data[:n * 2])])
+            self.feed([v / 32768.0 for v in struct.unpack(f"<{n}h", data)])
 
     def level(self, band: str = "bass") -> float:
         with self._lock:
@@ -122,6 +129,32 @@ def capture_command(which: Callable[[str], str | None] = shutil.which) -> list[s
     return None
 
 
+def _strip_wav_header(buf: bytes) -> tuple[bool, bytes]:
+    """Return (header_done, payload_or_pending). Supports full RIFF/WAVE subchunks and
+    minimal 44-byte synthetic RIFF headers."""
+    if len(buf) < 4:
+        return False, buf
+    if buf[:4] != b"RIFF":
+        return True, buf
+    if len(buf) < 12:
+        return False, buf
+    if buf[8:12] != b"WAVE":
+        return (True, buf[44:]) if len(buf) >= 44 else (False, buf)
+    pos = 12
+    while pos + 8 <= len(buf):
+        cid = buf[pos:pos + 4]
+        size = int.from_bytes(buf[pos + 4:pos + 8], "little")
+        if cid == b"data":
+            return True, buf[pos + 8:]
+        step = 8 + size + (size & 1)
+        if step <= 0 or pos + step > 65536:
+            break
+        pos += step
+    if len(buf) >= 65536:
+        return True, buf[44:]
+    return False, buf
+
+
 class AudioCapture:
     """Runs the capture command and feeds an analyzer. `level()` is thread-safe."""
 
@@ -132,50 +165,85 @@ class AudioCapture:
         self.popen = popen
         self.proc = None
         self.thread: threading.Thread | None = None
+        self._lock = threading.Lock()
+        self._stopping = threading.Event()
         self.error: str | None = None if self.command else \
             "no audio capture tool (install pulseaudio-utils for parec, or pipewire for pw-record)"
 
     def start(self) -> None:
-        if self.proc or not self.command:
-            return
-        try:
-            self.proc = self.popen(self.command, stdout=subprocess.PIPE,
-                                   stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
-        except OSError as exc:
-            self.error = f"{self.command[0]}: {exc}"
-            return
-        self.thread = threading.Thread(target=self._pump, name="tuf-audio", daemon=True)
-        self.thread.start()
+        with self._lock:
+            if self.proc or not self.command:
+                return
+            self._stopping.clear()
+            try:
+                proc = self.popen(self.command, stdout=subprocess.PIPE,
+                                  stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
+            except OSError as exc:
+                self.error = f"{self.command[0]}: {exc}"
+                return
+            self.proc = proc
+            t = threading.Thread(target=self._pump, args=(proc,), name="asusius-audio",
+                                 daemon=True)
+            self.thread = t
+            t.start()
 
-    def _pump(self) -> None:
-        out = self.proc.stdout
-        first = True
+    def _pump(self, proc=None) -> None:
+        proc = proc or self.proc
+        if proc is None or proc.stdout is None:
+            return
+        out = proc.stdout
+        head_done = False
+        pending = b""
         while True:
-            data = out.read(self.analyzer.block * 2)
+            try:
+                data = out.read(self.analyzer.block * 2)
+            except (OSError, ValueError):
+                break
             if not data:
                 break
-            if first and data[:4] == b"RIFF":  # pw-record may prepend a WAV header
-                data = data[44:]
-            first = False
-            self.analyzer.feed_s16le(data)
-        if self.proc and self.proc.poll() not in (None, 0, -15):
-            self.error = f"{self.command[0]} exited with {self.proc.returncode}"
+            if not head_done:
+                pending += data
+                head_done, rem = _strip_wav_header(pending)
+                if not head_done:
+                    continue
+                pending = b""
+                data = rem
+            if data:
+                self.analyzer.feed_s16le(data)
+        if not head_done and pending:
+            if pending[:4] == b"RIFF" and len(pending) >= 44:
+                self.analyzer.feed_s16le(pending[44:])
+            elif pending[:4] != b"RIFF":
+                self.analyzer.feed_s16le(pending)
+        rc = proc.poll()
+        if not self._stopping.is_set() and rc not in (None, 0, -15):
+            self.error = f"{self.command[0]} exited with {rc}"
 
     def stop(self) -> None:
-        if self.proc:
-            self.proc.terminate()
+        with self._lock:
+            self._stopping.set()
+            proc, t = self.proc, self.thread
+        if proc:
             try:
-                self.proc.wait(2)
+                proc.terminate()
+                proc.wait(2)
             except subprocess.TimeoutExpired:
-                self.proc.kill()
-                self.proc.wait(2)
-        if self.thread:
-            self.thread.join(1)
-            self.thread = None
-        if self.proc:
-            if self.proc.stdout:
-                self.proc.stdout.close()
-            self.proc = None
+                proc.kill()
+                proc.wait(2)
+            except OSError:
+                pass
+        if t:
+            t.join(1)
+        if proc and proc.stdout:
+            try:
+                proc.stdout.close()
+            except OSError:
+                pass
+        with self._lock:
+            if self.thread is t:
+                self.thread = None
+            if self.proc is proc:
+                self.proc = None
 
     def level(self, band: str = "bass") -> float:
         return self.analyzer.level(band)

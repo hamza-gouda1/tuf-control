@@ -33,6 +33,18 @@ def _prune_children() -> None:
         _SPAWNED[:] = [p for p in _SPAWNED if getattr(p, "poll", lambda: None)() is None]
 
 
+def _rotate_if_oversized(path: Path) -> None:
+    try:
+        st = os.lstat(path)
+    except OSError:
+        return
+    if stat.S_ISREG(st.st_mode) and st.st_size >= MAX_LOG_BYTES:
+        try:
+            os.replace(path, path.with_name(path.name + ".1"))
+        except OSError:
+            pass
+
+
 def _capture_log(stream, path: Path) -> None:
     """Drain the child's pipe with bounded memory and a 1 MiB rotating private log."""
     fd = None
@@ -105,8 +117,12 @@ class DaemonClient:
             return {"running": False}
         pid = data.get("pid")
         try:
-            stamp = float(data.get("updated_ts", 0))
-            fresh = math.isfinite(stamp) and 0 <= time.time() - stamp < STALE_S
+            if "updated_mono" in data and data["updated_mono"] is not None:
+                mono = float(data["updated_mono"])
+                fresh = math.isfinite(mono) and 0 <= time.monotonic() - mono < STALE_S
+            else:
+                stamp = float(data.get("updated_ts", 0))
+                fresh = math.isfinite(stamp) and 0 <= time.time() - stamp < STALE_S
         except (ValueError, TypeError, OverflowError):
             fresh = False
         data["running"] = bool(data.get("running", True) and isinstance(pid, int)
@@ -137,24 +153,25 @@ class DaemonClient:
         env["PYTHONPATH"] = os.pathsep.join(x for x in (pkg_root, env.get("PYTHONPATH")) if x)
         cmd = [sys.executable, "-m", "asusius.daemon"] + (["--dry-run"] if dry_run else [])
         log_path = self.runtime / "daemon.log"
-        fd = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW |
-                     os.O_CLOEXEC | os.O_NONBLOCK, 0o600)
-        try:
-            if not stat.S_ISREG(os.fstat(fd).st_mode):
-                raise BackendError("daemon log must be a regular file")
-            os.fchmod(fd, 0o600)
-        finally:
-            os.close(fd)
+        _rotate_if_oversized(log_path)
         _prune_children()
         with _SPAWN_LOCK:
             if len(_SPAWNED) >= 8:
                 raise BackendError("Too many detached daemon starts are still running")
-            proc = self.popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                              stderr=subprocess.STDOUT, start_new_session=True, env=env)
+            fd = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW |
+                         os.O_CLOEXEC, 0o600)
+            try:
+                if not stat.S_ISREG(os.fstat(fd).st_mode):
+                    raise BackendError("daemon log must be a regular file")
+                os.fchmod(fd, 0o600)
+                proc = self.popen(cmd, stdin=subprocess.DEVNULL, stdout=fd,
+                                  stderr=subprocess.STDOUT, start_new_session=True, env=env)
+            finally:
+                os.close(fd)
             _SPAWNED.append(proc)
         stream = getattr(proc, "stdout", None)
         if stream is not None:
-            threading.Thread(target=_capture_log, args=(stream, self.runtime / "daemon.log"),
+            threading.Thread(target=_capture_log, args=(stream, log_path),
                              name="asusius-daemon-log", daemon=True).start()
         return f"started pid {proc.pid}"
 

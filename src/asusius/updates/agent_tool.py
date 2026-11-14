@@ -20,10 +20,21 @@ def get_updates(_svc, a: dict) -> dict:
                                           "the Updates page or `asusius updates check`."}
     src = a.get("source")
     items = [i for i in rep.updates() if not src or i.source == src]
+    if src:
+        counts = {src: len(items)} if items else {}
+        total = len(items)
+        sec = sum(1 for i in items if i.security)
+        summary = (f"{total} update{'s' if total != 1 else ''} available ({src} {total})"
+                   if total else f"No updates available for {src}")
+    else:
+        counts = rep.counts()
+        total = rep.total
+        sec = rep.security_count
+        summary = rep.summary()
     out = {
         "checked": True, "checked_age_s": int(max(0, time.time() - rep.checked_ts)),
-        "checked_ago": age_text(rep.checked_ts), "summary": rep.summary(),
-        "total": rep.total, "security": rep.security_count, "counts": rep.counts(),
+        "checked_ago": age_text(rep.checked_ts), "summary": summary,
+        "total": total, "security": sec, "counts": counts,
         "restart_needed": rep.reboot_required,
         "restart_reasons": [clean(r, 120) for r in rep.reboot_reasons[:10]],
         "items": [{"source": i.source, "name": clean(i.name, 80),

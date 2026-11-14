@@ -47,7 +47,7 @@ def cache_path() -> Path:
 
 def load_cache(path: Path | None = None) -> dict:
     try:
-        data = json.loads((path or cache_path()).read_text())
+        data = json.loads((path or cache_path()).read_text(encoding="utf-8"))
         return data if isinstance(data, dict) else {}
     except (OSError, ValueError):
         return {}
@@ -128,13 +128,20 @@ def collect(settings: dict | None = None, now: float | None = None) -> Report:
         from .fake import fake_sources
         sources = fake_sources(now)
     else:
-        from . import apt, firmware, flatpak, repos, snap, system
+        from . import apt, distro_pkgs, firmware, flatpak, repos, snap, system
         enabled = settings.get("sources", {})
-        plan = [("apt", apt.check), ("snap", snap.check), ("flatpak", flatpak.check),
+        sys_pkg: tuple[str, object] = ("apt", apt.check)
+        if not apt.available()[0]:
+            mgr = distro_pkgs.detect_manager()
+            if mgr in ("dnf", "pacman", "zypper"):
+                sys_pkg = (mgr, lambda m=mgr: distro_pkgs.check(m))
+        plan = [sys_pkg, ("snap", snap.check), ("flatpak", flatpak.check),
                 ("firmware", firmware.check), ("system", system.check)]
         sources = []
         for name, fn in plan:
-            if not enabled.get(name, True):
+            on = enabled.get(name, enabled.get("apt", True)
+                             if name in ("dnf", "pacman", "zypper") else True)
+            if not on:
                 sources.append(SourceResult(name, available=False, reason="turned off in "
                                                                           "settings"))
                 continue

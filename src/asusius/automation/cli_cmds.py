@@ -6,7 +6,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 
-from ..core import AsusiusError, ValidationError, jsonable
+from ..core import ValidationError, jsonable
 from .config import config_path, load_config, update_config
 from .rules import Rule, parse_action_spec, parse_trigger_spec
 
