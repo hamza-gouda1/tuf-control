@@ -239,4 +239,4 @@ def _kbd(args) -> int:
     return 0
 
 
-__all__ = ["add_parsers", "run", "AsusiusError"]
+__all__ = ["add_parsers", "run"]
