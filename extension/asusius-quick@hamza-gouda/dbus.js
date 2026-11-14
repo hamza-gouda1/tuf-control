@@ -14,12 +14,15 @@ import {
 
 const ASUSD = 'xyz.ljones.Asusd';
 const PLATFORM = 'xyz.ljones.Platform';
-const PPD = 'net.hadess.PowerProfiles';
+const PPD_UPOWER = 'org.freedesktop.UPower.PowerProfiles';
+const PPD_UPOWER_PATH = '/org/freedesktop/UPower/PowerProfiles';
+const PPD_HADESS = 'net.hadess.PowerProfiles';
+const PPD_HADESS_PATH = '/net/hadess/PowerProfiles';
 const SUPERGFX = 'org.supergfxctl.Daemon';
 
 /**
  * Watches one bus name and keeps a proxy to one object while it is owned.
- * Subclasses implement _refresh() (read cached state) and _bound(proxy).
+ * Subclasses implement _read(proxy), _reset() and optional _signal(name).
  */
 class ProxySource extends Emitter {
     constructor(name, path, iface) {
@@ -48,7 +51,7 @@ class ProxySource extends Emitter {
                     const proxy = Gio.DBusProxy.new_for_bus_finish(res);
                     this._acceptProxy(proxy, generation);
                 } catch {
-                    return; // cancelled on destroy, or the service left again
+                    return; // cancelled on destroy/vanish, or the service left again
                 }
             });
     }
@@ -68,6 +71,9 @@ class ProxySource extends Emitter {
 
     _vanished() {
         ++this._generation;
+        this._cancellable.cancel();
+        if (!this._destroyed)
+            this._cancellable = new Gio.Cancellable();
         this._drop();
         this.available = false;
         this._reset();
@@ -85,7 +91,10 @@ class ProxySource extends Emitter {
     _update() {
         if (!this._proxy)
             return;
-        this.available = this._read(this._proxy);
+        const ok = this._read(this._proxy);
+        if (!ok)
+            this._reset();
+        this.available = ok;
         this.emit();
     }
 
@@ -97,19 +106,24 @@ class ProxySource extends Emitter {
     }
 
     _setProperty(iface, prop, variant, done) {
-        if (!this._proxy) {
+        if (this._destroyed || !this._proxy) {
             done(new Error('service not running'));
             return;
         }
+        const generation = this._generation;
         this._proxy.call('org.freedesktop.DBus.Properties.Set',
             new GLib.Variant('(ssv)', [iface, prop, variant]),
             Gio.DBusCallFlags.NONE, 5000, this._cancellable, (p, res) => {
+                if (this._destroyed || generation !== this._generation) {
+                    if (!this._destroyed)
+                        done(new Error('service disconnected'));
+                    return;
+                }
                 try {
                     p.call_finish(res);
                     done(null);
                 } catch (e) {
-                    if (!e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED))
-                        done(e);
+                    done(e);
                 }
             });
     }
@@ -161,9 +175,9 @@ export class AsusdProfileSource extends ProxySource {
     }
 }
 
-export class PpdProfileSource extends ProxySource {
-    constructor() {
-        super(PPD, '/net/hadess/PowerProfiles', PPD);
+class PpdEndpointSource extends ProxySource {
+    constructor(name, path, iface) {
+        super(name, path, iface);
         this.profile = null;
         this.choices = [];
     }
@@ -191,7 +205,65 @@ export class PpdProfileSource extends ProxySource {
     }
 
     set(profile, done) {
-        this._setProperty(PPD, 'ActiveProfile', new GLib.Variant('s', ppdName(profile)), done);
+        this._setProperty(this._iface, 'ActiveProfile', new GLib.Variant('s', ppdName(profile)), done);
+    }
+}
+
+/**
+ * Watches both the UPower bus name (power-profiles-daemon >= 0.22 / GNOME 47+)
+ * and the legacy net.hadess.PowerProfiles name (GNOME <= 46), preferring the
+ * former when both are present.
+ */
+export class PpdProfileSource extends Emitter {
+    constructor() {
+        super();
+        this._endpoints = [
+            new PpdEndpointSource(PPD_UPOWER, PPD_UPOWER_PATH, PPD_UPOWER),
+            new PpdEndpointSource(PPD_HADESS, PPD_HADESS_PATH, PPD_HADESS),
+        ];
+        this._ids = this._endpoints.map(ep => ep.connect(() => this.emit()));
+    }
+
+    get _active() {
+        return this._endpoints.find(ep => ep.available) ?? null;
+    }
+
+    get available() {
+        return this._active !== null;
+    }
+
+    get profile() {
+        return this._active?.profile ?? null;
+    }
+
+    get choices() {
+        return this._active?.choices ?? [];
+    }
+
+    get _watchId() {
+        return this._endpoints.some(ep => ep._watchId) ? 1 : 0;
+    }
+
+    get _proxy() {
+        return this._active?._proxy ?? null;
+    }
+
+    set(profile, done) {
+        const ep = this._active;
+        if (!ep) {
+            done(new Error('service not running'));
+            return;
+        }
+        ep.set(profile, done);
+    }
+
+    destroy() {
+        this._endpoints.forEach((ep, i) => {
+            ep.disconnect(this._ids[i]);
+            ep.destroy();
+        });
+        this._ids = [];
+        this.clear();
     }
 }
 
@@ -208,10 +280,16 @@ export class GpuModeSource extends ProxySource {
     }
 
     _fetch() {
-        this._proxy?.call('Mode', null, Gio.DBusCallFlags.NONE, 3000, this._cancellable,
+        const proxy = this._proxy;
+        if (!proxy || this._destroyed)
+            return;
+        const generation = this._generation;
+        proxy.call('Mode', null, Gio.DBusCallFlags.NONE, 3000, this._cancellable,
             (p, res) => {
                 try {
                     const mode = p.call_finish(res).deepUnpack()[0];
+                    if (this._destroyed || generation !== this._generation || this._proxy !== proxy)
+                        return;
                     if (mode !== this.mode) {
                         this.mode = mode;
                         this.available = true;

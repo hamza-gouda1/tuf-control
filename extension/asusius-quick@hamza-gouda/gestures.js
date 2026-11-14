@@ -111,6 +111,7 @@ export function shellActions(main, meta, settings, motion = null) {
 
     return {
         overviewVisible: () => main.overview.visible,
+        actionAllowed: motion?.actionAllowed,
         // the watcher consults this before returning the last app in the overview
         showDesktopCanReturn: () => desktop.canReturn,
         destroy: () => { cancelPending(); motion?.apps.destroy(); desktop.destroy(); },
@@ -143,28 +144,32 @@ export class GestureWatcher {
         this._log = log ?? (msg => console.log(`[${LOG_TAG}] ${msg}`));
         this._debug = debug ?? (msg => console.debug(`[${LOG_TAG}] ${msg}`));
         this._handler = 0;
+        this._usingFilter = false;
         this._startedOverview = false;
     }
 
     enable() {
         if (this._handler)
             return;
-        if (this._session) {
+        if (this._session && typeof this._clutter.Event?.add_filter === 'function') {
             // The filter precedes Shell's own captured-event swipe handlers.
             this._handler = this._clutter.Event.add_filter(this._stage, event => this._event(event));
+            this._usingFilter = true;
         } else {
             this._handler = this._stage.connect('captured-event', (stage, event) => this._event(event));
+            this._usingFilter = false;
         }
     }
 
     disable() {
         if (!this._handler)
             return;
-        if (this._session)
+        if (this._usingFilter)
             this._clutter.Event.remove_filter(this._handler);
         else
             this._stage.disconnect(this._handler);
         this._handler = 0;
+        this._usingFilter = false;
         this.cancel();
         this._actions.destroy?.();
     }
@@ -185,6 +190,10 @@ export class GestureWatcher {
             this._session?.cancel();
             return this._clutter.EVENT_PROPAGATE;
         }
+        if (!(this._actions.actionAllowed?.() ?? true)) {
+            this.cancel();
+            return this._clutter.EVENT_PROPAGATE;
+        }
         if (hold) {
             const handled = this._session.hold(event.get_gesture_phase(),
                 event.get_touchpad_gesture_finger_count(), event.get_time());
@@ -194,8 +203,10 @@ export class GestureWatcher {
         const [dx, dy] = pinch
             ? [event.get_gesture_pinch_angle_delta(), event.get_gesture_pinch_scale()]
             : event.get_gesture_motion_delta();
-        // not every surface reports an unaccelerated delta; tests' fakes do not either
-        const [udx, udy] = event.get_gesture_motion_delta_unaccelerated?.() ?? [dx, dy];
+        // Use unaccelerated deltas consistently across both tracker and interactive session
+        // when supported (matching GNOME's TouchpadSwipeGesture).
+        const [sx, sy] = pinch ? [dx, dy]
+            : (event.get_gesture_motion_delta_unaccelerated?.() ?? [dx, dy]);
         // Mutter 14 names it finger_count (get_touchpad_gesture_fingers does not exist)
         const fingers = event.get_touchpad_gesture_finger_count();
         const phase = event.get_gesture_phase();
@@ -206,13 +217,13 @@ export class GestureWatcher {
         const before = phase === PHASE_END ? this._tracker.stats() : null;
         const gesture = pinch
             ? this._tracker.pinch(phase, fingers, dx, dy)
-            : this._tracker.swipe(phase, fingers, dx, dy);
+            : this._tracker.swipe(phase, fingers, sx, sy);
         if (phase === PHASE_BEGIN || phase === PHASE_END)
-            this._debug(`swipe fingers=${fingers} phase=${phase === PHASE_BEGIN ? 'begin' : 'end'}`);
+            this._debug(`${pinch ? 'pinch' : 'swipe'} fingers=${fingers} phase=${phase === PHASE_BEGIN ? 'begin' : 'end'}`);
         if (this._session) {
             if (pinch && phase === PHASE_BEGIN)
                 this._session.cancel();
-            if (!pinch && this._session.swipe(phase, fingers, udx, udy,
+            if (!pinch && this._session.swipe(phase, fingers, sx, sy,
                 event.get_time()))
                 return this._clutter.EVENT_STOP;
         }
@@ -220,19 +231,23 @@ export class GestureWatcher {
             const ran = this._fire(gesture);
             this._log(`completed ${gesture} -> ${ran ?? 'no action bound'}`);
         } else if (phase === PHASE_END) {
-            this._debug(`no gesture: dx=${before.dx} dy=${before.dy} ` +
-                        `(unaccelerated ${udx.toFixed(1)}/${udy.toFixed(1)}; ` +
-                        `needs ${SWIPE_DISTANCE}px on one axis, ${DOMINANCE}x the other)`);
+            if (pinch) {
+                this._debug(`no gesture: pinch delta=${before.dy}`);
+            } else {
+                this._debug(`no gesture: dx=${before.dx} dy=${before.dy} ` +
+                            `(step ${sx.toFixed(1)}/${sy.toFixed(1)}; ` +
+                            `needs ${SWIPE_DISTANCE}px on one axis, ${DOMINANCE}x the other)`);
+            }
         }
         return this._clutter.EVENT_PROPAGATE;
     }
 
     _fire(gesture) {
-        // The interactive session owns the directional desktop gestures.
-        // The discrete fallback lets GNOME close its own overview first.
+        // When the interactive session is present, it owns 3-finger desktop drags;
+        // the discrete fallback only handles overview close/return when no session runs.
         if (this._session && gesture === 'swipe3-down' &&
             resolveAction(this._settings, gesture) === 'show-desktop')
-            return null; // the interactive owner handles this only in desktop mode
+            return null;
         if (gesture === 'swipe3-down' && (this._startedOverview || this._actions.overviewVisible())) {
             if (resolveAction(this._settings, gesture) === 'show-desktop'
                     && this._actions.showDesktopCanReturn())

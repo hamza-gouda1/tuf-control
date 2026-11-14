@@ -58,7 +58,7 @@ export class DesktopToggle {
         }
     }
 
-    restore(animate = true) {
+    restore(animate = true, focus = true) {
         for (const [w, r] of this._hidden) {
             this._forget(this._hidden, w, r);
             this._d.cancel(w);
@@ -80,13 +80,13 @@ export class DesktopToggle {
                 this._d.opacity(w, r.opacity);
             });
         }
-        if (this._focus)
+        if (focus && this._focus)
             this._d.activate(this._focus);
         this._focus = null;
     }
 
     destroy() {
-        this.restore(false);
+        this.restore(false, false);
         this._finishReturning();
     }
 }

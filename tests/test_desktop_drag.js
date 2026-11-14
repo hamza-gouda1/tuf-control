@@ -106,6 +106,16 @@ const halfway = [158, 52, 103, 0.75, 0.45];
     ok(activated.length > 0, 'restoring desktop returns focus');
 }
 
+// destroy() restores hidden windows without activating/focusing them (lock screen safety).
+{
+    const {d, wins, activated} = rig(); const w = wins[0];
+    d.begin(); d.update(1); d.end(true);
+    ok(w.minimized, 'tucked desktop window minimized');
+    d.destroy();
+    ok(!w.minimized && w.handlers.size === 0 && activated.length === 0,
+        'destroy unminimizes tucked window without calling activate()');
+}
+
 // Unmanaged windows and reduced motion do not leave work behind.
 {
     const {d, wins, q} = rig(); const w = wins[0];

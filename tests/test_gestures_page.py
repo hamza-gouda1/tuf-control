@@ -13,18 +13,25 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parent.parent
-_TMP = Path(tempfile.mkdtemp(prefix="tuf-gestures-test-"))
+_TMP = Path(tempfile.mkdtemp(prefix="asusius-gestures-test-"))
 _HOME = _TMP / "home"
 _CONFIG = _HOME / ".config"
 _DATA = _HOME / ".local" / "share"
-for _d in (_CONFIG, _DATA):
+_SYS_DATA = _TMP / "sysdata"
+for _d in (_CONFIG, _DATA, _SYS_DATA):
     _d.mkdir(parents=True)
-_OLD_ENV = {k: os.environ.get(k) for k in
-            ("HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "GSETTINGS_BACKEND")}
+_ISOLATED_KEYS = (
+    "HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_DATA_DIRS",
+    "GSETTINGS_BACKEND", "XDG_CURRENT_DESKTOP", "DESKTOP_SESSION",
+    "XDG_SESSION_TYPE", "WAYLAND_DISPLAY",
+)
+_OLD_ENV = {k: os.environ.get(k) for k in _ISOLATED_KEYS}
 os.environ["HOME"] = str(_HOME)
 os.environ["XDG_CONFIG_HOME"] = str(_CONFIG)
 os.environ["XDG_DATA_HOME"] = str(_DATA)
 os.environ["GSETTINGS_BACKEND"] = "keyfile"  # the real dconf is never touched
+for _k in ("XDG_CURRENT_DESKTOP", "DESKTOP_SESSION", "XDG_SESSION_TYPE", "WAYLAND_DISPLAY"):
+    os.environ.pop(_k, None)
 
 # the extension's schema, compiled the way install.sh does it (test_install.sh:114-133)
 _EXT_XML = (_ROOT / "extension" / "asusius-quick@hamza-gouda" / "schemas" /
@@ -42,6 +49,11 @@ for _d in (_EXT_SCHEMAS, _OTHER_SCHEMAS):
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 from gi.repository import Gio  # noqa: E402  (only once the environment is in place)
+
+# Prime GLib's cached default schema source with system paths (for touchpad schemas),
+# then isolate XDG_DATA_DIRS so host /usr/share/gnome-shell/extensions never leaks in.
+Gio.SettingsSchemaSource.get_default()
+os.environ["XDG_DATA_DIRS"] = str(_SYS_DATA)
 
 from asusius import touchpad  # noqa: E402
 
@@ -113,6 +125,18 @@ class ExtensionPresence(unittest.TestCase):
             shutil.rmtree(ext_dir)
         self.assertFalse(touchpad.GestureSettings().available)  # gone again: not installed
 
+    def test_found_in_xdg_data_dirs_system_package(self):
+        """System package layout (Arch PKGBUILD / distro /usr/share install) is discovered."""
+        ext_dir = _SYS_DATA / "gnome-shell" / "extensions" / touchpad.EXTENSION_UUID
+        shutil.copytree(_EXT_SCHEMAS, ext_dir / "schemas", dirs_exist_ok=True)
+        try:
+            gest = touchpad.GestureSettings()
+            self.assertTrue(gest.available)
+            self.assertEqual(touchpad.extension_dir(), str(ext_dir))
+        finally:
+            shutil.rmtree(ext_dir)
+        self.assertFalse(touchpad.GestureSettings().available)
+
 
 class GestureKeys(unittest.TestCase):
     def setUp(self):
@@ -177,8 +201,9 @@ class GestureKeys(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             tree = ET.parse(_EXT_XML)
             schema = tree.getroot().find("schema")
+            removed = ("gesture-hold4", "gesture-swipe3-left", "gesture-swipe3-right")
             for key in list(schema):
-                if key.get("name") in ("gesture-hold4", "gesture-swipe3-left", "gesture-swipe3-right"):
+                if key.get("name") in removed:
                     schema.remove(key)
             choices = schema.find("key[@name='gesture-swipe4-up']/choices")
             choices.remove(choices.find("choice[@value='volume-up']"))
@@ -340,6 +365,162 @@ class TouchpadKeys(unittest.TestCase):
     def test_missing_schema_raises_on_construction(self):
         self.assertRaises(touchpad.SchemaMissing, touchpad.TouchpadSettings,
                           source=other_source())
+
+
+class SessionDiagnostics(unittest.TestCase):
+    """Desktop detection, GNOME Shell extension state parsing, and one-click enable."""
+
+    def setUp(self):
+        self._saved = {k: os.environ.get(k) for k in
+                       ("XDG_CURRENT_DESKTOP", "DESKTOP_SESSION",
+                        "XDG_SESSION_TYPE", "WAYLAND_DISPLAY")}
+        self._ext_dir = _DATA / "gnome-shell" / "extensions" / touchpad.EXTENSION_UUID
+
+    def tearDown(self):
+        shutil.rmtree(self._ext_dir, ignore_errors=True)
+        for k, v in self._saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+    @staticmethod
+    def _set_env(**vals):
+        for k, v in vals.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+    def test_parse_gnome_extensions_info(self):
+        self.assertEqual(
+            touchpad.parse_gnome_extensions_info("  Enabled: Yes\n  State: ACTIVE\n"),
+            ("ACTIVE", True),
+        )
+        self.assertEqual(
+            touchpad.parse_gnome_extensions_info("  Enabled: No\n  State: INACTIVE\n"),
+            ("INACTIVE", False),
+        )
+        self.assertEqual(
+            touchpad.parse_gnome_extensions_info("  Enabled: true\n  State: OUT OF DATE\n"),
+            ("OUT_OF_DATE", True),
+        )
+        self.assertEqual(
+            touchpad.parse_gnome_extensions_info("  Enabled: No\n  State: ERROR\n"),
+            ("ERROR", False),
+        )
+
+    def test_non_gnome_desktops_skip_shell_query(self):
+        shutil.copytree(_EXT_SCHEMAS, self._ext_dir / "schemas", dirs_exist_ok=True)
+        called = False
+
+        def fail_runner(_cmd):
+            nonlocal called
+            called = True
+            return subprocess.CompletedProcess([], 0, "", "")
+
+        for desktop in ("KDE", "Hyprland", "sway", "XFCE", "Budgie:GNOME"):
+            self._set_env(XDG_CURRENT_DESKTOP=desktop, XDG_SESSION_TYPE="wayland")
+            info = touchpad.session_info(runner=fail_runner)
+            self.assertTrue(info.is_other_desktop, desktop)
+            self.assertFalse(info.is_gnome, desktop)
+        self.assertFalse(called)
+
+    def test_shell_states_and_x11_detection(self):
+        self._ext_dir.mkdir(parents=True)
+        self._set_env(XDG_CURRENT_DESKTOP="ubuntu:GNOME", XDG_SESSION_TYPE="wayland")
+        missing_schema = touchpad.session_info(query_shell=False)
+        self.assertTrue(missing_schema.installed)
+        self.assertFalse(missing_schema.schema_compiled)
+
+        shutil.copytree(_EXT_SCHEMAS, self._ext_dir / "schemas", dirs_exist_ok=True)
+        cases = (
+            (0, "  Enabled: Yes\n  State: ACTIVE\n", "", "active", True),
+            (0, "  Enabled: No\n  State: INACTIVE\n", "", "inactive", False),
+            (0, "  Enabled: Yes\n  State: ERROR\n", "", "error", True),
+            (0, "  Enabled: Yes\n  State: OUT OF DATE\n", "", "out_of_date", True),
+            (2, "", "Extension asusius-quick@hamza-gouda does not exist\n", "needs_relogin", None),
+        )
+        for rc, out, err, want_state, want_enabled in cases:
+            runner = lambda _cmd, r=rc, o=out, e=err: subprocess.CompletedProcess([], r, o, e)
+            info = touchpad.session_info(runner=runner)
+            self.assertEqual(info.shell_state, want_state)
+            self.assertEqual(info.enabled, want_enabled)
+
+        self._set_env(XDG_SESSION_TYPE="x11")
+        active_out = "Enabled: Yes\nState: ACTIVE\n"
+        x11_info = touchpad.session_info(
+            runner=lambda _c, out=active_out: subprocess.CompletedProcess([], 0, out, ""),
+        )
+        self.assertEqual(x11_info.session_type, "x11")
+        self.assertEqual(x11_info.shell_state, "active")
+
+    def test_enable_extension_helper(self):
+        ok, msg = touchpad.enable_extension(
+            runner=lambda _c: subprocess.CompletedProcess([], 0, "", ""),
+        )
+        self.assertTrue(ok)
+        self.assertIn("enabled", msg.lower())
+
+        ok, msg = touchpad.enable_extension(
+            runner=lambda _c: subprocess.CompletedProcess([], 2, "", "does not exist"),
+        )
+        self.assertFalse(ok)
+        self.assertIn("log out", msg.lower())
+
+        ok, msg = touchpad.enable_extension(
+            runner=lambda _c: (_ for _ in ()).throw(OSError("no binary")),
+        )
+        self.assertFalse(ok)
+        self.assertIn("not available", msg.lower())
+
+
+class BannerClassification(unittest.TestCase):
+    """Verify GesturesPage session banners for every DE / Wayland / X11 / extension state."""
+
+    def test_classify_session_banner(self):
+        import gi
+        gi.require_version("Gtk", "4.0")
+        gi.require_version("Adw", "1")
+        from asusius.ui.pages.gestures import classify_session_banner
+
+        kde = touchpad.SessionInfo(
+            "KDE", False, True, "wayland", True, True, "/usr/share/...", "unknown",
+        )
+        kde_b = classify_session_banner(kde, True)
+        self.assertEqual(kde_b.ext_label, "GNOME only")
+        self.assertFalse(kde_b.pad_applicable)
+        self.assertFalse(kde_b.show_qs_group)
+        self.assertNotIn("install.sh", kde_b.err_subtitle)
+
+        disabled = touchpad.SessionInfo(
+            "GNOME", True, False, "wayland", True, True, "/usr/share/...", "inactive", False,
+        )
+        dis_b = classify_session_banner(disabled, True)
+        self.assertTrue(dis_b.show_enable)
+        self.assertEqual(dis_b.ext_label, "Disabled")
+
+        relogin = touchpad.SessionInfo(
+            "GNOME", True, False, "wayland", True, True, "/usr/share/...", "needs_relogin",
+        )
+        rel_b = classify_session_banner(relogin, True)
+        self.assertFalse(rel_b.show_enable)
+        self.assertEqual(rel_b.ext_label, "Relogin required")
+
+        x11 = touchpad.SessionInfo(
+            "GNOME", True, False, "x11", True, True, "/usr/share/...", "active", True,
+        )
+        x11_b = classify_session_banner(x11, True)
+        self.assertTrue(x11_b.err_visible)
+        self.assertIn("Wayland", x11_b.err_subtitle)
+        self.assertTrue(x11_b.show_qs_group)
+
+        wayland_ok = touchpad.SessionInfo(
+            "GNOME", True, False, "wayland", True, True, "/usr/share/...", "active", True,
+        )
+        ok_b = classify_session_banner(wayland_ok, True)
+        self.assertFalse(ok_b.err_visible)
+        self.assertEqual(ok_b.ext_label, "Active")
 
 
 if __name__ == "__main__":

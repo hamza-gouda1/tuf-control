@@ -25,14 +25,15 @@ export function createGestureInput(main) {
     const windows = () => global.workspace_manager.get_active_workspace().list_windows();
     const switchable = new Set([Meta.WindowType.NORMAL, Meta.WindowType.DIALOG, Meta.WindowType.MODAL_DIALOG]);
     const eligible = window => switchable.has(window.get_window_type()) && !window.skip_taskbar;
-    const monitor = () => main.layoutManager.monitors[
-        focus()?.get_monitor() ?? main.layoutManager.primaryIndex] ?? main.layoutManager.primaryMonitor;
+    const activeMonitorIndex = () => focus()?.get_monitor() ?? main.layoutManager.primaryIndex;
+    const monitor = () => main.layoutManager.monitors[activeMonitorIndex()] ?? main.layoutManager.primaryMonitor;
     const tracker = Shell.WindowTracker.get_default();
     const appWindows = () => {
         const focused = focus();
+        const activeMonitor = activeMonitorIndex();
         const byApp = new Map();
         for (const window of windows().sort((a, b) => a.get_stable_sequence() - b.get_stable_sequence())) {
-            if (!eligible(window) || window.get_monitor() !== focused?.get_monitor())
+            if (!eligible(window) || window.get_monitor() !== activeMonitor)
                 continue;
             const app = tracker.get_window_app(window)?.get_id() ?? window;
             if (window === focused || !byApp.has(app))
@@ -46,8 +47,9 @@ export function createGestureInput(main) {
         activate: window => main.activateWindow(window, global.get_current_time()),
         animationsEnabled: () => St.Settings.get().enable_animations,
         skipEffect: windowActor => main.wm.skipNextEffect(windowActor),
+        // Always use onStopped (runs on interruption as well as completion) so interrupted eases cannot wedge drags.
         settle: (windowActor, properties, done) => windowActor.ease({...properties,
-            mode: Clutter.AnimationMode.EASE_OUT_CUBIC, onComplete: done}),
+            mode: Clutter.AnimationMode.EASE_OUT_CUBIC, onStopped: done}),
     };
     const desktop = new DesktopDrag({...shared, windows,
         eligible: window => eligible(window) && window.can_minimize() && !window.is_on_all_workspaces(),
@@ -61,15 +63,65 @@ export function createGestureInput(main) {
         },
     });
     const group = global.window_group;
+    const clipActors = (...actors) => {
+        const monitors = main.layoutManager.monitors;
+        const box = monitors.length > 1 ? monitor() : null;
+        if (!box)
+            return null;
+        const tracked = actors.map(winActor => {
+            const hadClip = winActor.has_clip?.() ?? false;
+            const clip = hadClip ? winActor.get_clip() : null;
+            const rect = Array.isArray(clip) && clip.length === 4 ? clip : null;
+            const sync = () => {
+                const sx = winActor.scale_x || 1;
+                const sy = winActor.scale_y || 1;
+                const tx = winActor.translation_x || 0;
+                const ty = winActor.translation_y || 0;
+                let x1 = (box.x - (winActor.x + tx)) / sx;
+                let y1 = (box.y - (winActor.y + ty)) / sy;
+                let x2 = x1 + box.width / sx;
+                let y2 = y1 + box.height / sy;
+                if (rect) {
+                    x1 = Math.max(x1, rect[0]);
+                    y1 = Math.max(y1, rect[1]);
+                    x2 = Math.min(x2, rect[0] + rect[2]);
+                    y2 = Math.min(y2, rect[1] + rect[3]);
+                }
+                winActor.set_clip(x1, y1, Math.max(0, x2 - x1), Math.max(0, y2 - y1));
+            };
+            const sig = winActor.connect('notify::translation-x', sync);
+            sync();
+            return {winActor, hadClip, rect, sig};
+        });
+        return goneActor => {
+            for (const {winActor, hadClip, rect, sig} of tracked) {
+                winActor.disconnect(sig);
+                if (winActor === goneActor)
+                    continue;
+                if (hadClip && rect)
+                    winActor.set_clip(...rect);
+                else
+                    winActor.remove_clip();
+            }
+        };
+    };
     const apps = new AppDrag({...shared,
         windows: appWindows,
         width: () => monitor()?.width ?? global.screen_width,
         stack: () => group.get_children(),
         raise: windowActor => group.set_child_above_sibling(windowActor, null),
+        clipActors,
         restoreStack: order => {
-            const current = new Set(group.get_children());
+            const current = group.get_children();
+            const currentSet = new Set(current);
+            const orderSet = new Set(order);
             for (const windowActor of order) {
-                if (current.has(windowActor))
+                if (currentSet.has(windowActor))
+                    group.set_child_above_sibling(windowActor, null);
+            }
+            // Keep any windows created mid-drag on top instead of burying them.
+            for (const windowActor of current) {
+                if (!orderSet.has(windowActor))
                     group.set_child_above_sibling(windowActor, null);
             }
         },
@@ -79,12 +131,14 @@ export function createGestureInput(main) {
         apps.cancel();
         desktop.restore(false);
     };
-
     let keyboard = null;
     return {
-        desktop, apps, prepareOverview,
+        desktop,
+        apps,
+        prepareOverview,
         dragAllowed: () => main.actionMode === Shell.ActionMode.NORMAL &&
             !main.overview.visible && !main.overview.animationInProgress,
+        actionAllowed: () => !!(main.actionMode & (Shell.ActionMode.NORMAL | Shell.ActionMode.OVERVIEW)),
         mediaAllowed: () => !!(main.actionMode & (Shell.ActionMode.NORMAL | Shell.ActionMode.OVERVIEW)),
         switchApp: step => {
             desktop.restore();
@@ -96,10 +150,15 @@ export function createGestureInput(main) {
             const key = MEDIA_KEYS[action];
             if (!key)
                 return;
-            keyboard ??= Clutter.get_default_backend().get_default_seat()
-                .create_virtual_device(Clutter.InputDeviceType.KEYBOARD_DEVICE);
-            keyboard.notify_keyval(GLib.get_monotonic_time(), key, Clutter.KeyState.PRESSED);
-            keyboard.notify_keyval(GLib.get_monotonic_time(), key, Clutter.KeyState.RELEASED);
+            try {
+                keyboard ??= Clutter.get_default_backend().get_default_seat()
+                    .create_virtual_device(Clutter.InputDeviceType.KEYBOARD_DEVICE);
+                const now = GLib.get_monotonic_time();
+                keyboard.notify_keyval(now, key, Clutter.KeyState.PRESSED);
+                keyboard.notify_keyval(now, key, Clutter.KeyState.RELEASED);
+            } catch {
+                keyboard = null;
+            }
         },
         destroy: () => {
             keyboard = null;

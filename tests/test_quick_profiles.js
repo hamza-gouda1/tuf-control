@@ -31,6 +31,20 @@ eq([P.gpuModeName(0), P.gpuModeName(5), P.gpuModeName(6)], ['Hybrid', 'Dedicated
 eq([P.chargeLabel(80), P.chargeLabel(5), P.chargeLabel(null)], ['Charge limit: 80%', null, null], 'charge label');
 eq([P.subtitleFor('quiet', 'asusd'), P.subtitleFor(null, 'asusd'), P.subtitleFor(null, null)],
     ['Quiet', 'Unknown', 'Unavailable'], 'subtitle');
+eq([P.isToggleActive('balanced', ['quiet', 'balanced', 'performance']),
+    P.isToggleActive('performance', ['quiet', 'balanced', 'performance']),
+    P.isToggleActive('quiet', ['quiet', 'balanced']),
+    P.isToggleActive('balanced', ['balanced']),
+    P.isToggleActive(null, ['balanced'])],
+[false, true, true, false, false], 'toggle active states');
+eq([P.pickToggleTarget('balanced', ['quiet', 'balanced', 'performance']),
+    P.pickToggleTarget('balanced', ['quiet', 'balanced']),
+    P.pickToggleTarget('quiet', ['quiet', 'balanced']),
+    P.pickToggleTarget('balanced', ['balanced']),
+    P.pickToggleTarget('performance', ['quiet', 'balanced', 'performance']),
+    P.pickToggleTarget('performance', ['performance']),
+    P.pickToggleTarget(null, ['quiet', 'balanced'])],
+['performance', 'quiet', 'balanced', null, 'balanced', null, 'quiet'], 'toggle targets');
 
 // --- model with fake sources
 class FakeSource extends P.Emitter {
@@ -180,6 +194,34 @@ class Clock {
     m2.destroy();
 }
 
+// --- self-initiated Quick Settings click suppresses matching OSD briefly ---
+{
+    const clock = new Clock();
+    const shown = [];
+    const src = new FakeSource('balanced', ['quiet', 'balanced', 'performance']);
+    const model = new P.ProfileModel([{name: 'asusd', source: src}]);
+    const osd = new P.ProfileAnnouncer(model, {
+        schedule: (ms, fn) => clock.schedule(ms, fn), cancel: id => clock.cancel(id),
+        now: () => clock.now, show: p => shown.push(p),
+    });
+    osd.suppress('performance', 2000);
+    src.profile = 'performance';
+    src.emit();
+    clock.advance(400);
+    eq(shown, [], 'suppressed Quick Settings click does not emit OSD');
+    src.profile = 'quiet';
+    src.emit();
+    clock.advance(300);
+    eq(shown, ['quiet'], 'different hardware profile inside suppression window still emits OSD');
+    clock.advance(2000);
+    src.profile = 'performance';
+    src.emit();
+    clock.advance(300);
+    eq(shown, ['quiet', 'performance'], 'OSD resumes after suppression window expires');
+    osd.destroy();
+    model.destroy();
+}
+
 // --- extension lifecycle: enable/disable cycles with stand-in sources (no shell needed)
 {
     const clock = new Clock();
@@ -220,6 +262,37 @@ sources.forEach(s => s.destroy());
 const lateProxy = {connect() { throw new Error('late proxy connected after destroy'); }};
 ok(!sources[0]._acceptProxy(lateProxy, generation), 'late async proxy cannot resurrect destroyed source');
 ok(sources.every(s => s.size === 0 && s._watchId === 0 && s._proxy === null), 'dbus sources fully cleaned up');
+
+// --- ProxySource._update resets stale state when _read returns false ---
+{
+    const src = new D.AsusdProfileSource();
+    src.available = true;
+    src.profile = 'performance';
+    src.choices = ['quiet', 'balanced', 'performance'];
+    src.chargeLimit = 80;
+    src._proxy = {get_cached_property: () => undefined};
+    src._update();
+    eq([src.available, src.profile, src.choices, src.chargeLimit], [false, null, [], null],
+        '_update resets stale values when _read returns false');
+    src._proxy = null;
+    src.destroy();
+}
+
+// --- GpuModeSource._fetch discards stale generation responses ---
+{
+    const gpu = new D.GpuModeSource();
+    let capturedCb = null;
+    gpu._proxy = {
+        call(_m, _p, _f, _t, _c, cb) { capturedCb = cb; },
+        call_finish() { return {deepUnpack: () => [2]}; },
+    };
+    gpu._fetch();
+    gpu._generation++; // simulate service vanish/reappear before async reply arrives
+    capturedCb(gpu._proxy, {});
+    eq([gpu.mode, gpu.available], [null, false], 'stale GpuModeSource async reply is ignored');
+    gpu._proxy = null;
+    gpu.destroy();
+}
 
 print(`${passed} passed, ${failed} failed`);
 System.exit(failed ? 1 : 0);

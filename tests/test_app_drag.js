@@ -37,11 +37,12 @@ class Window {
 function actor(x, y, opacity) {
     return {
         translation_x: x, translation_y: y, opacity,
-        remove_all_transitions() { this.removedTransitions = true; },
+        removedTransitions: [],
+        remove_transition(prop) { this.removedTransitions.push(prop); },
     };
 }
 
-function fixture({reduced = false, minimized = false, queued = false} = {}) {
+function fixture({reduced = false, minimized = false, queued = false, clipActors = null} = {}) {
     const a = actor(10, 4, 255), b = actor(-7, 8, 180), c = actor(31, 2, 220);
     const w1 = new Window('one', a), w2 = new Window('two', b, minimized), w3 = new Window('three', c);
     const wins = [w1, w2, w3];
@@ -56,6 +57,7 @@ function fixture({reduced = false, minimized = false, queued = false} = {}) {
         raise: ac => raised.push(ac),
         restoreStack: order => restored.push([...order]),
         skipEffect: ac => skipped.push(ac),
+        clipActors,
         activate: w => activated.push(w),
         animationsEnabled: () => !reduced,
         settle: (ac, props, done) => {
@@ -151,6 +153,37 @@ function fixture({reduced = false, minimized = false, queued = false} = {}) {
     for (const done of stale) done();
     eq([f.drag.active, f.activated.length], [true, 0], 'stale completion cannot finish new session');
     f.drag.cancel();
+}
+
+// Re-entrant end() is ignored while settling; clipActors unclips cleanly on end/cancel.
+{
+    const unclipped = [];
+    const clipped = [];
+    const f = fixture({
+        queued: true,
+        clipActors: (src, tgt) => {
+            clipped.push([src, tgt]);
+            return gone => unclipped.push(gone);
+        },
+    });
+    f.drag.begin(1);
+    eq(clipped, [[f.a, f.b]], 'begin clips source and target actors');
+    f.drag.update(0.6);
+    ok(f.drag.end(true), 'first end starts settle');
+    ok(!f.drag.end(true), 'duplicate end while settling returns false');
+    eq(f.settlements.length, 2, 'only one settle pair scheduled despite double end()');
+    for (const s of f.settlements)
+        s.done();
+    eq([f.activated, unclipped], [[f.w2], [null]], 'interrupted/finished settle unclips cleanly');
+}
+
+// Target unmanaged notifies unclip with goneActor=f.b.
+{
+    const unclipped = [];
+    const f = fixture({clipActors: () => goneActor => unclipped.push(goneActor)});
+    f.drag.begin(1);
+    f.w2.emit('unmanaged');
+    eq(unclipped, [f.b], 'unmanaged target passes target actor to unclip');
 }
 
 print(`${passed} passed, ${failed} failed`);

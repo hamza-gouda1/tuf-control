@@ -3,7 +3,11 @@
   "name": "Asusius Quick Settings",
   "description": "Performance profile toggle (Quiet / Balanced / Performance) in Quick Settings for ASUS TUF and ROG laptops. Shows the new profile in an on-screen display when it changes, e.g. with Fn+F5. Talks to asusd, falls back to power-profiles-daemon.",
   "shell-version": [
-    "46"
+    "45",
+    "46",
+    "47",
+    "48",
+    "49"
   ],
   "url": "https://github.com/hamza-gouda1/asusius",
   "settings-schema": "org.gnome.shell.extensions.asusius-quick",

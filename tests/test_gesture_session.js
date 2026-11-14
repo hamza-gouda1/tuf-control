@@ -140,5 +140,56 @@ function fixture(desktopHidden = false) {
     equal(session.swipe(END, 3, 0, 0, 70), false, 'interruption releases ownership');
     equal(calls.at(-1), ['desktop', 'end', false], 'interruption cancels the preview');
 }
+{
+    const {session, calls} = fixture();
+    equal(session.swipe(BEGIN, 3, 0, 0, 0), false, 'BEGIN never steals input ahead of GNOME');
+    equal(session.swipe(UPDATE, 3, 4, 4, 10), false, 'sub-10px movement propagates');
+    equal(session.swipe(UPDATE, 3, 18, 18, 20), false, 'diagonal >= 16px yields back to GNOME');
+    equal(calls, [], 'pre-lock and diagonal movement do not trigger prepareOverview or drags');
+}
+{
+    const {input, actions} = fixture();
+    const calls = [];
+    input.prepareOverview = () => calls.push('prepare-overview');
+    const workspaceSettings = {
+        get_boolean: () => true,
+        get_string: k => (k === 'gesture-swipe3-down' ? 'show-desktop' : 'none'),
+    };
+    const wsSession = new GestureSession(workspaceSettings, actions, input);
+    wsSession.swipe(BEGIN, 3, 0, 0, 0);
+    equal(wsSession.swipe(UPDATE, 3, 30, 0, 10), false, 'unbound horizontal swipe propagates');
+    equal(calls, [], 'unbound horizontal workspace swipe does not call prepareOverview');
+    wsSession.swipe(END, 3, 0, 0, 20);
+    wsSession.swipe(BEGIN, 3, 0, 0, 30);
+    equal(wsSession.swipe(UPDATE, 3, 0, -30, 40), false, 'unbound up swipe propagates to GNOME');
+    equal(calls, ['prepare-overview'], 'only unbound up swipe calls prepareOverview');
+}
+{
+    const {input} = fixture();
+    input.dragAllowed = () => false;
+    input.mediaAllowed = () => true;
+    const fired = [];
+    let holdAction = 'show-desktop';
+    const settings = {
+        get_boolean: () => true,
+        get_string: k => (k === 'gesture-hold4' ? holdAction : 'none'),
+    };
+    const actions = {
+        'show-desktop': () => fired.push('show-desktop'),
+        'next-window': () => fired.push('next-window'),
+        'play-pause': () => fired.push('play-pause'),
+    };
+    const gs = new GestureSession(settings, actions, input);
+    gs.hold(BEGIN, 4, 0);
+    gs.hold(END, 4, 100);
+    holdAction = 'next-window';
+    gs.hold(BEGIN, 4, 200);
+    gs.hold(END, 4, 300);
+    equal(fired, [], 'hold4 ignores drag/window bindings when dragAllowed is false');
+    holdAction = 'play-pause';
+    gs.hold(BEGIN, 4, 400);
+    gs.hold(END, 4, 500);
+    equal(fired, ['play-pause'], 'hold4 still triggers media bindings while mediaAllowed is true');
+}
 
 print(`gesture session: ${passed} passed, 0 failed`);

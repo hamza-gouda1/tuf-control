@@ -53,6 +53,28 @@ export function subtitleFor(profile, backend) {
 export const chargeLabel = pct =>
     (Number.isInteger(pct) && pct >= 20 && pct <= 100 ? `Charge limit: ${pct}%` : null);
 
+/** Whether the Quick Settings tile should render as checked for `profile` and `choices`. */
+export function isToggleActive(profile, choices) {
+    if (!profile)
+        return false;
+    if ((choices ?? PROFILES).includes('performance'))
+        return profile === 'performance';
+    return profile !== 'balanced';
+}
+
+/** Next profile to request when clicking the Quick Settings tile, or null if immutable. */
+export function pickToggleTarget(profile, choices) {
+    const avail = choices?.length ? choices : PROFILES;
+    if (avail.includes('performance')) {
+        if (profile === 'performance')
+            return avail.includes('balanced') ? 'balanced' : avail.find(c => c !== 'performance') ?? null;
+        return 'performance';
+    }
+    if (profile && profile !== 'balanced')
+        return avail.includes('balanced') ? 'balanced' : null;
+    return avail.find(c => c !== 'balanced') ?? null;
+}
+
 /** Minimal signal helper so tests can verify nothing is left connected. */
 export class Emitter {
     constructor() {
@@ -146,17 +168,28 @@ export class ProfileModel extends Emitter {
  * timers = {schedule(ms, fn) -> handle, cancel(handle)}
  */
 export class ProfileAnnouncer {
-    constructor(model, {schedule, cancel, show, delay = 300}) {
+    constructor(model, {schedule, cancel, show, delay = 300, now = () => Date.now()}) {
         this._model = model;
         this._schedule = schedule;
         this._cancel = cancel;
         this._show = show;
         this._delay = delay;
+        this._now = now;
         this._backend = model.backend;
         this._last = model.profile;
         this._pending = null;
+        this._suppressed = null;
         this.shown = 0;
         this._id = model.connect(() => this._changed());
+    }
+
+    /** Suppress the OSD briefly when our own Quick Settings UI just requested `profile`. */
+    suppress(profile, windowMs = 2000) {
+        this._suppressed = {profile, until: this._now() + windowMs};
+    }
+
+    clearSuppression() {
+        this._suppressed = null;
     }
 
     _changed() {
@@ -164,6 +197,7 @@ export class ProfileAnnouncer {
         if (backend !== this._backend) {
             this._backend = backend;
             this._last = profile;
+            this._suppressed = null;
             this._stop();
             return;
         }
@@ -171,7 +205,17 @@ export class ProfileAnnouncer {
             return;
         if (this._last === null) {
             this._last = profile;
+            this._suppressed = null;
             return;
+        }
+        if (this._suppressed) {
+            const matches = this._suppressed.profile === profile && this._now() <= this._suppressed.until;
+            this._suppressed = null;
+            if (matches) {
+                this._last = profile;
+                this._stop();
+                return;
+            }
         }
         if (profile === this._last && this._pending === null)
             return; // something else changed (choices, charge limit)
@@ -199,6 +243,7 @@ export class ProfileAnnouncer {
         if (!this._model)
             return;
         this._stop();
+        this._suppressed = null;
         this._model.disconnect(this._id);
         this._model = null;
     }

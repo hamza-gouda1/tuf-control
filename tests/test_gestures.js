@@ -618,5 +618,77 @@ function makeWatcher({bindings = {}, enabled = true, overview = false,
     }
 }
 
+// GestureWatcher filter path, actionAllowed gating, and pinch unaccelerated-delta safety.
+{
+    const fired = [];
+    let allowed = false;
+    const filters = new Map();
+    let nextFilter = 10;
+    const removedFilters = [];
+    const customClutter = {
+        EventType: {...CT.EventType, TOUCHPAD_HOLD: 15},
+        TouchpadGesturePhase: CT.TouchpadGesturePhase,
+        EVENT_PROPAGATE: false,
+        EVENT_STOP: true,
+        Event: {
+            add_filter(stage, fn) {
+                const id = ++nextFilter;
+                filters.set(id, {stage, fn});
+                return id;
+            },
+            remove_filter(id) {
+                removedFilters.push(id);
+                filters.delete(id);
+            },
+        },
+    };
+    const actions = {
+        overviewVisible: () => false,
+        actionAllowed: () => allowed,
+        showDesktopCanReturn: () => false,
+        destroy() {},
+        'volume-up': () => fired.push('volume-up'),
+        'launch-app': () => fired.push('launch-app'),
+    };
+    const input = {
+        prepareOverview() {},
+        dragAllowed: () => true,
+        mediaAllowed: () => true,
+        desktop: {begin: () => false, update() {}, end() {}, cancel() {}, restore() {}},
+        apps: {begin: () => false, update() {}, end() {}, cancel() {}, destroy() {}},
+    };
+    const stage = {connect() { throw new Error('expected Clutter.Event.add_filter'); }, disconnect() {}};
+    const settings = fakeSettings({'gesture-swipe4-up': 'volume-up', 'gesture-pinch-out': 'launch-app'});
+    const watcher = new G.GestureWatcher({
+        settings, stage, actions, input, clutter: customClutter, log: () => {}, debug: () => {},
+    });
+    watcher.enable();
+    ok(filters.size === 1, 'uses Clutter.Event.add_filter when input session is present');
+    const [{fn: filter}] = filters.values();
+    let pinchCalledUnaccel = false;
+    const pinchEvent = phase => ({
+        type: () => customClutter.EventType.TOUCHPAD_PINCH,
+        get_gesture_phase: () => phase,
+        get_touchpad_gesture_finger_count: () => 2,
+        get_gesture_pinch_angle_delta: () => 0,
+        get_gesture_pinch_scale: () => (phase === PHASE_UPDATE ? 1.4 : 1.0),
+        get_gesture_motion_delta_unaccelerated: () => { pinchCalledUnaccel = true; return [999, 999]; },
+        get_time: () => 50,
+    });
+    filter(pinchEvent(PHASE_BEGIN));
+    filter(pinchEvent(PHASE_UPDATE));
+    filter(pinchEvent(PHASE_END));
+    eq([fired, pinchCalledUnaccel], [[], false],
+        'actionAllowed=false blocks pinch and pinch never reads unaccelerated motion deltas');
+    allowed = true;
+    filter(pinchEvent(PHASE_BEGIN));
+    filter(pinchEvent(PHASE_UPDATE));
+    filter(pinchEvent(PHASE_END));
+    eq([fired, pinchCalledUnaccel], [['launch-app'], false],
+        'actionAllowed=true fires pinch without calling get_gesture_motion_delta_unaccelerated');
+    watcher.disable();
+    eq([filters.size, removedFilters.length], [0, 1], 'disable removes Clutter event filter');
+}
+
 print(`${passed} passed, ${failed} failed`);
 System.exit(failed ? 1 : 0);

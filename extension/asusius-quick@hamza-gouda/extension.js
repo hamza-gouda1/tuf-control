@@ -23,56 +23,105 @@ import {AsusdProfileSource, GpuModeSource, PpdProfileSource} from './dbus.js';
 import {GestureWatcher, shellActions} from './gestures.js';
 import {createGestureInput} from './gesture_input.js';
 import {
-    ICONS, LABELS, PROFILES, ProfileAnnouncer, ProfileModel, chargeLabel, gpuModeName, subtitleFor,
+    ICONS, LABELS, PROFILES, ProfileAnnouncer, ProfileModel, chargeLabel, gpuModeName,
+    isToggleActive, pickToggleTarget, subtitleFor,
 } from './profiles.js';
 
 const APP_DESKTOP_ID = 'io.github.hamzagouda.Asusius.desktop';
+const APP_SYMBOLIC_ICON = 'io.github.hamzagouda.Asusius-symbolic';
 
 
 /**
- * Hide GNOME's built-in Power Mode tile while ours runs: the two switch the same
- * platform profile. GNOME 46 puts the tile in the menu rather than under the
- * panel button, and updates its visibility whenever the power profile changes.
+ * Hide one stock Quick Settings toggle while active and restore it cleanly on
+ * disable or when the setting/precondition flips off. Null-guarded against Shell
+ * versions or panels that omit or replace the target item.
  */
-class PowerModeHider {
-    constructor(settings) {
+class QuickTileHider {
+    constructor({settings, key, findToggle, shouldHide = () => true, restoreVisibility}) {
         this._settings = settings;
-        this._quickSettings = Main.panel.statusArea.quickSettings;
+        this._key = key;
+        this._findToggle = findToggle;
+        this._shouldHide = shouldHide;
+        this._restoreVisibility = restoreVisibility;
+        this._quickSettings = Main.panel?.statusArea?.quickSettings ?? null;
         this._toggle = null;
         this._hideIdleId = 0;
+        this._visibilityId = 0;
+        this._destroyId = 0;
+        this._settingsId = 0;
+        this._indicatorAddedId = 0;
+        this._destroyed = false;
     }
 
     enable() {
-        this._settingsId = this._settings.connect('changed::hide-power-mode', () => this._apply());
-        // GNOME builds the stock indicators asynchronously during startup.
-        this._indicatorAddedId = this._quickSettings._indicators.connect(
-            'child-added', () => this._apply());
-        this._apply();
+        this._settingsId = this._settings.connect(`changed::${this._key}`, () => this.sync());
+        this._watchIndicators();
+        this.sync();
     }
 
-    _apply() {
-        if (!this._settings.get_boolean('hide-power-mode')) {
+    _watchIndicators() {
+        if (this._destroyed || this._toggle || this._indicatorAddedId)
+            return;
+        const indicators = this._quickSettings?._indicators;
+        if (indicators)
+            this._indicatorAddedId = indicators.connect('child-added', () => this.sync());
+    }
+
+    _unwatchIndicators() {
+        if (this._indicatorAddedId) {
+            this._quickSettings?._indicators?.disconnect(this._indicatorAddedId);
+            this._indicatorAddedId = 0;
+        }
+    }
+
+    sync() {
+        if (this._destroyed)
+            return;
+        if (!this._settings.get_boolean(this._key) || !this._shouldHide()) {
             this._restore();
             return;
         }
 
-        const toggle = this._quickSettings._powerProfiles?.quickSettingsItems[0];
-        if (!toggle || this._toggle)
+        if (this._toggle) {
+            if (this._toggle.visible)
+                this._toggle.hide();
             return;
+        }
 
+        const toggle = this._quickSettings ? this._findToggle(this._quickSettings) : null;
+        if (!toggle) {
+            this._watchIndicators();
+            return;
+        }
+
+        this._unwatchIndicators();
         this._toggle = toggle;
         this._visibilityId = toggle.connect('notify::visible', () => {
-            if (!toggle.visible || this._hideIdleId)
+            if (!toggle.visible || this._hideIdleId || this._toggle !== toggle)
                 return;
 
-            // Let GNOME finish syncing the profile before hiding the tile again.
+            // Let GNOME finish syncing before hiding the tile again.
             this._hideIdleId = GLib.idle_add(GLib.PRIORITY_HIGH_IDLE, () => {
                 this._hideIdleId = 0;
-                toggle.hide();
+                if (!this._destroyed && this._toggle === toggle)
+                    toggle.hide();
                 return GLib.SOURCE_REMOVE;
             });
         });
+        this._destroyId = toggle.connect('destroy', () => this._onToggleDestroyed());
         toggle.hide();
+    }
+
+    _onToggleDestroyed() {
+        if (this._hideIdleId) {
+            GLib.source_remove(this._hideIdleId);
+            this._hideIdleId = 0;
+        }
+        this._visibilityId = 0;
+        this._destroyId = 0;
+        this._toggle = null;
+        if (!this._destroyed)
+            this._watchIndicators();
     }
 
     _restore() {
@@ -83,128 +132,76 @@ class PowerModeHider {
             GLib.source_remove(this._hideIdleId);
             this._hideIdleId = 0;
         }
-        this._toggle.disconnect(this._visibilityId);
-        // Let the stock tile recompute visibility from the current daemon state.
-        this._toggle._sync();
+        const toggle = this._toggle;
         this._toggle = null;
+        if (this._visibilityId)
+            toggle.disconnect(this._visibilityId);
+        if (this._destroyId)
+            toggle.disconnect(this._destroyId);
+        this._visibilityId = 0;
+        this._destroyId = 0;
+        this._restoreVisibility(toggle);
+        if (!this._destroyed)
+            this._watchIndicators();
     }
 
     destroy() {
-        this._quickSettings._indicators.disconnect(this._indicatorAddedId);
-        this._settings.disconnect(this._settingsId);
-        this._restore();
-    }
-}
-
-/**
- * Hide GNOME's built-in Night Light tile while this extension runs, on the same
- * pattern as PowerModeHider: hide the toggle itself, watch for anything that
- * re-shows it, and put it back on disable. Unlike the Power Mode tile this one
- * has no _sync() to recompute its visibility from (its checked state is a
- * GSettings binding), so restoring is a plain show().
- */
-class NightLightHider {
-    constructor(settings) {
-        this._settings = settings;
-        this._quickSettings = Main.panel.statusArea.quickSettings;
-        this._toggle = null;
-        this._hideIdleId = 0;
-    }
-
-    enable() {
-        this._settingsId = this._settings.connect('changed::hide-night-light', () => this._apply());
-        // GNOME builds the stock indicators asynchronously during startup.
-        this._indicatorAddedId = this._quickSettings._indicators.connect(
-            'child-added', () => this._apply());
-        this._apply();
-    }
-
-    _apply() {
-        if (!this._settings.get_boolean('hide-night-light')) {
-            this._restore();
-            return;
+        this._destroyed = true;
+        this._unwatchIndicators();
+        if (this._settingsId) {
+            this._settings.disconnect(this._settingsId);
+            this._settingsId = 0;
         }
-
-        const toggle = this._quickSettings._nightLight?.quickSettingsItems[0];
-        if (!toggle || this._toggle)
-            return;
-
-        this._toggle = toggle;
-        this._visibilityId = toggle.connect('notify::visible', () => {
-            if (!toggle.visible || this._hideIdleId)
-                return;
-
-            // Let the shell finish whatever re-showed the tile before hiding it again.
-            this._hideIdleId = GLib.idle_add(GLib.PRIORITY_HIGH_IDLE, () => {
-                this._hideIdleId = 0;
-                toggle.hide();
-                return GLib.SOURCE_REMOVE;
-            });
-        });
-        toggle.hide();
-    }
-
-    _restore() {
-        if (!this._toggle)
-            return;
-
-        if (this._hideIdleId) {
-            GLib.source_remove(this._hideIdleId);
-            this._hideIdleId = 0;
-        }
-        this._toggle.disconnect(this._visibilityId);
-        // The tile's visibility normally follows GNOME's night-light-supported
-        // binding; showing it hands the decision back to the shell.
-        this._toggle.show();
-        this._toggle = null;
-    }
-
-    destroy() {
-        this._quickSettings._indicators.disconnect(this._indicatorAddedId);
-        this._settings.disconnect(this._settingsId);
         this._restore();
     }
 }
 
 const ProfileToggle = GObject.registerClass(
 class AsusiusProfileToggle extends QuickMenuToggle {
-    _init(model, asusd, gpu) {
+    _init(model, asusd, gpu, announcer) {
         super._init({
             title: 'Performance',
             iconName: ICONS.balanced,
-            toggleMode: true,
+            toggleMode: false,
         });
         this._model = model;
         this._asusd = asusd;
         this._gpu = gpu;
+        this._announcer = announcer;
         this._items = new Map();
 
-        this.menu.setHeader(ICONS.balanced, 'Performance', 'ASUS platform profile');
+        this.menu.setHeader(
+            Gio.ThemedIcon.new_from_names([APP_SYMBOLIC_ICON, ICONS.balanced]),
+            'Performance', 'ASUS platform profile');
 
         this._profileSection = new PopupMenu.PopupMenuSection();
         this.menu.addMenuItem(this._profileSection);
         for (const profile of PROFILES) {
-            const item = new PopupMenu.PopupMenuItem(LABELS[profile]);
+            const item = new PopupMenu.PopupImageMenuItem(LABELS[profile], ICONS[profile]);
             item.connect('activate', () => this._choose(profile));
             this._items.set(profile, item);
             this._profileSection.addMenuItem(item);
         }
 
-        this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+        this._infoSeparator = new PopupMenu.PopupSeparatorMenuItem();
+        this.menu.addMenuItem(this._infoSeparator);
         this._gpuItem = new PopupMenu.PopupMenuItem('', {reactive: false, can_focus: false});
         this._chargeItem = new PopupMenu.PopupMenuItem('', {reactive: false, can_focus: false});
         this.menu.addMenuItem(this._gpuItem);
         this.menu.addMenuItem(this._chargeItem);
 
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-        const open = new PopupMenu.PopupMenuItem('Open Asusius');
+        const open = new PopupMenu.PopupImageMenuItem('Open Asusius',
+            Gio.ThemedIcon.new_from_names([APP_SYMBOLIC_ICON, 'preferences-system-symbolic']));
         open.connect('activate', () => this._openApp());
         this.menu.addMenuItem(open);
 
-        // A click on the button itself flips between Performance and Balanced.
         this.connect('clicked', () => {
-            const want = this.checked ? 'performance' : 'balanced';
-            this._choose(want);
+            const want = pickToggleTarget(this._model.profile, this._model.choices);
+            if (want)
+                this._choose(want);
+            else
+                this.sync();
         });
 
         this._ids = [
@@ -216,9 +213,17 @@ class AsusiusProfileToggle extends QuickMenuToggle {
     }
 
     _choose(profile) {
+        if (!this._model.choices.includes(profile)) {
+            this.sync();
+            return;
+        }
+        this._announcer?.suppress(profile);
         this._model.set(profile, err => {
-            if (err)
+            if (err) {
+                this._announcer?.clearSuppression();
+                this.sync();
                 Main.notifyError('Asusius', `Could not switch profile: ${err.message}`);
+            }
         });
     }
 
@@ -237,14 +242,18 @@ class AsusiusProfileToggle extends QuickMenuToggle {
 
     sync() {
         const profile = this._model.profile;
+        const choices = this._model.choices;
         const known = !!profile;
+        const hasPerf = choices.includes('performance');
+        this.title = hasPerf ? 'Performance' : 'Power Mode';
         this.visible = this._model.backend !== null;
-        this.checked = profile === 'performance';
+        this.checked = isToggleActive(profile, choices);
         this.subtitle = subtitleFor(profile, this._model.backend);
         this.iconName = ICONS[profile] ?? ICONS.balanced;
-        this.menu.setHeader(this.iconName, 'Performance',
-            this._model.backend === 'ppd' ? 'power-profiles-daemon' : 'ASUS platform profile');
-        const choices = this._model.choices;
+        this.menu.setHeader(
+            Gio.ThemedIcon.new_from_names([APP_SYMBOLIC_ICON, this.iconName]),
+            this.title,
+            this._model.backend === 'ppd' ? 'Power Profiles Daemon' : 'ASUS platform profile');
         for (const [name, item] of this._items) {
             item.visible = choices.includes(name);
             item.setOrnament(known && name === profile
@@ -256,21 +265,25 @@ class AsusiusProfileToggle extends QuickMenuToggle {
         const charge = chargeLabel(this._asusd.chargeLimit);
         this._chargeItem.visible = !!charge;
         this._chargeItem.label.text = charge ?? '';
+        this._infoSeparator.visible = !!(gpuName || charge);
     }
 
     destroy() {
         for (const [obj, id] of this._ids ?? [])
             obj.disconnect(id);
         this._ids = [];
+        this._announcer = null;
+        this.menu?.close(false);
+        this.menu?.destroy();
         super.destroy();
     }
 });
 
 const ProfileIndicator = GObject.registerClass(
 class AsusiusProfileIndicator extends SystemIndicator {
-    _init(model, asusd, gpu) {
+    _init(model, asusd, gpu, announcer) {
         super._init();
-        this._toggle = new ProfileToggle(model, asusd, gpu);
+        this._toggle = new ProfileToggle(model, asusd, gpu, announcer);
         this.quickSettingsItems.push(this._toggle);
     }
 
@@ -283,63 +296,97 @@ class AsusiusProfileIndicator extends SystemIndicator {
 
 export default class AsusiusQuickExtension extends Extension {
     enable() {
-        this._asusd = new AsusdProfileSource();
-        this._ppd = new PpdProfileSource();
-        this._gpu = new GpuModeSource();
-        this._model = new ProfileModel([
-            {name: 'asusd', source: this._asusd},
-            {name: 'ppd', source: this._ppd},
-        ]);
-        this._indicator = new ProfileIndicator(this._model, this._asusd, this._gpu);
-        Main.panel.statusArea.quickSettings.addExternalIndicator(this._indicator);
-        // GNOME shows nothing when Fn+F5 (asusd) or another app switches the
-        // profile: show the new one in an OSD, like the volume keys do.
-        this._announcer = new ProfileAnnouncer(this._model, {
-            schedule: (ms, fn) => {
-                const id = GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms, () => {
-                    fn();
-                    return GLib.SOURCE_REMOVE;
-                });
-                GLib.Source.set_name_by_id(id, '[asusius-quick] profile osd');
-                return id;
-            },
-            cancel: id => GLib.source_remove(id),
-            show: profile => Main.osdWindowManager.show(-1,
-                Gio.ThemedIcon.new(ICONS[profile] ?? ICONS.balanced), LABELS[profile] ?? profile, null),
-        });
-        // Touchpad gestures, off until 'gesture-enabled' says otherwise. The
-        // settings are read per gesture, so changed bindings need no restart.
-        // The schema id is passed explicitly: a session that cached the extension's
-        // pre-gestures metadata (without "settings-schema") would otherwise hand
-        // getSettings() an undefined id here.
-        const settings = this.getSettings('org.gnome.shell.extensions.asusius-quick');
-        this._gestureInput = createGestureInput(Main);
-        this._gestures = new GestureWatcher({
-            settings,
-            stage: global.stage,
-            actions: shellActions(Main, Meta, settings, this._gestureInput),
-            input: this._gestureInput,
-            clutter: Clutter,
-        });
-        const resetGestureMotion = () => {
-            this._gestures.cancel();
-            this._gestureInput.prepareOverview();
-        };
-        this._overviewGestureId = Main.overview.connect('showing', resetGestureMotion);
-        this._workspaceGestureId = global.workspace_manager.connect(
-            'active-workspace-changed', resetGestureMotion);
-        this._gestures.enable();
-        // one Power Mode selector is enough: ours (asusd, ppd fallback) replaces the
-        // shell's own tile while this extension runs; a switch on the Touchpad &
-        // gestures page brings the system one back
-        this._hider = new PowerModeHider(settings);
-        this._hider.enable();
-        // the shell's Night Light tile hides behind the same setting pattern
-        this._nightLightHider = new NightLightHider(settings);
-        this._nightLightHider.enable();
+        try {
+            // The schema id is passed explicitly: a session that cached the extension's
+            // pre-gestures metadata (without "settings-schema") would otherwise hand
+            // getSettings() an undefined id here.
+            const settings = this.getSettings('org.gnome.shell.extensions.asusius-quick');
+
+            this._asusd = new AsusdProfileSource();
+            this._ppd = new PpdProfileSource();
+            this._gpu = new GpuModeSource();
+            this._model = new ProfileModel([
+                {name: 'asusd', source: this._asusd},
+                {name: 'ppd', source: this._ppd},
+            ]);
+            // GNOME shows nothing when Fn+F5 (asusd) or another app switches the
+            // profile: show the new one in an OSD, like the volume keys do.
+            this._announcer = new ProfileAnnouncer(this._model, {
+                schedule: (ms, fn) => {
+                    const id = GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms, () => {
+                        fn();
+                        return GLib.SOURCE_REMOVE;
+                    });
+                    GLib.Source.set_name_by_id(id, '[asusius-quick] profile osd');
+                    return id;
+                },
+                cancel: id => GLib.source_remove(id),
+                show: profile => Main.osdWindowManager.show(-1,
+                    Gio.ThemedIcon.new_from_names([ICONS[profile] ?? ICONS.balanced, APP_SYMBOLIC_ICON]),
+                    LABELS[profile] ?? profile, null),
+            });
+            this._indicator = new ProfileIndicator(this._model, this._asusd, this._gpu, this._announcer);
+            Main.panel?.statusArea?.quickSettings?.addExternalIndicator(this._indicator);
+
+            // Touchpad gestures, off until 'gesture-enabled' says otherwise. The
+            // settings are read per gesture, so changed bindings need no restart.
+            this._gestureInput = createGestureInput(Main);
+            this._gestures = new GestureWatcher({
+                settings,
+                stage: global.stage,
+                actions: shellActions(Main, Meta, settings, this._gestureInput),
+                input: this._gestureInput,
+                clutter: Clutter,
+            });
+            const resetGestureMotion = () => {
+                this._gestures.cancel();
+                this._gestureInput.prepareOverview();
+            };
+            this._overviewGestureId = Main.overview.connect('showing', resetGestureMotion);
+            this._workspaceGestureId = global.workspace_manager.connect(
+                'active-workspace-changed', resetGestureMotion);
+            this._gestures.enable();
+
+            // One Power Mode selector is enough: hide GNOME's stock tile only while
+            // Asusius has an active backend (asusd or ppd) to replace it.
+            this._hider = new QuickTileHider({
+                settings,
+                key: 'hide-power-mode',
+                findToggle: qs => qs._powerProfiles?.quickSettingsItems?.[0] ?? null,
+                shouldHide: () => this._model?.backend !== null,
+                restoreVisibility: toggle => {
+                    if (typeof toggle._sync === 'function')
+                        toggle._sync();
+                    else
+                        toggle.visible = true;
+                },
+            });
+            this._hiderModelId = this._model.connect(() => this._hider?.sync());
+            this._hider.enable();
+
+            this._nightLightHider = new QuickTileHider({
+                settings,
+                key: 'hide-night-light',
+                findToggle: qs => qs._nightLight?.quickSettingsItems?.[0] ?? null,
+                restoreVisibility: toggle => {
+                    const supported = global.backend?.get_monitor_manager?.()?.night_light_supported;
+                    if (typeof supported === 'boolean')
+                        toggle.visible = supported;
+                    else
+                        toggle.show();
+                },
+            });
+            this._nightLightHider.enable();
+        } catch (e) {
+            this.disable();
+            throw e;
+        }
     }
 
     disable() {
+        if (this._hiderModelId && this._model)
+            this._model.disconnect(this._hiderModelId);
+        this._hiderModelId = 0;
         this._nightLightHider?.destroy();
         this._nightLightHider = null;
         this._hider?.destroy();

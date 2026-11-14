@@ -181,7 +181,7 @@ export class DesktopDrag {
     }
 
     destroy() {
-        this.restore();
+        this.restore(false);
         this._destroyed = true;
     }
 }

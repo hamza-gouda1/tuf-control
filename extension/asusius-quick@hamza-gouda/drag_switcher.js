@@ -62,6 +62,7 @@ export class AppDrag {
         if (!session.reducedMotion) {
             this._d.raise(sourceActor);
             this._d.raise(targetActor);
+            session.unclip = this._d.clipActors?.(sourceActor, targetActor) ?? null;
         }
         return true;
     }
@@ -82,7 +83,7 @@ export class AppDrag {
 
     end(commit) {
         const s = this._session;
-        if (!s)
+        if (!s || s.ending)
             return false;
 
         const finish = () => this._finish(s, !!commit);
@@ -160,6 +161,10 @@ export class AppDrag {
     }
 
     _restore(s, commit, gone = null) {
+        const goneActor = gone === s.source ? s.sourceActor
+            : gone === s.target ? s.targetActor : null;
+        s.unclip?.(goneActor);
+        s.unclip = null;
         for (const [actor, state] of [[s.sourceActor, s.sourceState], [s.targetActor, s.targetState]]) {
             if (gone && ((gone === s.source && actor === s.sourceActor) ||
                     (gone === s.target && actor === s.targetActor)))
