@@ -19,8 +19,7 @@ optdepends=('asusctl: ASUS fan curves, Aura RGB, AniMe Matrix and charge limits 
 makedepends=('glib2' 'python-build' 'python-installer' 'python-setuptools' 'python-wheel')
 install="$pkgname.install"
 source=("$url/releases/download/v$pkgver/$pkgname-$pkgver.tar.gz")
-# Pin exact SHA256 from dist/SHA256SUMS after tagging v$pkgver.
-sha256sums=('SKIP')
+sha256sums=('8f49831cd49134e8ee1bd755c1fb65ab1bde28fc3ee3d08462b0c6bfe764391a')
 
 build() {
   cd "$pkgname-$pkgver"
