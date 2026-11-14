@@ -3,8 +3,7 @@
 """D-Bus write names and signatures, checked against asusd 6.3 / supergfxd introspection."""
 import unittest
 
-from asusius.backends.dbus import (ARMOURY_PATH, ASUSD, DBusBackend, direction_to_name,
-                                       speed_to_name)
+from asusius.backends.dbus import DBusBackend, direction_to_name, speed_to_name
 from asusius.core import FanCurve, KbdEffect, Profile
 
 
